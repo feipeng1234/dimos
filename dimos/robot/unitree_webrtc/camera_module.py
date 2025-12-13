@@ -91,6 +91,7 @@ class UnitreeCameraModule(Module):
 
         # Initialize Metric3D
         from dimos.models.depth.metric3d import Metric3D
+
         self.metric3d = Metric3D(camera_intrinsics=self.camera_intrinsics)
         self.tf = TF()
 
@@ -102,9 +103,9 @@ class UnitreeCameraModule(Module):
 
         # IPC & processor members
         self.backend = self._autodetect_backend()
-        self._source: Optional[SourceActor] = None     # owns the channel
-        self._desc: Optional[dict] = None              # descriptor from source.channel
-        self.slot = None                                # attached reader for MRP
+        self._source: Optional[SourceActor] = None  # owns the channel
+        self._desc: Optional[dict] = None  # descriptor from source.channel
+        self.slot = None  # attached reader for MRP
         self._multirateprocessor: Optional[MultiRateProcessor] = None
 
         # Threading
@@ -118,6 +119,7 @@ class UnitreeCameraModule(Module):
     def _autodetect_backend(self) -> str:
         try:
             import cupy as cp  # noqa
+
             return "cuda" if cp.is_available() else "cpu"
         except Exception:
             return "cpu"
@@ -183,7 +185,7 @@ class UnitreeCameraModule(Module):
         try:
             if self._source is None:
                 # First frame → initialize SourceActor (owner of channel)
-                shape = tuple(msg.data.shape)            # (H, W, C) expected
+                shape = tuple(msg.data.shape)  # (H, W, C) expected
                 prefer = "cuda" if self.backend == "cuda" else "cpu"
                 dtype = msg.data.dtype
 
@@ -208,7 +210,9 @@ class UnitreeCameraModule(Module):
                 )
                 self._multirateprocessor.start()
 
-                logger.info(f"Initialized SourceActor + IPC channel shape={shape} prefer={prefer} dtype={dtype}")
+                logger.info(
+                    f"Initialized SourceActor + IPC channel shape={shape} prefer={prefer} dtype={dtype}"
+                )
 
             # Push this frame into the channel via SourceActor
             self._source.publish(msg.data)
@@ -222,9 +226,7 @@ class UnitreeCameraModule(Module):
     def _start_processing_thread(self):
         """Start an idle processing thread (keeps module lifecycle/simple shutdown)."""
         self._stop_processing.clear()
-        self._processing_thread = threading.Thread(
-            target=self._main_processing_loop, daemon=True
-        )
+        self._processing_thread = threading.Thread(target=self._main_processing_loop, daemon=True)
         self._processing_thread.start()
         logger.info("Started camera processing thread")
 
@@ -352,4 +354,3 @@ class UnitreeCameraModule(Module):
         self.stop()
         # Metric3D teardown
         self.metric3d.cleanup()
-
