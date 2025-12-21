@@ -195,7 +195,7 @@ class ManipulationModule(Module):
         self.max_grasp_pitch_degrees = 80.0
 
         self.grasp_stage = GraspStage.IDLE
-        self.pose_history_size = 3
+        self.pose_history_size = 4
         self.pose_stabilization_threshold = 0.01  # 1cm position stability
         self.reached_poses = deque(maxlen=self.pose_history_size)
 
@@ -753,14 +753,14 @@ class ManipulationModule(Module):
             return
 
         # Check for detection timeout during pre-grasp
-        if self.last_target_update_time is not None:
-            time_since_last_detection = time.time() - self.last_target_update_time
-            if time_since_last_detection > self.detection_timeout:
-                logger.error(
-                    f"No new detection for {self.detection_timeout:.1f} seconds during pre-grasp, failing task"
-                )
-                self.task_failed = True
-                return
+        # if self.last_target_update_time is not None:
+        #     time_since_last_detection = time.time() - self.last_target_update_time
+        #     if time_since_last_detection > self.detection_timeout:
+        #         logger.error(
+        #             f"No new detection for {self.detection_timeout:.1f} seconds during pre-grasp, failing task"
+        #         )
+        #         self.task_failed = True
+        #         return
 
         # Only compute and execute new grasp pose if target has been updated with new detection
         if not self.target_has_new_detection:

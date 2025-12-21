@@ -173,7 +173,7 @@ def update_target_grasp_pose(
     target_pos = target_pose.position
 
     # Calculate orientation pointing from target towards EE
-    yaw_to_ee = yaw_towards_point(target_pos, ee_pose.position)
+    yaw_to_ee = yaw_towards_point(target_pos, Vector3(0, 0, 0))
 
     # Create target pose with proper orientation
     # Convert grasp pitch from degrees to radians with mapping:

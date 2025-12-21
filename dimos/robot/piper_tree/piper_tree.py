@@ -418,7 +418,7 @@ class PiperTree(Robot):
     def execute_dump(self) -> bool:
         """Execute a hardcoded command pose, wait 2 seconds, then open gripper."""
         # Create hardcoded pose
-        position = Vector3(0.45, 0.0, 0.15)  # 15cm forward, 25cm up
+        position = Vector3(0.5, 0.0, 0.15)  # 15cm forward, 25cm up
         orientation = euler_to_quaternion(Vector3(0.0, 110.0, 0.0), degrees=True)
         hardcoded_pose = Pose(position, orientation)
 
