@@ -1,0 +1,9 @@
+node_modules/
+build/
+dist/
+.expo/
+ios/
+android/
+*.config.js
+.eslintrc.js
+index.js

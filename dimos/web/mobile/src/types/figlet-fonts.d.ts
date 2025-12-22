@@ -1,5 +1,4 @@
 declare module 'figlet/importable-fonts/*' {
-  const font: any;
+  const font: string;
   export default font;
 }
-

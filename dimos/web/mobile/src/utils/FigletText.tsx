@@ -11,6 +11,7 @@ interface FigletTextProps {
   color?: string;
   fontSize?: number;
   style?: TextStyle;
+  className?: string;
 }
 
 const FigletText: React.FC<FigletTextProps> = ({
@@ -19,6 +20,7 @@ const FigletText: React.FC<FigletTextProps> = ({
   color = '#FFF200',
   fontSize = 6,
   style = {},
+  className = '',
 }) => {
   const rendered = useMemo(() => {
     return figlet.textSync(text, {
@@ -30,7 +32,12 @@ const FigletText: React.FC<FigletTextProps> = ({
     });
   }, [text, font]);
 
-  const monoFamily = Platform.select({ios: 'Menlo', android: 'monospace', default: 'monospace'});
+  const monoFamily = Platform.select({
+    ios: 'Menlo',
+    android: 'monospace',
+    default: 'monospace',
+  });
+
   const composedStyle: TextStyle = {
     fontFamily: monoFamily,
     fontSize: fontSize,
@@ -38,14 +45,20 @@ const FigletText: React.FC<FigletTextProps> = ({
     color,
     fontWeight: '400',
     textAlign: 'left',
-    includeFontPadding: false,
     letterSpacing: 0,
+    ...(Platform.OS === 'android' && {includeFontPadding: false}),
     ...style,
   };
 
-  return <Text style={composedStyle} allowFontScaling={false}>{rendered}</Text>;
+  return (
+    <Text
+      style={composedStyle}
+      className={className}
+      allowFontScaling={false}
+    >
+      {rendered}
+    </Text>
+  );
 };
 
 export default FigletText;
-
-
