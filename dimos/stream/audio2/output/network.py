@@ -59,10 +59,23 @@ class NetworkOutputNode(GStreamerSinkBase):
         super().__init__(config)
         self.config: NetworkOutputConfig = config
 
+    def _create_pipeline(self):
+        """Create pipeline and set up system clock for timestamp-based streaming."""
+        super()._create_pipeline()
+
+        # Use system clock so udpsink can sync to timestamps
+        # This allows sync=True to work properly and send packets at real-time rate
+        from gi.repository import Gst
+
+        clock = Gst.SystemClock.obtain()
+        self._pipeline.use_clock(clock)
+        logger.info(f"{self._get_sink_name()}: Using system clock for timestamp-based streaming")
+
     def _configure_sink(self):
         """Configure the udpsink after pipeline creation."""
-        # Use sync=False - send packets as fast as encoder produces them
-        # With proper queue buffering, this prevents initial packet loss
+        # Use sync=True to send packets at real-time rate based on buffer timestamps
+        # This prevents network congestion and receiver buffer overflow
+        # AudioEvents have timestamps that are preserved on GStreamer buffers
         from gi.repository import Gst
 
         # Get udpsink by iterating elements
@@ -70,11 +83,9 @@ class NetworkOutputNode(GStreamerSinkBase):
         result, elem = it.next()
         while result == Gst.IteratorResult.OK:
             if elem.get_factory().get_name() == "udpsink":
-                elem.set_property("sync", False)
+                elem.set_property("sync", True)
                 elem.set_property("async", False)
-                # Increase UDP buffer to prevent packet loss during bursts
-                elem.set_property("buffer-size", 2097152)  # 2MB buffer
-                logger.info(f"Set sync=False, async=False, buffer-size=2MB on udpsink")
+                logger.info(f"Set sync=True, async=False on udpsink (sends at timestamp rate)")
                 break
             result, elem = it.next()
 

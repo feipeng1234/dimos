@@ -226,11 +226,17 @@ class GStreamerSourceBase(GStreamerPipelineBase, ABC):
 
                 # Convert buffer to AudioEvent
                 try:
+                    # Extract timestamp from buffer PTS (in nanoseconds, convert to seconds)
+                    buffer_timestamp = None
+                    if buffer.pts != Gst.CLOCK_TIME_NONE:
+                        buffer_timestamp = buffer.pts / Gst.SECOND
+
                     event = buffer_to_audio_event(
                         buffer=buffer,
                         spec=self.config.output,
                         detected_rate=self._detected_rate,
                         detected_channels=self._detected_channels,
+                        timestamp=buffer_timestamp,
                     )
 
                     buffer_count += 1
