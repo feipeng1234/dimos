@@ -82,8 +82,8 @@ class Detection3DModule(Detection2DModule):
 
         return ImageDetections3DPC(detections.image, detection3d_list)
 
-    @skill  # type: ignore[arg-type]
-    def ask_vlm(self, question: str) -> str | ImageDetections3DPC:
+    @rpc
+    def query_vlm(self, question: str) -> ImageDetections3DPC:
         """
         query visual model about the view in front of the camera
         you can ask to mark objects like:
@@ -92,18 +92,26 @@ class Detection3DModule(Detection2DModule):
         "laptop on the desk"
         "a person wearing a red shirt"
         """
-        from dimos.models.vl.qwen import QwenVlModel
+        from dimos.models.vl.moondream import MoondreamVlModel
 
-        model = QwenVlModel()
-        result = model.query(self.image.get_next(), question)
+        model = MoondreamVlModel()
+        image = self.image.get_next()
+        print("GOT IMAGE FRAME", image)
+        result = model.query_detections(image, question)
 
+        print("VLM RESULT:", result)
         if isinstance(result, str) or not result or not len(result):
             return "No detections"
+
+        self.annotations.publish(result.to_foxglove_annotations())
 
         detections: ImageDetections2D = result
         pc = self.pointcloud.get_next()
         transform = self.tf.get("camera_optical", pc.frame_id, detections.image.ts, 5.0)
-        return self.process_frame(detections, pc, transform)
+        detections3d = self.process_frame(detections, pc, transform)
+
+        print("3D DETECTIONS:", detections3d)
+        return detections3d
 
     @rpc
     def start(self):

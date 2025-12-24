@@ -16,47 +16,57 @@ import time
 import pytest
 from lcm_msgs.foxglove_msgs import SceneUpdate
 
-from dimos.core import LCMTransport
+from dimos.core import LCMTransport, start
 from dimos.msgs.foxglove_msgs import ImageAnnotations
 from dimos.msgs.geometry_msgs import PoseStamped
 from dimos.msgs.sensor_msgs import Image, PointCloud2
 from dimos.msgs.vision_msgs import Detection2DArray
+from dimos.perception.detection.module3D import Detection3DModule
 from dimos.perception.detection.moduleDB import ObjectDBModule
 from dimos.protocol.service import lcmservice as lcm
 from dimos.robot.unitree_webrtc.modular import deploy_connection, deploy_navigation
 from dimos.robot.unitree_webrtc.modular.connection_module import ConnectionModule
 
 
+@pytest.fixture(scope="module")
+def dimos_cluster():
+    dimos = start(5)
+    yield dimos
+    dimos.stop()
+
+
 @pytest.mark.module
-def test_moduleDB(dimos_cluster):
+def test_module3d(dimos_cluster):
     connection = deploy_connection(dimos_cluster)
 
-    moduleDB = dimos_cluster.deploy(
-        ObjectDBModule,
+    module = dimos_cluster.deploy(
+        Detection3DModule,
         camera_info=ConnectionModule._camera_info(),
-        goto=lambda obj_id: print(f"Going to {obj_id}"),
+        # goto=lambda obj_id: print(f"Going to {obj_id}"),
     )
-    moduleDB.image.connect(connection.video)
-    moduleDB.pointcloud.connect(connection.lidar)
+    module.image.connect(connection.video)
+    module.pointcloud.connect(connection.lidar)
 
-    moduleDB.annotations.transport = LCMTransport("/annotations", ImageAnnotations)
-    moduleDB.detections.transport = LCMTransport("/detections", Detection2DArray)
+    module.annotations.transport = LCMTransport("/annotations", ImageAnnotations)
+    module.detections.transport = LCMTransport("/detections", Detection2DArray)
 
-    moduleDB.detected_pointcloud_0.transport = LCMTransport("/detected/pointcloud/0", PointCloud2)
-    moduleDB.detected_pointcloud_1.transport = LCMTransport("/detected/pointcloud/1", PointCloud2)
-    moduleDB.detected_pointcloud_2.transport = LCMTransport("/detected/pointcloud/2", PointCloud2)
+    module.detected_pointcloud_0.transport = LCMTransport("/detected/pointcloud/0", PointCloud2)
+    module.detected_pointcloud_1.transport = LCMTransport("/detected/pointcloud/1", PointCloud2)
+    module.detected_pointcloud_2.transport = LCMTransport("/detected/pointcloud/2", PointCloud2)
 
-    moduleDB.detected_image_0.transport = LCMTransport("/detected/image/0", Image)
-    moduleDB.detected_image_1.transport = LCMTransport("/detected/image/1", Image)
-    moduleDB.detected_image_2.transport = LCMTransport("/detected/image/2", Image)
+    module.detected_image_0.transport = LCMTransport("/detected/image/0", Image)
+    module.detected_image_1.transport = LCMTransport("/detected/image/1", Image)
+    module.detected_image_2.transport = LCMTransport("/detected/image/2", Image)
 
-    moduleDB.scene_update.transport = LCMTransport("/scene_update", SceneUpdate)
-    moduleDB.target.transport = LCMTransport("/target", PoseStamped)
+    module.scene_update.transport = LCMTransport("/scene_update", SceneUpdate)
+    # module.target.transport = LCMTransport("/target", PoseStamped)
 
     connection.start()
-    moduleDB.start()
+    module.start()
 
-    time.sleep(4)
-    print("STARTING QUERY!!")
-    print("VLM RES", moduleDB.navigate_to_object_in_view("white floor"))
+    time.sleep(3)
+    print("VLM QUERY START")
+    res = module.query_vlm("a chair")
+    print("VLM QUERY RESULT:", res)
+
     time.sleep(30)

@@ -25,6 +25,7 @@ class MoondreamVlModel(VlModel):
     ):
         self._model_name = model_name
         self._device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"Using device: {self._device}")
         self._dtype = dtype
 
     @cached_property
