@@ -527,3 +527,140 @@ def create_grasp_overlay(
         return cv2.cvtColor(result_bgr, cv2.COLOR_BGR2RGB)
     except Exception:
         return rgb_image.copy()
+
+
+def draw_grasps_on_image_colored(
+    image: np.ndarray,  # type: ignore[type-arg]
+    grasp_data: dict | dict[int | str, list[dict]] | list[dict],  # type: ignore[type-arg]
+    camera_intrinsics: list[float] | np.ndarray,  # type: ignore[type-arg]
+    color_bgr: tuple[int, int, int] = (0, 255, 0),
+    max_grasps: int = -1,
+    finger_length: float = 0.08,
+    finger_thickness: float = 0.004,
+) -> np.ndarray:  # type: ignore[type-arg]
+    """
+    Draw grasps with a specified BGR color.
+    """
+    result = image.copy()
+    if isinstance(camera_intrinsics, list) and len(camera_intrinsics) == 4:
+        fx, fy, cx, cy = camera_intrinsics
+        camera_matrix = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
+    else:
+        camera_matrix = np.array(camera_intrinsics)
+
+    if isinstance(grasp_data, dict) and not any(
+        key in grasp_data for key in ["scene", 0, 1, 2, 3, 4, 5]
+    ):
+        grasps_to_draw = [(grasp_data, 0)]
+    elif isinstance(grasp_data, list):
+        grasps_to_draw = [(grasp, i) for i, grasp in enumerate(grasp_data)]
+    else:
+        grasps_to_draw = []
+        for _obj_id, grasps in grasp_data.items():
+            for i, grasp in enumerate(grasps):
+                grasps_to_draw.append((grasp, i))
+
+    if max_grasps > 0:
+        grasps_to_draw = grasps_to_draw[:max_grasps]
+
+    for grasp, index in grasps_to_draw:
+        try:
+            thickness = max(1, 4 - index // 3)
+            if "translation" not in grasp or "rotation_matrix" not in grasp:
+                continue
+            translation = np.array(grasp["translation"])
+            rotation_matrix = np.array(grasp["rotation_matrix"])
+            width = grasp.get("width", 0.04)
+            finger_width = 0.006
+            handle_length = 0.05
+
+            left_finger_points = np.array(
+                [
+                    [width / 2 - finger_width / 2, -finger_length, -finger_thickness / 2],
+                    [width / 2 + finger_width / 2, -finger_length, -finger_thickness / 2],
+                    [width / 2 + finger_width / 2, 0, -finger_thickness / 2],
+                    [width / 2 - finger_width / 2, 0, -finger_thickness / 2],
+                ]
+            )
+            right_finger_points = np.array(
+                [
+                    [-width / 2 - finger_width / 2, -finger_length, -finger_thickness / 2],
+                    [-width / 2 + finger_width / 2, -finger_length, -finger_thickness / 2],
+                    [-width / 2 + finger_width / 2, 0, -finger_thickness / 2],
+                    [-width / 2 - finger_width / 2, 0, -finger_thickness / 2],
+                ]
+            )
+            base_points = np.array(
+                [
+                    [
+                        -width / 2 - finger_width / 2,
+                        -finger_length - finger_thickness,
+                        -finger_thickness / 2,
+                    ],
+                    [
+                        width / 2 + finger_width / 2,
+                        -finger_length - finger_thickness,
+                        -finger_thickness / 2,
+                    ],
+                    [width / 2 + finger_width / 2, -finger_length, -finger_thickness / 2],
+                    [-width / 2 - finger_width / 2, -finger_length, -finger_thickness / 2],
+                ]
+            )
+            handle_points = np.array(
+                [
+                    [
+                        -finger_width / 2,
+                        -finger_length - finger_thickness - handle_length,
+                        -finger_thickness / 2,
+                    ],
+                    [
+                        finger_width / 2,
+                        -finger_length - finger_thickness - handle_length,
+                        -finger_thickness / 2,
+                    ],
+                    [finger_width / 2, -finger_length - finger_thickness, -finger_thickness / 2],
+                    [-finger_width / 2, -finger_length - finger_thickness, -finger_thickness / 2],
+                ]
+            )
+
+            def transform_points(points):  # type: ignore[no-untyped-def]
+                return (rotation_matrix @ points.T).T + translation
+
+            lf = transform_points(left_finger_points)
+            rf = transform_points(right_finger_points)
+            bb = transform_points(base_points)
+            hh = transform_points(handle_points)
+
+            for poly in (
+                project_3d_points_to_2d(lf, camera_matrix),
+                project_3d_points_to_2d(rf, camera_matrix),
+                project_3d_points_to_2d(bb, camera_matrix),
+                project_3d_points_to_2d(hh, camera_matrix),
+            ):
+                pts = poly.astype(np.int32)
+                cv2.polylines(result, [pts], True, color_bgr, thickness)
+
+            center_2d = project_3d_points_to_2d(translation.reshape(1, -1), camera_matrix)[0]
+            cv2.circle(result, tuple(center_2d.astype(int)), 3, color_bgr, -1)
+        except Exception:
+            continue
+    return result
+
+
+def create_grasp_overlay_colored(
+    rgb_image: np.ndarray,  # type: ignore[type-arg]
+    grasps: list[dict],  # type: ignore[type-arg]
+    camera_intrinsics: list[float] | np.ndarray,  # type: ignore[type-arg]
+    color_bgr: tuple[int, int, int] = (0, 255, 0),
+) -> np.ndarray:  # type: ignore[type-arg]
+    """
+    Create colored grasp overlay on RGB image.
+    """
+    try:
+        bgr_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR)
+        result_bgr = draw_grasps_on_image_colored(
+            bgr_image, grasps, camera_intrinsics, color_bgr=color_bgr, max_grasps=-1
+        )
+        return cv2.cvtColor(result_bgr, cv2.COLOR_BGR2RGB)
+    except Exception:
+        return rgb_image.copy()

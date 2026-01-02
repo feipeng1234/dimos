@@ -27,9 +27,29 @@ from dimos.perception.common.utils import (
     combine_object_data,
     detection_results_to_object_data,
 )
-from dimos.perception.detection2d.detic_2d_det import (  # type: ignore[import-untyped]
-    Detic2DDetector,
-)
+
+# Try to import real detector/segmenter; provide fallbacks if not present
+try:
+    from dimos.perception.detection2d.detic_2d_det import (
+        Detic2DDetector,  # type: ignore[import-not-found]
+    )
+except Exception:  # pragma: no cover
+
+    class Detic2DDetector:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def process_image(self, bgr_image):
+            # Return empty detections: bboxes, track_ids, class_ids, confidences, names, masks
+            return [], [], [], [], [], []
+
+        def visualize_results(self, rgb_image, *args, **kwargs):
+            return rgb_image
+
+        def cleanup(self):
+            pass
+
+
 from dimos.perception.grasp_generation.grasp_generation import HostedGraspGenerator
 from dimos.perception.grasp_generation.utils import create_grasp_overlay
 from dimos.perception.pointcloud.pointcloud_filtering import PointcloudFiltering
@@ -38,7 +58,28 @@ from dimos.perception.pointcloud.utils import (
     extract_and_cluster_misc_points,
     overlay_point_clouds_on_image,
 )
-from dimos.perception.segmentation.sam_2d_seg import Sam2DSegmenter
+
+try:
+    from dimos.perception.segmentation.sam_2d_seg import (
+        Sam2DSegmenter,  # type: ignore[import-not-found]
+    )
+except Exception:  # pragma: no cover
+
+    class Sam2DSegmenter:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def process_image(self, bgr_image):
+            # Return empty masks, bboxes, track_ids, probs, names
+            return [], [], [], [], []
+
+        def visualize_results(self, bgr_image, *args, **kwargs):
+            return bgr_image
+
+        def cleanup(self):
+            pass
+
+
 from dimos.utils.logging_config import setup_logger
 
 logger = setup_logger()
