@@ -42,9 +42,11 @@ class ObjectDB:
         self,
         distance_threshold: float = 0.5,
         min_detections_for_permanent: int = 5,
+        require_same_name_for_distance_match: bool = True,
     ) -> None:
         self._distance_threshold = distance_threshold
         self._min_detections = min_detections_for_permanent
+        self._require_same_name_for_distance_match = require_same_name_for_distance_match
 
         # Internal storage - keyed by object_id
         self._pending_objects: dict[str, Object] = {}
@@ -78,6 +80,31 @@ class ObjectDB:
         """Get all permanent objects (detection_count >= threshold)."""
         with self._lock:
             return list(self._objects.values())
+
+    def get_by_track_id(self, track_id: int) -> Object | None:
+        """Get object by track_id (searches both pending and permanent objects).
+        
+        Args:
+            track_id: The track_id to search for
+            
+        Returns:
+            Object instance or None if not found
+        """
+        with self._lock:
+            obj_id = self._track_id_map.get(track_id)
+            if obj_id:
+                return self._objects.get(obj_id) or self._pending_objects.get(obj_id)
+            return None
+
+    def get_by_object_id(self, object_id: str) -> Object | None:
+        """Get an object by stable object_id (searches pending and permanent)."""
+        with self._lock:
+            return self._objects.get(object_id) or self._pending_objects.get(object_id)
+
+    def is_permanent(self, object_id: str) -> bool:
+        """Check if an object_id refers to a permanent object."""
+        with self._lock:
+            return object_id in self._objects
 
     def find_by_name(self, name: str) -> list[Object]:
         """Find all permanent objects with matching name."""
@@ -206,7 +233,7 @@ class ObjectDB:
         return None
 
     def _match_by_distance(self, obj: Object) -> Object | None:
-        """Find object within distance threshold with same name."""
+        """Find object within distance threshold (optionally requiring same name)."""
         if obj.center is None:
             return None
 
@@ -215,8 +242,11 @@ class ObjectDB:
         candidates = [
             o
             for o in all_objects
-            if o.name == obj.name
-            and o.center is not None
+            if o.center is not None
+            and (
+                (not self._require_same_name_for_distance_match)
+                or (o.name == obj.name)
+            )
             and obj.center.distance(o.center) < self._distance_threshold
         ]
 

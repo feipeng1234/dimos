@@ -56,6 +56,7 @@ class Object(Detection3D):
 
     # Mesh/pose enhancement (optional, from hosted service)
     mesh_obj: bytes | None = None
+    mesh_path: str | None = None
     mesh_dimensions: tuple[float, float, float] | None = None
     fp_position: tuple[float, float, float] | None = None
     fp_orientation: tuple[float, float, float, float] | None = None

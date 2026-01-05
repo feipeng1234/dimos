@@ -201,23 +201,34 @@ class MeshPoseClient:
 
     def get_mesh_and_pose(
         self,
-        label: str,
         bbox: tuple[float, float, float, float],
         color_image: Image,
         depth_image: Image,
         camera_info: CameraInfo,
+        *,
+        use_box_prompt: bool = True,
+        label: str | None = None,
+        include_grasps: bool = False,
+        filter_collisions: bool = True,
+        gripper_type: str = "robotiq_2f_140",
     ) -> dict:
         """
-        Get mesh and pose for an object without requiring Detection3DPC.
+        Get mesh and pose for an object via hosted service /process endpoint.
 
-        This is a simpler interface for integration with Object class.
+        By default uses box-only prompting (use_box_prompt=True) to avoid passing
+        garbage YOLO-E labels. Set use_box_prompt=False and provide a label for
+        text-based prompting.
 
         Args:
-            label: Object label/name for SAM3 text prompt.
             bbox: 2D bounding box (x1, y1, x2, y2).
             color_image: RGB color image.
             depth_image: Depth image in meters.
             camera_info: Camera intrinsics.
+            use_box_prompt: Use bbox as geometric prompt (ignore label). Default True.
+            label: Object label for text prompting (only used if use_box_prompt=False).
+            include_grasps: Request grasp generation in addition to mesh/pose.
+            filter_collisions: Filter colliding grasps (if include_grasps=True).
+            gripper_type: Gripper type for grasp generation.
 
         Returns:
             Dictionary with keys:
@@ -225,20 +236,29 @@ class MeshPoseClient:
             - mesh_dimensions: tuple | None - (sx, sy, sz) dimensions
             - fp_position: tuple | None - (x, y, z) position
             - fp_orientation: tuple | None - (x, y, z, w) quaternion
+            - grasps: list | None - Grasp poses (if include_grasps=True)
 
         Raises:
             requests.exceptions.Timeout: If request times out.
             RuntimeError: If service returns an error.
         """
         payload = self._build_payload_from_raw(
-            label=label,
             bbox=bbox,
             color_image=color_image,
             depth_image=depth_image,
             camera_info=camera_info,
+            use_box_prompt=use_box_prompt,
+            label=label,
+            include_grasps=include_grasps,
+            filter_collisions=filter_collisions,
+            gripper_type=gripper_type,
         )
 
-        logger.info(f"Sending request to mesh/pose service for label='{label}'")
+        label_for_log = label if (label and not use_box_prompt) else "<box_prompt>"
+        logger.info(
+            f"Sending request to mesh/pose service "
+            f"(endpoint=/process, use_box_prompt={use_box_prompt}) for label='{label_for_log}'"
+        )
 
         resp = self._session.post(
             urljoin(self.service_url, "/process"),
@@ -250,17 +270,101 @@ class MeshPoseClient:
             raise RuntimeError(f"Service error: {resp.status_code} - {resp.text}")
 
         data = resp.json()
-        return self._parse_raw_response(data, label)
+        parsed = self._parse_raw_response(data, label_for_log)
 
-    def _build_payload_from_raw(
+        # Surface grasps if the gateway returns them
+        if include_grasps:
+            parsed["grasps"] = data.get("grasps", [])
+
+        return parsed
+
+    def get_grasps(
         self,
-        label: str,
         bbox: tuple[float, float, float, float],
         color_image: Image,
         depth_image: Image,
         camera_info: CameraInfo,
+        *,
+        use_box_prompt: bool = True,
+        label: str | None = None,
+        filter_collisions: bool = True,
+        gripper_type: str = "robotiq_2f_140",
+        num_grasps: int = 400,
+        topk_num_grasps: int = 100,
     ) -> dict:
-        """Build JSON payload from raw components."""
+        """
+        Get grasps only via fast pipeline (hosted service /grasp endpoint).
+
+        This skips mesh reconstruction and pose estimation (SAM3 -> GraspGen only).
+        Much faster than full pipeline when you only need grasp candidates.
+
+        Args:
+            bbox: 2D bounding box (x1, y1, x2, y2).
+            color_image: RGB color image.
+            depth_image: Depth image in meters.
+            camera_info: Camera intrinsics.
+            use_box_prompt: Use bbox as geometric prompt (ignore label). Default True.
+            label: Object label for text prompting (only used if use_box_prompt=False).
+            filter_collisions: Filter colliding grasps.
+            gripper_type: Gripper type ("robotiq_2f_140", "franka_panda", etc).
+            num_grasps: Number of grasp candidates to generate.
+            topk_num_grasps: Return top K grasps.
+
+        Returns:
+            Dictionary with keys:
+            - label: str
+            - grasps: list - Grasp poses with scores
+            - gripper_type: str
+            - inference_time_ms: float
+
+        Raises:
+            requests.exceptions.Timeout: If request times out.
+            RuntimeError: If service returns an error.
+        """
+        payload = self._build_payload_from_raw(
+            bbox=bbox,
+            color_image=color_image,
+            depth_image=depth_image,
+            camera_info=camera_info,
+            use_box_prompt=use_box_prompt,
+            label=label,
+        )
+        payload["filter_collisions"] = filter_collisions
+        payload["gripper_type"] = gripper_type
+        payload["num_grasps"] = num_grasps
+        payload["topk_num_grasps"] = topk_num_grasps
+
+        label_for_log = label if (label and not use_box_prompt) else "<box_prompt>"
+        logger.info(
+            f"Sending request to mesh/pose service "
+            f"(endpoint=/grasp, use_box_prompt={use_box_prompt}) for label='{label_for_log}'"
+        )
+
+        resp = self._session.post(
+            urljoin(self.service_url, "/grasp"),
+            json=payload,
+            timeout=self.timeout,
+        )
+
+        if resp.status_code != 200:
+            raise RuntimeError(f"Service error: {resp.status_code} - {resp.text}")
+
+        return resp.json()
+
+    def _build_payload_from_raw(
+        self,
+        bbox: tuple[float, float, float, float],
+        color_image: Image,
+        depth_image: Image,
+        camera_info: CameraInfo,
+        *,
+        use_box_prompt: bool = True,
+        label: str | None = None,
+        include_grasps: bool = False,
+        filter_collisions: bool = True,
+        gripper_type: str = "robotiq_2f_140",
+    ) -> dict:
+        """Build JSON payload for gateway (/process or /grasp)."""
         import cv2
 
         # Encode RGB image as base64 PNG
@@ -287,22 +391,46 @@ class MeshPoseClient:
             [camera_info.K[6], camera_info.K[7], camera_info.K[8]],
         ]
 
-        return {
+        payload: dict = {
             "image_rgb_b64": image_rgb_b64,
             "depth_b64": depth_b64,
             "K": K,
-            "label": label,
             "bbox": list(bbox),
+            "use_box_prompt": use_box_prompt,
         }
+
+        # Only include label in text-prompt mode
+        if not use_box_prompt and label is not None:
+            payload["label"] = label
+
+        # Optional grasps for /process
+        if include_grasps:
+            payload["include_grasps"] = True
+            payload["filter_collisions"] = filter_collisions
+            payload["gripper_type"] = gripper_type
+
+        return payload
 
     def _parse_raw_response(self, data: dict, label: str) -> dict:
         """Parse service response into a simple dict."""
         mesh_obj = None
-        if data.get("mesh_b64"):
+        mesh_id = data.get("mesh_id")
+        
+        if mesh_id:
+            # Download mesh from artifact endpoint
             try:
-                mesh_obj = base64.b64decode(data["mesh_b64"])
+                mesh_resp = self._session.get(
+                    urljoin(self.service_url, f"/mesh/{mesh_id}"),
+                    timeout=60.0,
+                    stream=True,
+                )
+                if mesh_resp.status_code == 200:
+                    mesh_obj = mesh_resp.content
+                    logger.info(f"Downloaded mesh {mesh_id}: {len(mesh_obj)} bytes")
+                else:
+                    logger.warning(f"Failed to download mesh {mesh_id}: HTTP {mesh_resp.status_code}")
             except Exception as e:
-                logger.warning(f"Failed to decode mesh: {e}")
+                logger.warning(f"Failed to download mesh {mesh_id}: {e}")
 
         mesh_dimensions = None
         if data.get("bbox_3d"):
@@ -349,13 +477,17 @@ class MeshPoseClient:
         depth_image: Image,
         camera_info: CameraInfo,
     ) -> dict:
-        """Build the JSON payload for the service request."""
+        """Build the JSON payload for the service request.
+        
+        Default: use bbox prompting, do NOT forward detector labels.
+        """
         return self._build_payload_from_raw(
-            label=detection.name,
             bbox=detection.bbox,
             color_image=color_image,
             depth_image=depth_image,
             camera_info=camera_info,
+            use_box_prompt=True,
+            label=None,
         )
 
     def _parse_response(
