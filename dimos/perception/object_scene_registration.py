@@ -688,8 +688,27 @@ class ObjectSceneRegistrationModule(Module):
         color_image = Image.from_numpy(cv_image)
         color_image.from_ros_header(color_msg.header)
 
-        # Rerun: log RGB image (mirror what RViz users see).
-        self._rr_log("/world/camera/rgb", color_image.to_rerun())
+        # Rerun: log RGB image under proper TF hierarchy (world/robot/base/camera).
+        # Log camera intrinsics as Pinhole (static, only once)
+        if not hasattr(self, '_rerun_camera_intrinsics_logged'):
+            try:
+                import rerun as rr  # type: ignore[import-not-found]
+                K = self._camera_info.K.reshape(3, 3)
+                self._rr_log(
+                    "/world/robot/base/camera",
+                    rr.Pinhole(
+                        resolution=[self._camera_info.width, self._camera_info.height],
+                        focal_length=[K[0, 0], K[1, 1]],
+                        principal_point=[K[0, 2], K[1, 2]]
+                    ),
+                    static=True
+                )
+                self._rerun_camera_intrinsics_logged = True
+                logger.info("[Rerun] Logged camera intrinsics as Pinhole")
+            except Exception:
+                pass
+        
+        self._rr_log("/world/robot/base/camera/rgb", color_image.to_rerun())
 
         # Convert compressed depth image
         depth_image = self._convert_compressed_depth_image(depth_msg)
@@ -718,7 +737,7 @@ class ObjectSceneRegistrationModule(Module):
                 labels.append(f"{name} {conf:.2f}")
             if mins:
                 self._rr_log(
-                    "/world/camera/rgb/detections2d",
+                    "/world/robot/base/camera/rgb/detections2d",
                     rr.Boxes2D(mins=mins, sizes=sizes, labels=labels),
                 )
         except Exception:
@@ -745,8 +764,8 @@ class ObjectSceneRegistrationModule(Module):
         overlay_msg.header = color_msg.header
         self._overlay_pub.publish(overlay_msg)
 
-        # Rerun: log overlay image.
-        self._rr_log("/world/camera/overlay", overlay_image.to_rerun())
+        # Rerun: log overlay image under camera.
+        self._rr_log("/world/robot/base/camera/overlay", overlay_image.to_rerun())
 
         # Process 3D detections
         self._process_3d_detections(detections_2d, color_image, depth_image, color_msg.header)

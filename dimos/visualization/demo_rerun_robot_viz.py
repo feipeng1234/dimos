@@ -44,11 +44,11 @@ custom_blueprint = rrb.Blueprint(
         rrb.Vertical(
             rrb.Spatial2DView(
                 name="Camera RGB",
-                origin="/world/camera/rgb",
+                origin="/world/robot/base/camera/rgb",
             ),
             rrb.Spatial2DView(
                 name="Detections Overlay",
-                origin="/world/camera/overlay",
+                origin="/world/robot/base/camera/overlay",
             ),
             row_shares=[1, 1],
         ),

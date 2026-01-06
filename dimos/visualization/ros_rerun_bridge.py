@@ -21,18 +21,22 @@ streams without modifying any ROS publishers.
 """
 
 import threading
+import time
+from collections import deque
 from typing import Any
 
 from geometry_msgs.msg import PointStamped, PolygonStamped, PoseStamped
 from nav_msgs.msg import Odometry, Path
 import numpy as np
 import rclpy
+import rclpy.duration
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.time import Time
 from sensor_msgs.msg import PointCloud2
 from visualization_msgs.msg import Marker, MarkerArray
+from tf2_ros import TransformException
 
 try:
     from numpy.lib.recfunctions import structured_to_unstructured
@@ -50,6 +54,36 @@ from dimos.utils.logging_config import setup_logger
 logger = setup_logger()
 
 
+class PointCloudBuffer:
+    """Buffer that accumulates pointclouds with timestamps for 5-second decay effect."""
+    
+    def __init__(self, decay_seconds: float = 5.0):
+        self.decay_seconds = decay_seconds
+        self.scans = deque()  # List of (timestamp, points_array)
+    
+    def add_scan(self, points: np.ndarray) -> None:
+        """Add a new scan with current timestamp."""
+        now = time.time()
+        self.scans.append((now, points))
+        self._cleanup()
+    
+    def _cleanup(self) -> None:
+        """Remove scans older than decay_seconds."""
+        now = time.time()
+        cutoff = now - self.decay_seconds
+        while self.scans and self.scans[0][0] < cutoff:
+            self.scans.popleft()
+    
+    def get_all_points(self) -> np.ndarray:
+        """Get all points from buffered scans."""
+        self._cleanup()
+        if not self.scans:
+            return np.zeros((0, 3), dtype=np.float32)
+        
+        all_points = [p for t, p in self.scans]
+        return np.vstack(all_points) if all_points else np.zeros((0, 3), dtype=np.float32)
+
+
 class RosRerunBridgeNode(Node):
     """ROS2 node that bridges autonomy stack topics to Rerun."""
 
@@ -61,7 +95,23 @@ class RosRerunBridgeNode(Node):
 
         # ReentrantCallbackGroup for concurrent callbacks
         self.callback_group = ReentrantCallbackGroup()
-
+        
+        # Point cloud buffers for 5-second decay
+        self._registered_scan_buffer = PointCloudBuffer(decay_seconds=5.0)
+        self._terrain_map_buffer = PointCloudBuffer(decay_seconds=5.0)
+        self._overall_map_buffer = PointCloudBuffer(decay_seconds=10.0)  # Keep map longer
+        
+        # Frame counter for sequence timeline
+        self._frame_count = 0
+        
+        # TF buffer for camera transforms
+        from tf2_ros import Buffer, TransformListener
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
+        
+        # Camera intrinsics (logged once as static)
+        self._camera_intrinsics_logged = False
+        
         # Debug: Check if RerunConnection has a stream
         if self.rc.stream is None:
             logger.warning(
@@ -204,48 +254,125 @@ class RosRerunBridgeNode(Node):
         except Exception as e:
             logger.error(f"[RosRerunBridge] Failed to parse pointcloud: {e}", exc_info=True)
             return None
-
-    # PointCloud2 callbacks
+    
+    # PointCloud2 callbacks with 5-second accumulation
     def _on_registered_scan(self, msg: PointCloud2) -> None:
         pts = self._parse_pointcloud(msg, max_points=250_000)
         if pts is not None:
-            self._log_with_time("world/lidar/registered_scan", rr.Points3D(pts), msg.header.stamp)
-
+            self._registered_scan_buffer.add_scan(pts)
+            all_pts = self._registered_scan_buffer.get_all_points()
+            
+            # Use sequence timeline for auto-cleanup + white color
+            try:
+                with self._log_lock:
+                    self.rc.stream.set_time("frame", sequence=self._frame_count)
+                    self.rc.log(
+                        "world/lidar/registered_scan",
+                        rr.Points3D(all_pts, colors=[[255, 255, 255]], radii=0.005)
+                    )
+                self._frame_count += 1
+            except Exception as e:
+                logger.error(f"[RosRerunBridge] Failed to log registered_scan: {e}", exc_info=True)
+    
     def _on_terrain_map(self, msg: PointCloud2) -> None:
         pts = self._parse_pointcloud(msg, max_points=200_000)
         if pts is not None:
-            self._log_with_time("world/lidar/terrain_map", rr.Points3D(pts), msg.header.stamp)
-
+            self._terrain_map_buffer.add_scan(pts)
+            all_pts = self._terrain_map_buffer.get_all_points()
+            
+            try:
+                with self._log_lock:
+                    self.rc.stream.set_time("frame", sequence=self._frame_count)
+                    self.rc.log(
+                        "world/lidar/terrain_map",
+                        rr.Points3D(all_pts, colors=[[255, 255, 255]], radii=0.005)
+                    )
+            except Exception as e:
+                logger.error(f"[RosRerunBridge] Failed to log terrain_map: {e}", exc_info=True)
+    
     def _on_terrain_map_ext(self, msg: PointCloud2) -> None:
         pts = self._parse_pointcloud(msg, max_points=200_000)
         if pts is not None:
-            self._log_with_time("world/lidar/terrain_map_ext", rr.Points3D(pts), msg.header.stamp)
-
+            try:
+                with self._log_lock:
+                    self.rc.stream.set_time("frame", sequence=self._frame_count)
+                    self.rc.log(
+                        "world/lidar/terrain_map_ext",
+                        rr.Points3D(pts, colors=[[255, 255, 255]], radii=0.005)
+                    )
+            except Exception as e:
+                logger.error(f"[RosRerunBridge] Failed to log terrain_map_ext: {e}", exc_info=True)
+    
     def _on_overall_map(self, msg: PointCloud2) -> None:
         pts = self._parse_pointcloud(msg, max_points=300_000)
         if pts is not None:
-            self._log_with_time("world/lidar/overall_map", rr.Points3D(pts), msg.header.stamp)
-
+            self._overall_map_buffer.add_scan(pts)
+            all_pts = self._overall_map_buffer.get_all_points()
+            
+            try:
+                with self._log_lock:
+                    self.rc.stream.set_time("frame", sequence=self._frame_count)
+                    self.rc.log(
+                        "world/lidar/overall_map",
+                        rr.Points3D(all_pts, colors=[[255, 255, 255]], radii=0.005)
+                    )
+            except Exception as e:
+                logger.error(f"[RosRerunBridge] Failed to log overall_map: {e}", exc_info=True)
+    
     def _on_free_paths(self, msg: PointCloud2) -> None:
         pts = self._parse_pointcloud(msg, max_points=150_000)
         if pts is not None:
-            self._log_with_time("world/lidar/free_paths", rr.Points3D(pts), msg.header.stamp)
-
+            try:
+                with self._log_lock:
+                    self.rc.stream.set_time("frame", sequence=self._frame_count)
+                    self.rc.log(
+                        "world/lidar/free_paths",
+                        rr.Points3D(pts, colors=[[0, 170, 255]], radii=0.005)  # Light blue like RViz
+                    )
+            except Exception as e:
+                logger.error(f"[RosRerunBridge] Failed to log free_paths: {e}", exc_info=True)
+    
     def _on_explored_areas(self, msg: PointCloud2) -> None:
         pts = self._parse_pointcloud(msg, max_points=200_000)
         if pts is not None:
-            self._log_with_time("world/lidar/explored_areas", rr.Points3D(pts), msg.header.stamp)
-
+            try:
+                with self._log_lock:
+                    self.rc.stream.set_time("frame", sequence=self._frame_count)
+                    self.rc.log(
+                        "world/lidar/explored_areas",
+                        rr.Points3D(pts, colors=[[255, 255, 255]], radii=0.005),
+                        static=True  # Explored areas persist
+                    )
+            except Exception as e:
+                logger.error(f"[RosRerunBridge] Failed to log explored_areas: {e}", exc_info=True)
+    
     def _on_trajectory(self, msg: PointCloud2) -> None:
         pts = self._parse_pointcloud(msg, max_points=100_000)
         if pts is not None:
-            self._log_with_time("world/robot/trajectory", rr.Points3D(pts), msg.header.stamp)
-
+            try:
+                with self._log_lock:
+                    self.rc.stream.set_time("frame", sequence=self._frame_count)
+                    self.rc.log(
+                        "world/robot/trajectory",
+                        rr.Points3D(pts, colors=[[255, 255, 0]], radii=0.01),  # Yellow trail
+                        static=True
+                    )
+            except Exception as e:
+                logger.error(f"[RosRerunBridge] Failed to log trajectory: {e}", exc_info=True)
+    
     def _on_added_obstacles(self, msg: PointCloud2) -> None:
         pts = self._parse_pointcloud(msg, max_points=100_000)
         if pts is not None:
-            self._log_with_time("world/lidar/added_obstacles", rr.Points3D(pts), msg.header.stamp)
-
+            try:
+                with self._log_lock:
+                    self.rc.stream.set_time("frame", sequence=self._frame_count)
+                    self.rc.log(
+                        "world/lidar/added_obstacles",
+                        rr.Points3D(pts, colors=[[255, 25, 0]], radii=0.01)  # Red obstacles
+                    )
+            except Exception as e:
+                logger.error(f"[RosRerunBridge] Failed to log added_obstacles: {e}", exc_info=True)
+    
     # Planning callbacks
     def _on_path(self, msg: Path) -> None:
         if not msg.poses:
@@ -322,15 +449,57 @@ class RosRerunBridgeNode(Node):
             from scipy.spatial.transform import Rotation as R
 
             rot_matrix = R.from_quat([q.x, q.y, q.z, q.w]).as_matrix()
-
-            self._log_with_time(
-                "world/robot/base",
-                rr.Transform3D(translation=[p.x, p.y, p.z], mat3x3=rot_matrix),
-                msg.header.stamp,
-            )
+            
+            # Log robot base pose
+            with self._log_lock:
+                self.rc.stream.set_time("frame", sequence=self._frame_count)
+                self.rc.log(
+                    "world/robot/base",
+                    rr.Transform3D(
+                        translation=[p.x, p.y, p.z],
+                        mat3x3=rot_matrix,
+                        axis_length=0.5
+                    )
+                )
+                
+                # Log forward direction arrow (yellow)
+                self.rc.log(
+                    "world/robot/base/heading",
+                    rr.Arrows3D(
+                        origins=[[0, 0, 0]],
+                        vectors=[[0.3, 0, 0]],  # X-forward
+                        colors=[[255, 255, 0]],
+                        radii=0.02
+                    )
+                )
+            
+            # Look up camera transform relative to base_link
+            try:
+                ros_time = Time.from_msg(msg.header.stamp)
+                tf = self.tf_buffer.lookup_transform(
+                    "base_link",
+                    "camera_color_optical_frame",
+                    ros_time,
+                    timeout=rclpy.duration.Duration(seconds=0.1)
+                )
+                t = tf.transform.translation
+                q_cam = tf.transform.rotation
+                
+                with self._log_lock:
+                    self.rc.log(
+                        "world/robot/base/camera",
+                        rr.Transform3D(
+                            translation=[t.x, t.y, t.z],
+                            rotation=rr.Quaternion(xyzw=[q_cam.x, q_cam.y, q_cam.z, q_cam.w])
+                        )
+                    )
+            except (TransformException, Exception) as tf_err:
+                # TF not available yet or frame names don't match - not critical
+                pass
+                
         except Exception as e:
-            logger.debug(f"[RosRerunBridge] Failed to log odometry: {e}")
-
+            logger.error(f"[RosRerunBridge] Failed to log odometry: {e}", exc_info=True)
+    
     # Marker callbacks
     def _convert_marker_to_rerun(self, marker: Marker, entity_path: str) -> None:
         """Convert a single RViz marker to Rerun archetype."""
