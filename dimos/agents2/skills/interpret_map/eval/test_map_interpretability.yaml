@@ -92,8 +92,8 @@ point_placement_tests:
     image_path: "floorplan_office_noise.png"
     resolution: 0.05
     robot_pose:
-      position: [450, 980, 0] # 
-      orientation: [ 0, 0, 0, 1 ] 
+      position: [450, 980, 0] #
+      orientation: [ 0, 0, 0, 1 ]
     questions:
       - query: "doorway to enter the nearest room" # mostly fails - even w/o noise
         expected_range:
@@ -105,7 +105,7 @@ point_placement_tests:
     resolution: 0.05
     robot_pose:
       position: [625, 760, 0] # center cubicles
-      orientation: [ 0, 0, -0.7071068, 0.7071068 ] 
+      orientation: [ 0, 0, -0.7071068, 0.7071068 ]
     questions:
       - query: "entrance to the next cublicle ahead"
         expected_range:
