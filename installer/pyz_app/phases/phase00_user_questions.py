@@ -175,7 +175,7 @@ def phase0(cli_features: list[str] | None = None) -> tuple[dict[str, object], li
             # build command
             while True:
                 try:
-                    response = input(f"Please type {p.highlight("run/docker_build")} to build the image right now\npress CTRL+C to if you want to run that command yourself (e.g. later)")
+                    response = input(f"Please type {p.highlight('run/docker_build')} to build the image right now\npress CTRL+C to if you want to run that command yourself (e.g. later)")
                 except KeyboardInterrupt:
                     print("exiting installer, NOTE: docker is ready whenever you're ready to build+run it")
                     exit(0)
@@ -185,7 +185,7 @@ def phase0(cli_features: list[str] | None = None) -> tuple[dict[str, object], li
             # run command
             while True:
                 try:
-                    response = input(f"Please type {p.highlight("run/docker_exec")} to run the image right now\npress CTRL+C to if you want to run that command later")
+                    response = input(f"Please type {p.highlight('run/docker_exec')} to run the image right now\npress CTRL+C to if you want to run that command later")
                 except KeyboardInterrupt:
                     print("exiting installer, NOTE: docker is ready whenever you're ready to run it")
                     exit(0)

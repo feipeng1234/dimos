@@ -165,7 +165,7 @@ def get_project_directory() -> Path:
         if installer_status.get("template_repo"):
             _project_directory = Path.cwd()
         else:
-            print("Dimos needs to be installed to a project (not just a global install)")
+            print("Dimos needs to be installed to a project")
             print("Ex: if you're in your home folder, or your desktop, say 'no' to this question")
             if p.ask_yes_no("Are you currently in a project directory?"):
                 _project_directory = Path.cwd()
