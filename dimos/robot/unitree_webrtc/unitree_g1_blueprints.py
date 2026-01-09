@@ -15,15 +15,16 @@
 
 """Blueprint configurations for Unitree G1 humanoid robot.
 
-This module provides pre-configured blueprints for various G1 robot setups,
-from basic teleoperation to full autonomous agent configurations.
+On `dev`, the canonical navigation stack is the same as GO2:
+- TF drives motion (visualized via `tf_rerun()` snapshot polling)
+- Planning uses `replanning_a_star_planner()` (no ROS nav dependency required)
+- Connection selects WebRTC vs MuJoCo via `GlobalConfig.simulation`/`unitree_connection_type`
 """
 
 from dimos_lcm.foxglove_msgs import SceneUpdate
 from dimos_lcm.foxglove_msgs.ImageAnnotations import (
     ImageAnnotations,
 )
-from dimos_lcm.sensor_msgs import CameraInfo
 
 from dimos.agents.agent import llm_agent
 from dimos.agents.cli.human import human_input
@@ -31,25 +32,17 @@ from dimos.agents.skills.navigation import navigation_skill
 from dimos.constants import DEFAULT_CAPACITY_COLOR_IMAGE
 from dimos.core.blueprints import autoconnect
 from dimos.core.transport import LCMTransport, pSHMTransport
-from dimos.hardware.sensors.camera import zed
-from dimos.hardware.sensors.camera.module import camera_module  # type: ignore[attr-defined]
-from dimos.hardware.sensors.camera.webcam import Webcam
+from dimos.dashboard.tf_rerun_module import tf_rerun
 from dimos.mapping.costmapper import cost_mapper
 from dimos.mapping.voxels import voxel_mapper
 from dimos.msgs.geometry_msgs import (
     PoseStamped,
-    Quaternion,
-    Transform,
     Twist,
-    Vector3,
 )
-from dimos.msgs.nav_msgs import Odometry, Path
-from dimos.msgs.sensor_msgs import Image, PointCloud2
-from dimos.msgs.std_msgs import Bool
+from dimos.msgs.sensor_msgs import CameraInfo, Image, PointCloud2
 from dimos.msgs.vision_msgs import Detection2DArray
 from dimos.navigation.frontier_exploration import wavefront_frontier_explorer
 from dimos.navigation.replanning_a_star.module import replanning_a_star_planner
-from dimos.navigation.rosnav import ros_nav
 from dimos.perception.detection.detectors.person.yolo import YoloPersonDetector
 from dimos.perception.detection.module3D import Detection3DModule, detection3d_module
 from dimos.perception.detection.moduleDB import ObjectDBModule, detectionDB_module
@@ -57,73 +50,30 @@ from dimos.perception.detection.person_tracker import PersonTracker, person_trac
 from dimos.perception.object_tracker import object_tracking
 from dimos.perception.spatial_perception import spatial_memory
 from dimos.robot.foxglove_bridge import foxglove_bridge
-from dimos.robot.unitree.connection.g1 import g1_connection
-from dimos.robot.unitree.connection.g1sim import g1_sim_connection
+from dimos.robot.unitree.connection.g1 import G1Connection, g1_connection
 from dimos.robot.unitree_webrtc.keyboard_teleop import keyboard_teleop
 from dimos.robot.unitree_webrtc.unitree_g1_skill_container import g1_skills
 from dimos.utils.monitoring import utilization
 from dimos.web.websocket_vis.websocket_vis_module import websocket_vis
 
-_basic_no_nav = (
-    autoconnect(
-        camera_module(
-            transform=Transform(
-                translation=Vector3(0.05, 0.0, 0.0),
-                rotation=Quaternion.from_euler(Vector3(0.0, 0.2, 0.0)),
-                frame_id="sensor",
-                child_frame_id="camera_link",
-            ),
-            hardware=lambda: Webcam(
-                camera_index=0,
-                fps=15,
-                stereo_slice="left",
-                camera_info=zed.CameraInfo.SingleWebcam,
-            ),
-        ),
-        voxel_mapper(voxel_size=0.1),
-        cost_mapper(),
-        wavefront_frontier_explorer(),
-        # Visualization
-        websocket_vis(),
-        foxglove_bridge(),
-    )
-    .global_config(n_dask_workers=4, robot_model="unitree_g1")
-    .transports(
-        {
-            # G1 uses Twist for movement commands
-            ("cmd_vel", Twist): LCMTransport("/cmd_vel", Twist),
-            # State estimation from ROS
-            ("state_estimation", Odometry): LCMTransport("/state_estimation", Odometry),
-            # Odometry output from ROSNavigationModule
-            ("odom", PoseStamped): LCMTransport("/odom", PoseStamped),
-            # Navigation module topics from nav_bot
-            ("goal_req", PoseStamped): LCMTransport("/goal_req", PoseStamped),
-            ("goal_active", PoseStamped): LCMTransport("/goal_active", PoseStamped),
-            ("path_active", Path): LCMTransport("/path_active", Path),
-            ("pointcloud", PointCloud2): LCMTransport("/lidar", PointCloud2),
-            ("global_pointcloud", PointCloud2): LCMTransport("/map", PointCloud2),
-            # Original navigation topics for backwards compatibility
-            ("goal_pose", PoseStamped): LCMTransport("/goal_pose", PoseStamped),
-            ("goal_reached", Bool): LCMTransport("/goal_reached", Bool),
-            ("cancel_goal", Bool): LCMTransport("/cancel_goal", Bool),
-            # Camera topics (if camera module is added)
-            ("color_image", Image): LCMTransport("/g1/color_image", Image),
-            ("camera_info", CameraInfo): LCMTransport("/g1/camera_info", CameraInfo),
-        }
-    )
-)
-
-basic_ros = autoconnect(
-    _basic_no_nav,
+basic = autoconnect(
     g1_connection(),
-    ros_nav(),
-)
+    foxglove_bridge(),
+    websocket_vis(),
+    tf_rerun(),  # TF snapshot polling -> Rerun under `world/tf/*`
+).global_config(n_dask_workers=4, robot_model="unitree_g1")
 
-basic_sim = autoconnect(
-    _basic_no_nav,
-    g1_sim_connection(),
+nav = autoconnect(
+    basic,
+    voxel_mapper(voxel_size=0.1),
+    cost_mapper(),
     replanning_a_star_planner(),
-)
+    wavefront_frontier_explorer(),
+).global_config(n_dask_workers=6, robot_model="unitree_g1")
+
+# Backwards-compat names expected by `all_blueprints.py`
+basic_ros = basic
+basic_sim = basic
 
 _perception_and_memory = autoconnect(
     spatial_memory(),
@@ -132,14 +82,11 @@ _perception_and_memory = autoconnect(
 )
 
 standard = autoconnect(
-    basic_ros,
+    nav,
     _perception_and_memory,
 ).global_config(n_dask_workers=8)
 
-standard_sim = autoconnect(
-    basic_sim,
-    _perception_and_memory,
-).global_config(n_dask_workers=8)
+standard_sim = standard
 
 # Optimized configuration using shared memory for images
 standard_with_shm = autoconnect(
@@ -177,37 +124,37 @@ agentic_sim = autoconnect(
 
 # Configuration with joystick control for teleoperation
 with_joystick = autoconnect(
-    basic_ros,
+    basic,
     keyboard_teleop(),  # Pygame-based joystick control
 )
 
 # Detection configuration with person tracking and 3D detection
 detection = (
     autoconnect(
-        basic_ros,
+        nav,
         # Person detection modules with YOLO
         detection3d_module(
-            camera_info=zed.CameraInfo.SingleWebcam,
+            camera_info=G1Connection.camera_info_static,
             detector=YoloPersonDetector,
         ),
         detectionDB_module(
-            camera_info=zed.CameraInfo.SingleWebcam,
+            camera_info=G1Connection.camera_info_static,
             filter=lambda det: det.class_id == 0,  # Filter for person class only
         ),
         person_tracker_module(
-            cameraInfo=zed.CameraInfo.SingleWebcam,
+            cameraInfo=G1Connection.camera_info_static,
         ),
     )
     .global_config(n_dask_workers=8)
     .remappings(
         [
-            # Connect detection modules to camera and lidar
-            (Detection3DModule, "image", "color_image"),
-            (Detection3DModule, "pointcloud", "pointcloud"),
-            (ObjectDBModule, "image", "color_image"),
-            (ObjectDBModule, "pointcloud", "pointcloud"),
-            (PersonTracker, "image", "color_image"),
-            (PersonTracker, "detections", "detections_2d"),
+            # Use the mapped global map (PointCloud2) for 3D projection/tracking
+            (Detection3DModule, "pointcloud", "global_map"),
+            (ObjectDBModule, "pointcloud", "global_map"),
+            # Ensure the camera stream is the connection camera (not any other image stream)
+            (Detection3DModule, "color_image", "color_image"),
+            (ObjectDBModule, "color_image", "color_image"),
+            (PersonTracker, "color_image", "color_image"),
         ]
     )
     .transports(
