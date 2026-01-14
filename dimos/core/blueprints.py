@@ -30,7 +30,8 @@ from dimos.core.global_config import GlobalConfig
 from dimos.core.module import Module
 from dimos.core.module_coordinator import ModuleCoordinator
 from dimos.core.stream import In, Out
-from dimos.core.transport import LCMTransport, pLCMTransport
+from dimos.core.transport import LCMTransport, ROSTransport, pLCMTransport
+from dimos.protocol.pubsub.rospubsub import ROS_AVAILABLE
 from dimos.utils.generic import short_id
 from dimos.utils.logging_config import setup_logger
 
@@ -124,14 +125,28 @@ class ModuleBlueprintSet:
                 f"{modules_str}. Please use a concrete class name instead."
             )
 
-    def _get_transport_for(self, name: str, type: type) -> Any:
+    def _get_transport_for(self, name: str, type: type, backend: str = "lcm") -> Any:
         transport = self.transport_map.get((name, type), None)
         if transport:
             return transport
 
-        use_pickled = getattr(type, "lcm_encode", None) is None
         topic = f"/{name}" if self._is_name_unique(name) else f"/{short_id()}"
-        transport = pLCMTransport(topic) if use_pickled else LCMTransport(topic, type)
+
+        if backend == "ros":
+            if not ROS_AVAILABLE:
+                raise ImportError(
+                    "ROS transport requested but rclpy not available. "
+                    "Install ROS 2 or set default_transport='lcm'."
+                )
+            # For ROS, we need a ROS message type. The type here is an LCM type,
+            # so ROSTransport will handle the conversion internally.
+            from dimos.protocol.pubsub.rospubsub import _get_ros_type
+
+            ros_type = _get_ros_type(type())  # Get ROS type from an instance
+            transport = ROSTransport(topic, ros_type)
+        else:
+            use_pickled = getattr(type, "lcm_encode", None) is None
+            transport = pLCMTransport(topic) if use_pickled else LCMTransport(topic, type)
 
         return transport
 
@@ -209,7 +224,9 @@ class ModuleBlueprintSet:
                 kwargs["global_config"] = global_config
             module_coordinator.deploy(blueprint.module, *blueprint.args, **kwargs)
 
-    def _connect_transports(self, module_coordinator: ModuleCoordinator) -> None:
+    def _connect_transports(
+        self, module_coordinator: ModuleCoordinator, global_config: GlobalConfig
+    ) -> None:
         # Gather all the In/Out connections with remapping applied.
         connections = defaultdict(list)
         # Track original name -> remapped name for each module
@@ -225,8 +242,9 @@ class ModuleBlueprintSet:
                 connections[remapped_name, conn.type].append((blueprint.module, conn.name))
 
         # Connect all In/Out connections by remapped name and type.
+        backend = global_config.default_transport
         for remapped_name, type in connections.keys():
-            transport = self._get_transport_for(remapped_name, type)
+            transport = self._get_transport_for(remapped_name, type, backend)
             for module, original_name in connections[(remapped_name, type)]:
                 instance = module_coordinator.get_instance(module)
                 instance.set_transport(original_name, transport)  # type: ignore[union-attr]
@@ -386,7 +404,7 @@ class ModuleBlueprintSet:
         module_coordinator.start()
 
         self._deploy_all_modules(module_coordinator, global_config)
-        self._connect_transports(module_coordinator)
+        self._connect_transports(module_coordinator, global_config)
         self._connect_rpc_methods(module_coordinator)
 
         module_coordinator.start_all_modules()

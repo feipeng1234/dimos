@@ -96,7 +96,7 @@ nav = autoconnect(
     cost_mapper(),
     replanning_a_star_planner(),
     wavefront_frontier_explorer(),
-).global_config(n_dask_workers=6, robot_model="unitree_go2")
+).global_config(n_dask_workers=6, robot_model="unitree_go2", default_transport="ros")
 
 detection = (
     autoconnect(

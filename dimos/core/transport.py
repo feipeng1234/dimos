@@ -28,6 +28,7 @@ from typing import (
 from dimos.core.stream import In, Out, Stream, Transport
 from dimos.protocol.pubsub.jpeg_shm import JpegSharedMemory
 from dimos.protocol.pubsub.lcmpubsub import LCM, JpegLCM, PickleLCM, Topic as LCMTopic
+from dimos.protocol.pubsub.rospubsub import ROS_AVAILABLE, DimosROS, ROSTopic
 from dimos.protocol.pubsub.shmpubsub import PickleSharedMemory, SharedMemory
 
 if TYPE_CHECKING:
@@ -123,6 +124,54 @@ class JpegLcmTransport(LCMTransport):  # type: ignore[type-arg]
 
     def stop(self) -> None:
         self.lcm.stop()
+
+
+class ROSTransport(PubSubTransport[T]):
+    """Transport that publishes/subscribes via ROS 2.
+
+    Automatically converts between dimos_lcm messages and ROS messages.
+
+    Usage:
+        from geometry_msgs.msg import Vector3 as ROSVector3
+
+        ROSTransport("/my_topic", ROSVector3)
+    """
+
+    _started: bool = False
+    _ros: DimosROS | None = None
+
+    def __init__(self, topic: str, ros_type: type, **kwargs) -> None:  # type: ignore[no-untyped-def]
+        if not ROS_AVAILABLE:
+            raise ImportError("ROS not available. Install rclpy to use ROSTransport.")
+        super().__init__(ROSTopic(topic, ros_type))
+        self._kwargs = kwargs
+
+    def _ensure_ros(self) -> DimosROS:
+        if self._ros is None:
+            self._ros = DimosROS(**self._kwargs)
+        return self._ros
+
+    def start(self) -> None:
+        if not self._started:
+            self._ensure_ros().start()
+            self._started = True
+
+    def stop(self) -> None:
+        if self._ros is not None:
+            self._ros.stop()
+
+    def __reduce__(self):  # type: ignore[no-untyped-def]
+        return (ROSTransport, (self.topic.topic, self.topic.ros_type))
+
+    def broadcast(self, _, msg) -> None:  # type: ignore[no-untyped-def]
+        """Publish a dimos_lcm message to ROS (auto-converts to ROS message)."""
+        self.start()
+        self._ensure_ros().publish(self.topic, msg)
+
+    def subscribe(self, callback: Callable[[T], None], selfstream: In[T] = None) -> None:  # type: ignore[assignment, override]
+        """Subscribe to ROS topic (auto-converts ROS messages to dimos_lcm)."""
+        self.start()
+        return self._ensure_ros().subscribe(self.topic, lambda msg, topic: callback(msg))  # type: ignore[return-value]
 
 
 class pSHMTransport(PubSubTransport[T]):
