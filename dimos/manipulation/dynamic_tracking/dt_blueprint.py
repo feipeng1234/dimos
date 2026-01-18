@@ -71,40 +71,44 @@ from dimos.robot.foxglove_bridge import foxglove_bridge
 #   RealSenseCamera.camera_info ──► ArucoTracker.camera_info (intrinsics)
 # =============================================================================
 
-aruco_tracker_realsense = autoconnect(
-    RealSenseCamera.blueprint(
-        width=848,
-        height=480,
-        fps=15,
-        camera_name="camera",
-        base_frame_id="ee_link",
-        base_transform=Transform(
-            translation=Vector3(0.06693724, -0.0309563, 0.00691482),
-            rotation=Quaternion(0.70513398, 0.00535696, 0.70897578, -0.01052180),  # xyzw
+aruco_tracker_realsense = (
+    autoconnect(
+        RealSenseCamera.blueprint(
+            width=848,
+            height=480,
+            fps=15,
+            camera_name="camera",
+            base_frame_id="ee_link",
+            base_transform=Transform(
+                translation=Vector3(0.06693724, -0.0309563, 0.00691482),
+                rotation=Quaternion(0.70513398, 0.00535696, 0.70897578, -0.01052180),  # xyzw
+            ),
+            enable_depth=True,
+            align_depth_to_color=False,
         ),
-        enable_depth=True,
-        align_depth_to_color=False,
-    ),
-    aruco_tracker(
-        marker_size=0.027,  # 27mm markers (default)
-        aruco_dict=cv2.aruco.DICT_4X4_50,
-        camera_frame_id="camera_color_optical_frame",
-        target_marker_id=0,  # Only track marker ID 0 (set to None to track all)
-        save_images=False,
-        output_dir=os.path.join(_THIS_DIR, "aruco_output"),
-        processing_rate=1,
-        max_loops=300,
-        move_robot_to_aruco=False,
-    ),
-    foxglove_bridge(),
-).transports(
-    {
-        # Camera color image for ArUco detection
-        ("color_image", Image): LCMTransport("/camera/color", Image),
-        # Camera info for pose estimation
-        ("camera_info", CameraInfo): LCMTransport("/camera/color_info", CameraInfo),
-    }
-).global_config(viewer_backend="foxglove")
+        aruco_tracker(
+            marker_size=0.027,  # 27mm markers (default)
+            aruco_dict=cv2.aruco.DICT_4X4_50,
+            camera_frame_id="camera_color_optical_frame",
+            target_marker_id=0,  # Only track marker ID 0 (set to None to track all)
+            save_images=False,
+            output_dir=os.path.join(_THIS_DIR, "aruco_output"),
+            processing_rate=1,
+            max_loops=300,
+            move_robot_to_aruco=False,
+        ),
+        foxglove_bridge(),
+    )
+    .transports(
+        {
+            # Camera color image for ArUco detection
+            ("color_image", Image): LCMTransport("/camera/color", Image),
+            # Camera info for pose estimation
+            ("camera_info", CameraInfo): LCMTransport("/camera/color_info", CameraInfo),
+        }
+    )
+    .global_config(viewer_backend="foxglove")
+)
 
 # =============================================================================
 # ArUco Tracker with RealSense Camera + XArm6 Control Orchestrator
@@ -120,42 +124,46 @@ aruco_tracker_realsense = autoconnect(
 #   ControlOrchestrator.get_ee_positions ──► ArucoTracker (RPC for EE pose)
 # =============================================================================
 
-aruco_tracker_realsense_xarm6 = autoconnect(
-    orchestrator_xarm6_cartesian,
-    RealSenseCamera.blueprint(
-        width=848,
-        height=480,
-        fps=15,
-        camera_name="camera",
-        base_frame_id="ee_link",
-        base_transform=Transform(
-            translation=Vector3(0.06693724, -0.0309563, 0.00691482),
-            rotation=Quaternion(0.70513398, 0.00535696, 0.70897578, -0.01052180),  # xyzw
+aruco_tracker_realsense_xarm6 = (
+    autoconnect(
+        orchestrator_xarm6_cartesian,
+        RealSenseCamera.blueprint(
+            width=848,
+            height=480,
+            fps=15,
+            camera_name="camera",
+            base_frame_id="ee_link",
+            base_transform=Transform(
+                translation=Vector3(0.06693724, -0.0309563, 0.00691482),
+                rotation=Quaternion(0.70513398, 0.00535696, 0.70897578, -0.01052180),  # xyzw
+            ),
+            enable_depth=True,
+            align_depth_to_color=False,
         ),
-        enable_depth=True,
-        align_depth_to_color=False,
-    ),
-    aruco_tracker(
-        marker_size=0.027,  # 27mm markers (default)
-        aruco_dict=cv2.aruco.DICT_4X4_50,
-        camera_frame_id="camera_color_optical_frame",
-        target_marker_id=0,  # Only track marker ID 0 (set to None to track all)
-        save_images=False,
-        output_dir=os.path.join(_THIS_DIR, "aruco_output"),
-        processing_rate=1,
-        max_loops=300,
-        move_robot_to_aruco=True,
-        hardware_id="arm",  # Hardware ID in ControlOrchestrator for EE pose
-    ),
-    foxglove_bridge(),
-).transports(
-    {
-        # Camera color image for ArUco detection
-        ("color_image", Image): LCMTransport("/camera/color", Image),
-        # Camera info for pose estimation
-        ("camera_info", CameraInfo): LCMTransport("/camera/color_info", CameraInfo),
-    }
-).global_config(viewer_backend="foxglove")
+        aruco_tracker(
+            marker_size=0.027,  # 27mm markers (default)
+            aruco_dict=cv2.aruco.DICT_4X4_50,
+            camera_frame_id="camera_color_optical_frame",
+            target_marker_id=0,  # Only track marker ID 0 (set to None to track all)
+            save_images=False,
+            output_dir=os.path.join(_THIS_DIR, "aruco_output"),
+            processing_rate=1,
+            max_loops=300,
+            move_robot_to_aruco=True,
+            hardware_id="arm",  # Hardware ID in ControlOrchestrator for EE pose
+        ),
+        foxglove_bridge(),
+    )
+    .transports(
+        {
+            # Camera color image for ArUco detection
+            ("color_image", Image): LCMTransport("/camera/color", Image),
+            # Camera info for pose estimation
+            ("camera_info", CameraInfo): LCMTransport("/camera/color_info", CameraInfo),
+        }
+    )
+    .global_config(viewer_backend="foxglove")
+)
 
 
 __all__ = ["aruco_tracker_realsense", "aruco_tracker_realsense_xarm6"]

@@ -125,14 +125,22 @@ class OrchestratorClient:
         return self._rpc.get_ee_positions() or {}
 
     def move_to_cartesian_pose(
-        self, hardware_id: str, x: float, y: float, z: float,
-        roll: float, pitch: float, yaw: float, velocity: float = 0.2,
+        self,
+        hardware_id: str,
+        x: float,
+        y: float,
+        z: float,
+        roll: float,
+        pitch: float,
+        yaw: float,
+        velocity: float = 0.2,
         wait: bool = True,
     ) -> bool:
         """Move end-effector to Cartesian pose (meters, radians)."""
-        return self._rpc.move_to_cartesian_pose(
-            hardware_id, x, y, z, roll, pitch, yaw, velocity, wait
-        ) or False
+        return (
+            self._rpc.move_to_cartesian_pose(hardware_id, x, y, z, roll, pitch, yaw, velocity, wait)
+            or False
+        )
 
     def get_trajectory_status(self, task_name: str) -> TaskStatus | None:
         """Get status of a trajectory task."""
@@ -563,10 +571,21 @@ class OrchestratorShell:
                     f"y={math.degrees(pose['yaw']):.1f} deg"
                 )
 
-    def move_ee(self, x: float, y: float, z: float, roll: float, pitch: float, yaw: float,
-                hw_id: str | None = None, vel: float = 1.0) -> None:
+    def move_ee(
+        self,
+        x: float,
+        y: float,
+        z: float,
+        roll: float,
+        pitch: float,
+        yaw: float,
+        hw_id: str | None = None,
+        vel: float = 1.0,
+    ) -> None:
         """Move end-effector to pose. Position in meters, angles in degrees."""
-        hardware = hw_id or self._client.list_hardware()[0] if self._client.list_hardware() else None
+        hardware = (
+            hw_id or self._client.list_hardware()[0] if self._client.list_hardware() else None
+        )
         if not hardware:
             print("No hardware available")
             return

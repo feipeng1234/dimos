@@ -20,8 +20,8 @@ Handles all XArm SDK communication and unit conversion.
 import math
 
 from xarm.wrapper import XArmAPI
-from dimos.core import logger
 
+from dimos.core import logger
 from dimos.hardware.manipulators.spec import (
     ControlMode,
     JointLimits,
@@ -364,9 +364,14 @@ class XArmBackend(ManipulatorBackend):
         )
 
         code: int = self._arm.set_position(
-            x=x_mm, y=y_mm, z=z_mm,
-            roll=roll_deg, pitch=pitch_deg, yaw=yaw_deg,
-            speed=speed, wait=wait,
+            x=x_mm,
+            y=y_mm,
+            z=z_mm,
+            roll=roll_deg,
+            pitch=pitch_deg,
+            yaw=yaw_deg,
+            speed=speed,
+            wait=wait,
         )
 
         if code != 0:
@@ -396,9 +401,7 @@ class XArmBackend(ManipulatorBackend):
         pitch_deg = self._rad_to_deg(pose.get("pitch", 0))
         yaw_deg = self._rad_to_deg(pose.get("yaw", 0))
 
-        code: int = self._arm.set_servo_cartesian(
-            [x_mm, y_mm, z_mm, roll_deg, pitch_deg, yaw_deg]
-        )
+        code: int = self._arm.set_servo_cartesian([x_mm, y_mm, z_mm, roll_deg, pitch_deg, yaw_deg])
 
         if code != 0:
             logger.warning(f"XArm set_servo_cartesian returned error code: {code}")

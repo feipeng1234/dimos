@@ -27,7 +27,6 @@ from dimos.core.rpc_client import RpcCall
 from dimos.msgs.geometry_msgs import Quaternion, Transform, Vector3
 from dimos.msgs.sensor_msgs.CameraInfo import CameraInfo
 from dimos.msgs.sensor_msgs.Image import Image
-
 from dimos.utils.logging_config import setup_logger
 
 logger = setup_logger()
@@ -167,7 +166,9 @@ class ArucoTracker(Module[ArucoTrackerConfig]):
                         pose = ee_positions[self.config.hardware_id]
                         if pose:
                             self._last_commanded_pos = (pose["x"], pose["y"], pose["z"])
-                            logger.debug(f"Initialized last_commanded_pos from EE: {self._last_commanded_pos}")
+                            logger.debug(
+                                f"Initialized last_commanded_pos from EE: {self._last_commanded_pos}"
+                            )
                 except Exception as e:
                     logger.warning(f"Failed to get initial EE position: {e}")
 
@@ -196,7 +197,7 @@ class ArucoTracker(Module[ArucoTrackerConfig]):
             rotation=Quaternion(0.0, 0.0, 0.0, 1.0),
             frame_id="world_frame",
             child_frame_id="base_link",
-            ts=time.time(), 
+            ts=time.time(),
         )
         self.tf.publish(robot_base_to_world_transform)
 
@@ -324,7 +325,9 @@ class ArucoTracker(Module[ArucoTrackerConfig]):
                 reach_pitch = 0.0
                 reach_yaw = 0.0
 
-                logger.debug(f"Computed reach pose: x={reach_x:.3f}, y={reach_y:.3f}, z={reach_z:.3f}, roll={reach_roll:.3f}, pitch={reach_pitch:.3f}, yaw={reach_yaw:.3f}")
+                logger.debug(
+                    f"Computed reach pose: x={reach_x:.3f}, y={reach_y:.3f}, z={reach_z:.3f}, roll={reach_roll:.3f}, pitch={reach_pitch:.3f}, yaw={reach_yaw:.3f}"
+                )
 
                 # RPC call to ControlOrchestrator to move to pose
                 if self.config.move_robot_to_aruco:
@@ -408,6 +411,7 @@ class ArucoTracker(Module[ArucoTrackerConfig]):
                         roll, pitch, yaw = hw_pose["roll"], hw_pose["pitch"], hw_pose["yaw"]
                         # Convert Euler angles to quaternion
                         from dimos.utils.transform_utils import euler_to_quaternion
+
                         orientation = euler_to_quaternion(Vector3(roll, pitch, yaw))
                         # Create and publish transform from base_link to ee_link
                         ee_transform = Transform(
@@ -423,7 +427,9 @@ class ArucoTracker(Module[ArucoTrackerConfig]):
             except Exception as e:
                 logger.error(f"Error getting EE pose from ControlOrchestrator: {e}")
         else:
-            logger.warning("ControlOrchestrator RPC not available, cannot publish base_link -> ee_link transform")
+            logger.warning(
+                "ControlOrchestrator RPC not available, cannot publish base_link -> ee_link transform"
+            )
         return aruco_transform
 
     def _draw_markers(
