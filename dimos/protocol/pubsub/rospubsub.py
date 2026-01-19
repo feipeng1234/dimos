@@ -14,9 +14,8 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
-import importlib
 import threading
-from typing import Any, Protocol, TypeAlias, TypeVar, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 try:
     import rclpy
@@ -39,6 +38,11 @@ except ImportError:
 import uuid
 
 from dimos.msgs import DimosMsg
+from dimos.protocol.pubsub.rospubsub_conversion import (
+    derive_ros_type,
+    dimos_to_ros,
+    ros_to_dimos,
+)
 from dimos.protocol.pubsub.spec import PubSub
 
 
@@ -241,50 +245,6 @@ class RawROS(PubSub[RawROSTopic, Any]):
             return unsubscribe
 
 
-def _derive_ros_type(dimos_type: type[DimosMsg]) -> type:
-    """Derive the ROS message type from a dimos message type.
-
-    Args:
-        dimos_type: A dimos message type (e.g., dimos.msgs.geometry_msgs.Vector3)
-
-    Returns:
-        The corresponding ROS message type (e.g., geometry_msgs.msg.Vector3)
-
-    Example:
-        msg_name = "geometry_msgs.Vector3" -> geometry_msgs.msg.Vector3
-    """
-    msg_name = dimos_type.msg_name  # e.g., "geometry_msgs.Vector3"
-    parts = msg_name.split(".")
-    if len(parts) != 2:
-        raise ValueError(f"Invalid msg_name format: {msg_name}, expected 'package.MessageName'")
-
-    package, message_name = parts
-    ros_module = importlib.import_module(f"{package}.msg")
-    return getattr(ros_module, message_name)
-
-
-def _dimos_to_ros(msg: DimosMsg, ros_type: type) -> ROSMessage:
-    """Convert a dimos message to a ROS message by copying fields."""
-    ros_msg = ros_type()
-    # Get fields from ROS message type
-    fields = ros_msg.get_fields_and_field_types()
-    for field_name in fields:
-        if hasattr(msg, field_name):
-            setattr(ros_msg, field_name, getattr(msg, field_name))
-    return ros_msg
-
-
-def _ros_to_dimos(msg: ROSMessage, dimos_type: type[DimosMsg]) -> DimosMsg:
-    """Convert a ROS message to a dimos message by copying fields."""
-    # Get fields from ROS message
-    fields = msg.get_fields_and_field_types()
-    kwargs = {}
-    for field_name in fields:
-        if hasattr(msg, field_name):
-            kwargs[field_name] = getattr(msg, field_name)
-    return dimos_type(**kwargs)
-
-
 class DimosROS(RawROS):
     """ROS PubSub with automatic dimos.msgs ↔ ROS message conversion.
 
@@ -294,7 +254,7 @@ class DimosROS(RawROS):
 
     def _to_raw_topic(self, topic: ROSTopic) -> RawROSTopic:
         """Convert a ROSTopic to a RawROSTopic by deriving the ROS type."""
-        ros_type = _derive_ros_type(topic.msg_type)
+        ros_type = derive_ros_type(topic.msg_type)
         return RawROSTopic(topic=topic.topic, ros_type=ros_type, qos=topic.qos)
 
     def publish(self, topic: ROSTopic, message: DimosMsg) -> None:  # type: ignore[override]
@@ -305,7 +265,7 @@ class DimosROS(RawROS):
             message: Dimos message to publish
         """
         raw_topic = self._to_raw_topic(topic)
-        ros_message = _dimos_to_ros(message, raw_topic.ros_type)
+        ros_message = dimos_to_ros(message, raw_topic.ros_type)
         super().publish(raw_topic, ros_message)
 
     def subscribe(
@@ -323,7 +283,7 @@ class DimosROS(RawROS):
         raw_topic = self._to_raw_topic(topic)
 
         def wrapped_callback(ros_msg: Any, _raw_topic: RawROSTopic) -> None:
-            dimos_msg = _ros_to_dimos(ros_msg, topic.msg_type)
+            dimos_msg = ros_to_dimos(ros_msg, topic.msg_type)
             callback(dimos_msg, topic)
 
         return super().subscribe(raw_topic, wrapped_callback)
