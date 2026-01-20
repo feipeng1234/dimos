@@ -26,7 +26,7 @@ xarm7_trajectory_sim = simulation(
     engine="mujoco",
     robot="xarm7",
     config_path=None,
-    headless=True,
+    headless=False,
 ).transports(
     {
         ("joint_state", JointState): LCMTransport("/xarm/joint_states", JointState),

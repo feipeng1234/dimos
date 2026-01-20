@@ -24,7 +24,7 @@ from dimos.simulation.engines.mujoco_engine import MujocoEngine
 from dimos.simulation.registry import registry
 
 
-def _xarm_limits(dof: int) -> JointLimits:
+def _xarm_limits(dof: int) -> JointLimits:  # these are useless
     if dof == 7:
         lower_deg = [-360, -118, -360, -233, -360, -97, -360]
         upper_deg = [360, 118, 360, 11, 360, 180, 360]
