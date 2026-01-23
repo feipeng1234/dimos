@@ -14,12 +14,17 @@
 
 """Simulation manipulator utilities."""
 
-from dimos.simulation.manipulators.sim_manip_interface import SimManipInterface
-from dimos.simulation.manipulators.sim_module import (
-    SimulationModule,
-    SimulationModuleConfig,
-    simulation,
-)
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from dimos.simulation.manipulators.sim_manip_interface import SimManipInterface
+    from dimos.simulation.manipulators.sim_module import (
+        SimulationModule,
+        SimulationModuleConfig,
+        simulation,
+    )
 
 __all__ = [
     "SimManipInterface",
@@ -27,3 +32,23 @@ __all__ = [
     "SimulationModuleConfig",
     "simulation",
 ]
+
+
+def __getattr__(name: str):  # type: ignore[no-untyped-def]
+    if name == "SimManipInterface":
+        from dimos.simulation.manipulators.sim_manip_interface import SimManipInterface
+
+        return SimManipInterface
+    if name in {"SimulationModule", "SimulationModuleConfig", "simulation"}:
+        from dimos.simulation.manipulators.sim_module import (
+            SimulationModule,
+            SimulationModuleConfig,
+            simulation,
+        )
+
+        return {
+            "SimulationModule": SimulationModule,
+            "SimulationModuleConfig": SimulationModuleConfig,
+            "simulation": simulation,
+        }[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
