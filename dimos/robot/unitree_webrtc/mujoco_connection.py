@@ -88,6 +88,10 @@ class MujocoConnection:
         self._policy_thread: threading.Thread | None = None
         self._policy_stop_event: threading.Event | None = None
 
+        # Latched safety state (so UI clicks before the runner is ready aren't dropped).
+        self._desired_policy_enabled: bool = False
+        self._desired_policy_estop: bool = False
+
     def start(self) -> None:
         self.shm_data = ShmWriter()
 
@@ -128,7 +132,7 @@ class MujocoConnection:
 
     def _start_sdk2_policy_runner(self) -> None:
         """Start the SDK2 policy runner if configured."""
-        if self.global_config.mujoco_control_mode != "sdk2":
+        if self.global_config.mujoco_control_mode not in ("sdk2", "mirror"):
             return
 
         profile = self.global_config.mujoco_profile
@@ -184,6 +188,19 @@ class MujocoConnection:
 
                 # Run policy loop with stop check
                 logger.info("SDK2 policy runner started")
+
+                # Apply any latched safety state immediately.
+                try:
+                    self._policy_runner.set_estop(self._desired_policy_estop)
+                    self._policy_runner.set_enabled(self._desired_policy_enabled)
+                    logger.info(
+                        "Applied latched policy safety state",
+                        enabled=self._desired_policy_enabled,
+                        estop=self._desired_policy_estop,
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed applying latched safety state: {e}")
+
                 while not self._policy_stop_event.is_set():
                     step_start = time.perf_counter()
                     self._policy_runner.step()
@@ -410,11 +427,16 @@ class MujocoConnection:
 
     def set_policy_enabled(self, enabled: bool) -> None:
         """Enable/disable the SDK2 policy runner (no-op when not running in SDK2 mode)."""
+        self._desired_policy_enabled = bool(enabled)
         if self._policy_runner is not None and hasattr(self._policy_runner, "set_enabled"):
             self._policy_runner.set_enabled(bool(enabled))
 
     def set_policy_estop(self, estop: bool) -> None:
         """Latch/unlatch E-stop on the SDK2 policy runner (no-op when not running in SDK2 mode)."""
+        self._desired_policy_estop = bool(estop)
+        if self._desired_policy_estop:
+            # Match runner behavior: estop forces disabled.
+            self._desired_policy_enabled = False
         if self._policy_runner is not None and hasattr(self._policy_runner, "set_estop"):
             self._policy_runner.set_estop(bool(estop))
 

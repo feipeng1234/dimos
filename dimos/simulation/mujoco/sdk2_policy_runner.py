@@ -163,6 +163,11 @@ class SDK2PolicyRunner:
         # Thread lock for safe access to sensor data (callbacks run in background threads)
         self._data_lock = threading.Lock()
 
+        # For humanoid (unitree_hg) LowCmd fields: mode_machine/mode_pr must be set consistently.
+        # We mirror mode_machine from LowState and default to PR mode (0) unless overridden.
+        self._mode_machine: int = 0
+        self._mode_pr: int = 0  # Mode.PR from Unitree examples
+
         # Initialize SDK2
         ChannelFactoryInitialize(domain_id, interface)
 
@@ -254,6 +259,13 @@ class SDK2PolicyRunner:
             for i in range(self.num_joints):
                 self.joint_pos[i] = msg.motor_state[i].q
                 self.joint_vel[i] = msg.motor_state[i].dq
+
+            # Humanoid (hg) state carries the current machine mode; copy it so LowCmd is accepted.
+            if hasattr(msg, "mode_machine"):
+                try:
+                    self._mode_machine = int(msg.mode_machine)
+                except Exception:
+                    pass
 
             # IMU data
             self.imu_quat[0] = msg.imu_state.quaternion[0]  # w
@@ -385,6 +397,7 @@ class SDK2PolicyRunner:
     def set_enabled(self, enabled: bool) -> None:
         with self._data_lock:
             self._enabled = bool(enabled)
+        print(f"[SDK2PolicyRunner] enabled={self._enabled}")
 
     def set_estop(self, estop: bool) -> None:
         with self._data_lock:
@@ -392,6 +405,7 @@ class SDK2PolicyRunner:
             if self._estop:
                 # When E-stop is asserted, force policy disabled.
                 self._enabled = False
+        print(f"[SDK2PolicyRunner] estop={self._estop} enabled={self._enabled}")
 
     def step(self) -> None:
         """Run one policy step."""
@@ -401,6 +415,8 @@ class SDK2PolicyRunner:
         with self._data_lock:
             enabled = bool(self._enabled)
             estop = bool(self._estop)
+            mode_machine = int(self._mode_machine)
+            mode_pr = int(self._mode_pr)
             # Snapshot current motor-order joint state for safe/hold commands.
             joint_pos_motor_order = self.joint_pos.copy()
             joint_vel_motor_order = self.joint_vel.copy()
@@ -420,14 +436,14 @@ class SDK2PolicyRunner:
         # If E-stop: publish "limp" command (kp=kd=tau=0).
         if estop:
             cmd = self._create_lowcmd()
-            if hasattr(cmd, "head"):
-                cmd.head[0] = 0xFE
-                cmd.head[1] = 0xEF
-            if hasattr(cmd, "level_flag"):
-                cmd.level_flag = 0xFF
+            if hasattr(cmd, "mode_machine"):
+                cmd.mode_machine = mode_machine
+            if hasattr(cmd, "mode_pr"):
+                cmd.mode_pr = mode_pr
 
             for motor_idx in range(self.num_joints):
-                cmd.motor_cmd[motor_idx].mode = 0x01
+                # HG: mode is enable(1)/disable(0). GO: mode is motor control mode.
+                cmd.motor_cmd[motor_idx].mode = 0
                 cmd.motor_cmd[motor_idx].q = float(joint_pos_motor_order[motor_idx])
                 cmd.motor_cmd[motor_idx].dq = 0.0
                 cmd.motor_cmd[motor_idx].kp = 0.0
@@ -440,17 +456,16 @@ class SDK2PolicyRunner:
         # If not enabled: publish "hold current pose" command with modest gains.
         if not enabled:
             cmd = self._create_lowcmd()
-            if hasattr(cmd, "head"):
-                cmd.head[0] = 0xFE
-                cmd.head[1] = 0xEF
-            if hasattr(cmd, "level_flag"):
-                cmd.level_flag = 0xFF
+            if hasattr(cmd, "mode_machine"):
+                cmd.mode_machine = mode_machine
+            if hasattr(cmd, "mode_pr"):
+                cmd.mode_pr = mode_pr
 
             for motor_idx in range(self.num_joints):
                 policy_idx = self._motor_to_policy[motor_idx]
                 kp = float(self.metadata.joint_stiffness[policy_idx]) * float(self._hold_kp_scale)
                 kd = float(self.metadata.joint_damping[policy_idx]) * float(self._hold_kp_scale)
-                cmd.motor_cmd[motor_idx].mode = 0x01
+                cmd.motor_cmd[motor_idx].mode = 1
                 cmd.motor_cmd[motor_idx].q = float(joint_pos_motor_order[motor_idx])
                 cmd.motor_cmd[motor_idx].dq = 0.0
                 cmd.motor_cmd[motor_idx].kp = kp
@@ -475,11 +490,10 @@ class SDK2PolicyRunner:
         cmd = self._create_lowcmd()
 
         # Set header (required for real robot)
-        if hasattr(cmd, "head"):
-            cmd.head[0] = 0xFE
-            cmd.head[1] = 0xEF
-        if hasattr(cmd, "level_flag"):
-            cmd.level_flag = 0xFF
+        if hasattr(cmd, "mode_machine"):
+            cmd.mode_machine = mode_machine
+        if hasattr(cmd, "mode_pr"):
+            cmd.mode_pr = mode_pr
 
         # Apply actions using joint name mapping
         # motor_cmd[motor_idx] gets the action from policy index _motor_to_policy[motor_idx]
@@ -496,7 +510,7 @@ class SDK2PolicyRunner:
             # Compute target position
             target_pos = default_pos + action * action_scale
 
-            cmd.motor_cmd[motor_idx].mode = 0x01  # PMSM mode
+            cmd.motor_cmd[motor_idx].mode = 1  # HG: enable, GO: typically PMSM
             cmd.motor_cmd[motor_idx].q = float(target_pos)
             cmd.motor_cmd[motor_idx].kp = float(kp)
             cmd.motor_cmd[motor_idx].dq = 0.0

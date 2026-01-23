@@ -124,6 +124,7 @@ class G1SimConnection(Module):
         if self.connection is None:
             return
         try:
+            logger.info("Policy enable received", enabled=bool(msg.data))
             self.connection.set_policy_enabled(bool(msg.data))
         except Exception as e:
             logger.warning(f"Failed to set policy enabled: {e}")
@@ -132,6 +133,7 @@ class G1SimConnection(Module):
         if self.connection is None:
             return
         try:
+            logger.info("Policy estop received", estop=bool(msg.data))
             self.connection.set_policy_estop(bool(msg.data))
         except Exception as e:
             logger.warning(f"Failed to set policy estop: {e}")

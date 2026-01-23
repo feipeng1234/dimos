@@ -21,7 +21,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from dimos.mapping.occupancy.path_map import NavigationStrategy
 
 ViewerBackend: TypeAlias = Literal["rerun-web", "rerun-native", "foxglove"]
-MujocoControlMode: TypeAlias = Literal["onnx", "sdk2"]
+MujocoControlMode: TypeAlias = Literal["onnx", "sdk2", "mirror"]
 
 
 def _get_all_numbers(s: str) -> list[float]:

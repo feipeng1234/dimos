@@ -498,4 +498,155 @@ class SDK2BridgeController:
             self._sport_state.velocity[2] = self.mj_data.sensordata[idx + 2]
 
 
-__all__ = ["SDK2BridgeConfig", "SDK2BridgeController"]
+G1_MOTOR_JOINT_NAMES: list[str] = [
+    # Left leg (0-5)
+    "left_hip_pitch_joint",
+    "left_hip_roll_joint",
+    "left_hip_yaw_joint",
+    "left_knee_joint",
+    "left_ankle_pitch_joint",
+    "left_ankle_roll_joint",
+    # Right leg (6-11)
+    "right_hip_pitch_joint",
+    "right_hip_roll_joint",
+    "right_hip_yaw_joint",
+    "right_knee_joint",
+    "right_ankle_pitch_joint",
+    "right_ankle_roll_joint",
+    # Waist (12-14)
+    "waist_yaw_joint",
+    "waist_roll_joint",
+    "waist_pitch_joint",
+    # Left arm (15-21)
+    "left_shoulder_pitch_joint",
+    "left_shoulder_roll_joint",
+    "left_shoulder_yaw_joint",
+    "left_elbow_joint",
+    "left_wrist_roll_joint",
+    "left_wrist_pitch_joint",
+    "left_wrist_yaw_joint",
+    # Right arm (22-28)
+    "right_shoulder_pitch_joint",
+    "right_shoulder_roll_joint",
+    "right_shoulder_yaw_joint",
+    "right_elbow_joint",
+    "right_wrist_roll_joint",
+    "right_wrist_pitch_joint",
+    "right_wrist_yaw_joint",
+]
+
+
+class SDK2MirrorController:
+    """Subscriber-only DDS controller for 'mirror' mode.
+
+    Subscribes to the robot's SDK2 topics and writes the received state into MuJoCo `qpos/qvel`
+    for visualization. It does NOT publish any SDK2 topics (avoids conflicting with the real robot).
+    """
+
+    def __init__(
+        self,
+        mj_model: mujoco.MjModel,
+        mj_data: mujoco.MjData,
+        config: SDK2BridgeConfig,
+    ) -> None:
+        self.mj_model = mj_model
+        self.mj_data = mj_data
+        self.config = config
+
+        (
+            _LowCmd_,
+            self.LowState_,
+            self.SportModeState_,
+            _LowState_default,
+            _SportModeState_default,
+        ) = _get_idl_types(config.robot_type)
+
+        # DDS
+        ChannelFactoryInitialize(config.domain_id, config.interface)
+        self._state_sub = ChannelSubscriber(TOPIC_LOWSTATE, self.LowState_)
+        self._state_sub.Init(self._lowstate_callback, 10)
+        self._sport_sub = ChannelSubscriber(TOPIC_SPORTMODESTATE, self.SportModeState_)
+        self._sport_sub.Init(self._sportstate_callback, 10)
+
+        # Buffers (motor order)
+        import numpy as np
+
+        if config.robot_type != "g1":
+            raise NotImplementedError("SDK2MirrorController currently supports robot_type='g1' only")
+
+        self._num_motors = len(G1_MOTOR_JOINT_NAMES)
+        self._joint_pos = np.zeros(self._num_motors, dtype=np.float32)
+        self._joint_vel = np.zeros(self._num_motors, dtype=np.float32)
+        self._imu_quat = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)  # w,x,y,z
+        self._base_ang_vel = np.zeros(3, dtype=np.float32)
+        self._state_received = False
+
+        self._data_lock = threading.Lock()
+
+        # Map motor_idx -> qposadr/qveladr (by joint name)
+        self._motor_qposadr: list[int] = []
+        self._motor_qveladr: list[int] = []
+        for name in G1_MOTOR_JOINT_NAMES:
+            jid = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_JOINT, name)
+            if jid < 0:
+                self._motor_qposadr.append(-1)
+                self._motor_qveladr.append(-1)
+                logger.warning("SDK2 mirror: joint not found in model", joint=name)
+                continue
+            self._motor_qposadr.append(int(self.mj_model.jnt_qposadr[jid]))
+            self._motor_qveladr.append(int(self.mj_model.jnt_dofadr[jid]))
+
+        logger.info(
+            "SDK2 mirror initialized",
+            domain_id=config.domain_id,
+            interface=config.interface,
+            robot_type=config.robot_type,
+        )
+
+    def _lowstate_callback(self, msg: Any) -> None:
+        with self._data_lock:
+            for i in range(self._num_motors):
+                self._joint_pos[i] = msg.motor_state[i].q
+                self._joint_vel[i] = msg.motor_state[i].dq
+
+            self._imu_quat[0] = msg.imu_state.quaternion[0]
+            self._imu_quat[1] = msg.imu_state.quaternion[1]
+            self._imu_quat[2] = msg.imu_state.quaternion[2]
+            self._imu_quat[3] = msg.imu_state.quaternion[3]
+
+            self._base_ang_vel[0] = msg.imu_state.gyroscope[0]
+            self._base_ang_vel[1] = msg.imu_state.gyroscope[1]
+            self._base_ang_vel[2] = msg.imu_state.gyroscope[2]
+
+            self._state_received = True
+
+    def _sportstate_callback(self, msg: Any) -> None:
+        # Currently unused for visualization-only mirror mode.
+        _ = msg
+
+    def apply_to_mujoco(self) -> bool:
+        """Apply latest robot state to MuJoCo qpos/qvel. Returns True if updated."""
+        with self._data_lock:
+            if not self._state_received:
+                return False
+            joint_pos = self._joint_pos.copy()
+            joint_vel = self._joint_vel.copy()
+            imu_quat = self._imu_quat.copy()
+            base_ang_vel = self._base_ang_vel.copy()
+
+        # Update freejoint orientation from IMU (keep position fixed for now).
+        self.mj_data.qpos[3:7] = imu_quat
+        self.mj_data.qvel[3:6] = base_ang_vel
+
+        for motor_idx in range(self._num_motors):
+            qadr = self._motor_qposadr[motor_idx]
+            vadr = self._motor_qveladr[motor_idx]
+            if qadr >= 0:
+                self.mj_data.qpos[qadr] = float(joint_pos[motor_idx])
+            if vadr >= 0:
+                self.mj_data.qvel[vadr] = float(joint_vel[motor_idx])
+
+        return True
+
+
+__all__ = ["SDK2BridgeConfig", "SDK2BridgeController", "SDK2MirrorController"]

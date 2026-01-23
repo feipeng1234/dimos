@@ -140,10 +140,13 @@ def _run_simulation(config: GlobalConfig, shm: ShmReader) -> None:
     profile = config.mujoco_profile
     scene_xml = load_scene_xml(config)
 
-    # SDK2 bridge for direct motor control via DDS
+    # SDK2 controllers:
+    # - sdk2: bridge subscribes lowcmd and publishes lowstate (simulated robot)
+    # - mirror: subscribes real robot lowstate and mirrors it into MuJoCo for rendering (no DDS publishing)
     sdk2_bridge = None
+    sdk2_mirror = None
 
-    if config.mujoco_control_mode == "sdk2":
+    if config.mujoco_control_mode in ("sdk2", "mirror"):
         # SDK2 mode: load model without ONNX policy, use DDS bridge for control
         # SDK2BridgeController is created later, after mj_forward updates sensors
         model, data = load_model_sdk2(
@@ -185,7 +188,7 @@ def _run_simulation(config: GlobalConfig, shm: ShmReader) -> None:
 
     mujoco.mj_forward(model, data)
 
-    # Create SDK2 bridge AFTER mj_forward so sensors are updated from keyframe
+    # Create SDK2 controller AFTER mj_forward so sensors are updated from keyframe
     if config.mujoco_control_mode == "sdk2":
         # Debug: verify qpos and sensordata after mj_forward
         logger.info(
@@ -208,6 +211,23 @@ def _run_simulation(config: GlobalConfig, shm: ShmReader) -> None:
         )
         logger.info(
             "SDK2 bridge mode enabled",
+            domain_id=config.sdk2_domain_id,
+            interface=config.sdk2_interface,
+        )
+    elif config.mujoco_control_mode == "mirror":
+        from dimos.simulation.mujoco.sdk2_bridge import SDK2BridgeConfig, SDK2MirrorController
+
+        sdk2_mirror = SDK2MirrorController(
+            model,
+            data,
+            SDK2BridgeConfig(
+                domain_id=config.sdk2_domain_id,
+                interface=config.sdk2_interface,
+                robot_type=robot_name.replace("unitree_", ""),  # "g1" -> "g1"
+            ),
+        )
+        logger.info(
+            "SDK2 mirror mode enabled (subscriber-only)",
             domain_id=config.sdk2_domain_id,
             interface=config.sdk2_interface,
         )
@@ -258,8 +278,10 @@ def _run_simulation(config: GlobalConfig, shm: ShmReader) -> None:
             steps_per_frame=config.mujoco_steps_per_frame,
         )
 
-    # Elastic band / gantry assist (sim-only). Attach at the torso link to approximate a real harness.
+    # Elastic band / gantry assist (sim-only). Only meaningful when physics is stepping.
     elastic_band = ElasticBand()
+    if config.mujoco_control_mode == "mirror":
+        elastic_band.enable = False
     try:
         gantry_body_id = model.body("torso_link").id
     except Exception:
@@ -327,22 +349,28 @@ def _run_simulation(config: GlobalConfig, shm: ShmReader) -> None:
             step_start = time.time()
             time.perf_counter()
 
-            # Step simulation
+            # Step / update simulation
             t0 = time.perf_counter()
-            for _ in range(config.mujoco_steps_per_frame):
-                # Apply gantry force before stepping.
-                if gantry_body_id >= 0:
-                    if elastic_band.enable:
-                        # Use free-joint linear velocity (qvel[0:3]) as a damping signal.
-                        force = elastic_band.advance(data.xpos[gantry_body_id], data.qvel[0:3])
-                        data.xfrc_applied[gantry_body_id, 0:3] = force
-                    else:
-                        data.xfrc_applied[gantry_body_id, 0:3] = 0.0
+            if sdk2_mirror is not None:
+                # Mirror mode: apply incoming robot state and forward kinematics for rendering.
+                sdk2_mirror.apply_to_mujoco()
+                mujoco.mj_forward(model, data)
+            else:
+                # Normal sim stepping
+                for _ in range(config.mujoco_steps_per_frame):
+                    # Apply gantry force before stepping.
+                    if gantry_body_id >= 0:
+                        if elastic_band.enable:
+                            # Use free-joint linear velocity (qvel[0:3]) as a damping signal.
+                            force = elastic_band.advance(data.xpos[gantry_body_id], data.qvel[0:3])
+                            data.xfrc_applied[gantry_body_id, 0:3] = force
+                        else:
+                            data.xfrc_applied[gantry_body_id, 0:3] = 0.0
 
-                mujoco.mj_step(model, data)
-                # In SDK2 mode, publish state after each physics step
-                if sdk2_bridge is not None:
-                    sdk2_bridge.publish_state()
+                    mujoco.mj_step(model, data)
+                    # In SDK2 mode, publish state after each physics step
+                    if sdk2_bridge is not None:
+                        sdk2_bridge.publish_state()
             acc_step_s += time.perf_counter() - t0
 
             # Detect MuJoCo viewer reset (e.g. backspace). Reset typically makes time jump backwards.

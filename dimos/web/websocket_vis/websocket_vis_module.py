@@ -379,10 +379,20 @@ class WebsocketVisModule(Module):
             enabled = bool(data.get("enabled", False))
             estop = bool(data.get("estop", False))
 
+            logger.info("Safety command received", sid=sid, enabled=enabled, estop=estop)
+
             if self.policy_enable and self.policy_enable.transport:
                 self.policy_enable.publish(Bool(data=enabled))
             if self.policy_estop and self.policy_estop.transport:
                 self.policy_estop.publish(Bool(data=estop))
+
+            # ACK back to the UI so we know the backend received the click.
+            if self.sio is not None:
+                await self.sio.emit(
+                    "safety_state",
+                    {"enabled": enabled, "estop": estop, "ts": time.time()},
+                    room=sid,
+                )
 
     def _run_uvicorn_server(self) -> None:
         config = uvicorn.Config(
