@@ -16,33 +16,9 @@
 
 from __future__ import annotations
 
-import math
-
-from dimos.hardware.manipulators.spec import JointLimits
 from dimos.simulation.engines.base import RobotSpec
 from dimos.simulation.engines.mujoco_engine import MujocoEngine
 from dimos.simulation.registry import registry
-
-
-def _xarm_limits(dof: int) -> JointLimits:
-    if dof == 7:
-        lower_deg = [-360, -118, -360, -233, -360, -97, -360]
-        upper_deg = [360, 118, 360, 11, 360, 180, 360]
-    elif dof == 6:
-        lower_deg = [-360, -118, -225, -11, -360, -97]
-        upper_deg = [360, 118, 11, 225, 360, 180]
-    else:
-        lower_deg = [-360, -118, -225, -97, -360]
-        upper_deg = [360, 118, 11, 180, 360]
-
-    lower_rad = [math.radians(d) for d in lower_deg[:dof]]
-    upper_rad = [math.radians(d) for d in upper_deg[:dof]]
-    max_vel_rad = math.radians(180.0)
-    return JointLimits(
-        position_lower=lower_rad,
-        position_upper=upper_rad,
-        velocity_max=[max_vel_rad] * dof,
-    )
 
 
 def register() -> None:
@@ -57,7 +33,6 @@ def register() -> None:
             dof=7,
             vendor="UFACTORY",
             model="xArm7",
-            limits=_xarm_limits(7),
         ),
     )
     registry.register_robot(
@@ -69,7 +44,6 @@ def register() -> None:
             dof=6,
             vendor="UFACTORY",
             model="xArm6",
-            limits=_xarm_limits(6),
         ),
     )
     registry.register_robot(
@@ -81,7 +55,6 @@ def register() -> None:
             dof=5,
             vendor="UFACTORY",
             model="xArm5",
-            limits=_xarm_limits(5),
         ),
     )
 
