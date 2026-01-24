@@ -24,7 +24,7 @@ import mujoco
 import mujoco.viewer as viewer  # type: ignore[import-untyped]
 
 from dimos.simulation.engines.base import SimulationEngine
-from dimos.simulation.manipulators.xml_parser import JointMapping, build_joint_mappings
+from dimos.simulation.utils.xml_parser import JointMapping, build_joint_mappings
 from dimos.utils.logging_config import setup_logger
 
 logger = setup_logger()
