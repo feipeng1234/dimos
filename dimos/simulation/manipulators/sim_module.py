@@ -179,6 +179,7 @@ class SimulationModule(Module[SimulationModuleConfig]):
 
     def _control_loop(self) -> None:
         period = 1.0 / max(self._control_rate, self.MIN_CONTROL_RATE)
+        next_tick = time.monotonic()  # monotonic time used to avoid time drift
         while not self._stop_event.is_set():
             with self._command_lock:
                 positions = (
@@ -193,46 +194,59 @@ class SimulationModule(Module[SimulationModuleConfig]):
                     self._backend.write_joint_positions(positions)
                 elif velocities is not None:
                     self._backend.write_joint_velocities(velocities)
-            time.sleep(period)
+            next_tick += period
+            sleep_for = next_tick - time.monotonic()
+            if sleep_for > 0:
+                if self._stop_event.wait(sleep_for):
+                    break
+            else:
+                next_tick = time.monotonic()
 
     def _monitor_loop(self) -> None:
         period = 1.0 / max(self._monitor_rate, self.MIN_CONTROL_RATE)
+        next_tick = time.monotonic()  # monotonic time used to avoid time drift
         while not self._stop_event.is_set():
             if not self._backend:
-                time.sleep(period)
-                continue
-            dof = self._backend.get_dof()
-            names = self._resolve_joint_names(dof)
-            positions = self._backend.read_joint_positions()
-            velocities = self._backend.read_joint_velocities()
-            efforts = self._backend.read_joint_efforts()
-            state = self._backend.read_state()
-            error_code, _ = self._backend.read_error()
+                pass
+            else:
+                dof = self._backend.get_dof()
+                names = self._resolve_joint_names(dof)
+                positions = self._backend.read_joint_positions()
+                velocities = self._backend.read_joint_velocities()
+                efforts = self._backend.read_joint_efforts()
+                state = self._backend.read_state()
+                error_code, _ = self._backend.read_error()
 
-            self.joint_state.publish(
-                JointState(
-                    frame_id=self.frame_id,
-                    name=names,
-                    position=positions,
-                    velocity=velocities,
-                    effort=efforts,
+                self.joint_state.publish(
+                    JointState(
+                        frame_id=self.frame_id,
+                        name=names,
+                        position=positions,
+                        velocity=velocities,
+                        effort=efforts,
+                    )
                 )
-            )
-            self.robot_state.publish(
-                RobotState(
-                    state=state.get("state", 0),
-                    mode=state.get("mode", 0),
-                    error_code=error_code,
-                    warn_code=0,
-                    cmdnum=0,
-                    mt_brake=0,
-                    mt_able=1 if self._backend.read_enabled() else 0,
-                    tcp_pose=[],
-                    tcp_offset=[],
-                    joints=[float(p) for p in positions],
+                self.robot_state.publish(
+                    RobotState(
+                        state=state.get("state", 0),
+                        mode=state.get("mode", 0),
+                        error_code=error_code,
+                        warn_code=0,
+                        cmdnum=0,
+                        mt_brake=0,
+                        mt_able=1 if self._backend.read_enabled() else 0,
+                        tcp_pose=[],
+                        tcp_offset=[],
+                        joints=[float(p) for p in positions],
+                    )
                 )
-            )
-            time.sleep(period)
+            next_tick += period
+            sleep_for = next_tick - time.monotonic()
+            if sleep_for > 0:
+                if self._stop_event.wait(sleep_for):
+                    break
+            else:
+                next_tick = time.monotonic()
 
     def _resolve_joint_names(self, dof: int) -> list[str]:
         if self._backend:
