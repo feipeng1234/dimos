@@ -128,29 +128,38 @@ class MujocoEngine(SimulationEngine):
                 if mapping.actuator_id is not None:
                     self._joint_efforts[i] = float(self._data.actuator_force[mapping.actuator_id])
 
-    def connect(self) -> None:
-        logger.info(f"{self.__class__.__name__}: connect()")
-        with self._lock:
-            self._connected = True
-            self._stop_event.clear()
+    def connect(self) -> bool:
+        try:
+            logger.info(f"{self.__class__.__name__}: connect()")
+            with self._lock:
+                self._connected = True
+                self._stop_event.clear()
 
-        if self._sim_thread is None or not self._sim_thread.is_alive():
-            self._sim_thread = threading.Thread(
-                target=self._sim_loop,
-                name=f"{self.__class__.__name__}Sim",
-                daemon=True,
-            )
-            self._sim_thread.start()
+            if self._sim_thread is None or not self._sim_thread.is_alive():
+                self._sim_thread = threading.Thread(
+                    target=self._sim_loop,
+                    name=f"{self.__class__.__name__}Sim",
+                    daemon=True,
+                )
+                self._sim_thread.start()
+            return True
+        except Exception as e:
+            logger.error(f"{self.__class__.__name__}: connect() failed: {e}")
+            return False
 
-    def disconnect(self) -> None:
-        logger.info(f"{self.__class__.__name__}: disconnect()")
-        with self._lock:
-            self._connected = False
-
-        self._stop_event.set()
-        if self._sim_thread and self._sim_thread.is_alive():
-            self._sim_thread.join(timeout=2.0)
-        self._sim_thread = None
+    def disconnect(self) -> bool:
+        try:
+            logger.info(f"{self.__class__.__name__}: disconnect()")
+            with self._lock:
+                self._connected = False
+            self._stop_event.set()
+            if self._sim_thread and self._sim_thread.is_alive():
+                self._sim_thread.join(timeout=2.0)
+            self._sim_thread = None
+            return True
+        except Exception as e:
+            logger.error(f"{self.__class__.__name__}: disconnect() failed: {e}")
+            return False
 
     def _sim_loop(self) -> None:
         logger.info(f"{self.__class__.__name__}: sim loop started")

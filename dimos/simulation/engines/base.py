@@ -35,11 +35,11 @@ class SimulationEngine(ABC):
         return self._headless
 
     @abstractmethod
-    def connect(self) -> None:
+    def connect(self) -> bool:
         """Connect to simulation and start the engine."""
 
     @abstractmethod
-    def disconnect(self) -> None:
+    def disconnect(self) -> bool:
         """Disconnect from simulation and stop the engine."""
 
     @property

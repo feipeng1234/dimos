@@ -44,7 +44,9 @@ class SimManipInterface:
         """Connect to the simulation engine."""
         try:
             self.logger.info("Connecting to simulation engine...")
-            self._engine.connect()
+            if not self._engine.connect():
+                self.logger.error("Failed to connect to simulation engine")
+                return False
             if self._engine.connected:
                 self._connected = True
                 self._servos_enabled = True
@@ -61,10 +63,10 @@ class SimManipInterface:
             self.logger.error(f"Sim connection failed: {exc}")
             return False
 
-    def disconnect(self) -> None:
+    def disconnect(self) -> bool:
         """Disconnect from simulation."""
         try:
-            self._engine.disconnect()
+            return self._engine.disconnect()
         finally:
             self._connected = False
 
