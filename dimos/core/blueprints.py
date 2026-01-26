@@ -180,14 +180,14 @@ class Blueprint:
                 f"{modules_str}. Please use a concrete class name instead."
             )
 
-    def _get_transport_for(self, name: str, type: type) -> PubSubTransport:
-        transport = self.transport_map.get((name, type), None)
+    def _get_transport_for(self, name: str, stream_type: type) -> PubSubTransport:
+        transport = self.transport_map.get((name, stream_type), None)
         if transport:
             return transport
 
-        use_pickled = getattr(type, "lcm_encode", None) is None
+        use_pickled = getattr(stream_type, "lcm_encode", None) is None
         topic = f"/{name}" if self._is_name_unique(name) else f"/{short_id()}"
-        transport = pLCMTransport(topic) if use_pickled else LCMTransport(topic, type)
+        transport = pLCMTransport(topic) if use_pickled else LCMTransport(topic, stream_type)
 
         return transport
 
@@ -277,9 +277,9 @@ class Blueprint:
                 connections[remapped_name, conn.type].append((blueprint.module, conn.name))
 
         # Connect all In/Out connections by remapped name and type.
-        for remapped_name, type in connections.keys():
-            transport = self._get_transport_for(remapped_name, type)
-            for module, original_name in connections[(remapped_name, type)]:
+        for remapped_name, stream_type in connections.keys():
+            transport = self._get_transport_for(remapped_name, stream_type)
+            for module, original_name in connections[(remapped_name, stream_type)]:
                 instance: ModuleProxy = module_coordinator.get_instance(module)
                 instance.set_transport(original_name, transport)  # type: ignore[union-attr]
                 logger.info(
@@ -287,7 +287,7 @@ class Blueprint:
                     name=remapped_name,
                     original_name=original_name,
                     topic=str(getattr(transport, "topic", None)),
-                    type=f"{type.__module__}.{type.__qualname__}",
+                    type=f"{stream_type.__module__}.{stream_type.__qualname__}",
                     module=module.__name__,
                     transport=transport.__class__.__name__,
                 )
