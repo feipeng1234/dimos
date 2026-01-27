@@ -104,7 +104,7 @@ module_c = ModuleC.blueprint
 
 
 def test_get_connection_set() -> None:
-    assert _make_module_blueprint(CatModule, args=("arg1"), kwargs={"k": "v"}) == ModuleBlueprint(
+    assert _make_module_blueprint(CatModule, args=("arg1",), kwargs={"k": "v"}) == ModuleBlueprint(
         module=CatModule,
         connections=(
             ModuleConnection(name="pet_cat", type=Petting, direction="in"),
