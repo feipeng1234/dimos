@@ -24,7 +24,7 @@ class Spec(Protocol):
     pass
 
 
-def is_spec(cls: type) -> bool:
+def is_spec(cls: object) -> bool:
     """
     Example:
         class NormalProtocol(Protocol):
@@ -41,7 +41,7 @@ def is_spec(cls: type) -> bool:
 
 def spec_structural_compliance(
     obj: object,
-    spec: type[Spec],
+    spec: type[object],
 ) -> bool:
     """
     Example:
@@ -71,7 +71,7 @@ def spec_structural_compliance(
 
 def spec_annotation_compliance(
     obj: object,
-    proto: type[Spec],
+    proto: type[object],
 ) -> bool:
     """
     Example:
@@ -99,19 +99,19 @@ def spec_annotation_compliance(
     return isinstance(obj, strict_proto)
 
 
-def get_protocol_method_signatures(proto: type[Protocol]) -> dict[str, inspect.Signature]:
+def get_protocol_method_signatures(proto: type[object]) -> dict[str, inspect.Signature]:
     """
     Return a mapping of method_name -> inspect.Signature
     for all methods required by a Protocol.
     """
-    if not getattr(proto, "_is_protocol", False):
+    if not is_protocol(proto):
         raise TypeError(f"{proto} is not a Protocol")
 
     methods: dict[str, inspect.Signature] = {}
 
     # Walk MRO so inherited protocol methods are included
     for cls in reversed(proto.__mro__):
-        if cls is Protocol:
+        if cls is Protocol:  # type: ignore[comparison-overlap]
             continue
 
         for name, value in cls.__dict__.items():

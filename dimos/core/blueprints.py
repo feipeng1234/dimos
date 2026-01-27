@@ -21,7 +21,7 @@ import inspect
 import operator
 import sys
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Literal, Self, get_args, get_origin, get_type_hints
+from typing import TYPE_CHECKING, Any, Literal, get_args, get_origin, get_type_hints
 
 import rerun as rr
 import rerun.blueprint as rrb
@@ -59,11 +59,13 @@ class _BlueprintAtom:
     module: type[Module]
     connections: tuple[StreamRef, ...]
     module_refs: tuple[ModuleRef, ...]
-    args: tuple[Any]
+    args: tuple[Any, ...]
     kwargs: dict[str, Any]
 
-    @staticmethod
-    def create(module: type[Module], args: tuple[Any], kwargs: dict[str, Any]) -> Self:
+    @classmethod
+    def create(
+        cls, module: type[Module], args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> "_BlueprintAtom":
         connections: list[StreamRef] = []
         module_refs: list[ModuleRef] = []
 
@@ -94,7 +96,7 @@ class _BlueprintAtom:
                 other_module = getattr(module, name)
                 module_refs.append(ModuleRef(name=name, spec=other_module.rpc_calls))
 
-        return _BlueprintAtom(
+        return cls(
             module=module,
             connections=tuple(connections),
             module_refs=tuple(module_refs),
@@ -106,7 +108,7 @@ class _BlueprintAtom:
 @dataclass(frozen=True)
 class Blueprint:
     blueprints: tuple[_BlueprintAtom, ...]
-    transport_map: Mapping[tuple[str, type], PubSubTransport] = field(
+    transport_map: Mapping[tuple[str, type], PubSubTransport[Any]] = field(
         default_factory=lambda: MappingProxyType({})
     )
     global_config_overrides: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
@@ -115,10 +117,10 @@ class Blueprint:
     )
     requirement_checks: tuple[Callable[[], str | None], ...] = field(default_factory=tuple)
 
-    @staticmethod
-    def create(module: type[Module], *args: tuple[Any], **kwargs: dict[str, Any]) -> Self:
+    @classmethod
+    def create(cls, module: type[Module], *args: Any, **kwargs: Any) -> "Blueprint":
         blueprint = _BlueprintAtom.create(module, args, kwargs)
-        return Blueprint(blueprints=(blueprint,))
+        return cls(blueprints=(blueprint,))
 
     def transports(self, transports: dict[tuple[str, type], Any]) -> "Blueprint":
         return Blueprint(
@@ -179,7 +181,7 @@ class Blueprint:
                 f"{modules_str}. Please use a concrete class name instead."
             )
 
-    def _get_transport_for(self, name: str, stream_type: type) -> PubSubTransport:
+    def _get_transport_for(self, name: str, stream_type: type) -> PubSubTransport[Any]:
         transport = self.transport_map.get((name, stream_type), None)
         if transport:
             return transport
@@ -279,7 +281,7 @@ class Blueprint:
         for remapped_name, stream_type in connections.keys():
             transport = self._get_transport_for(remapped_name, stream_type)
             for module, original_name in connections[(remapped_name, stream_type)]:
-                instance: ModuleProxy = module_coordinator.get_instance(module)
+                instance: ModuleProxy = module_coordinator.get_instance(module)  # type: ignore[assignment]
                 instance.set_transport(original_name, transport)  # type: ignore[union-attr]
                 logger.info(
                     "Transport",
@@ -388,7 +390,7 @@ class Blueprint:
 
         for blueprint in self.blueprints:
             for method_name in blueprint.module.rpcs.keys():  # type: ignore[attr-defined]
-                module_proxy: ModuleProxy = module_coordinator.get_instance(blueprint.module)
+                module_proxy: ModuleProxy = module_coordinator.get_instance(blueprint.module)  # type: ignore[assignment]
                 method_for_rpc_client = getattr(module_proxy, method_name)
                 # Register under concrete class name (backward compatibility)
                 rpc_methods[f"{blueprint.module.__name__}_{method_name}"] = method_for_rpc_client
@@ -424,7 +426,7 @@ class Blueprint:
 
         # Fulfil method requests (so modules can call each other).
         for blueprint in self.blueprints:
-            instance = module_coordinator.get_instance(blueprint.module)
+            instance: ModuleProxy = module_coordinator.get_instance(blueprint.module)  # type: ignore[assignment]
 
             for method_name in blueprint.module.rpcs.keys():  # type: ignore[attr-defined]
                 if not method_name.startswith("set_"):
@@ -495,7 +497,7 @@ class Blueprint:
             )
             rr.send_blueprint(composed_blueprint)
 
-    def _start_rerun(self, global_config):
+    def _start_rerun(self, global_config: GlobalConfig) -> None:
         # Initialize Rerun server before deploying modules (if backend is Rerun)
         if global_config.rerun_enabled and global_config.viewer_backend.startswith("rerun"):
             try:

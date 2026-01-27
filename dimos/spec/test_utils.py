@@ -41,15 +41,18 @@ def test_is_spec_rejects_non_type() -> None:
 
 
 class MySpec(Spec, Protocol):
-    def foo(self) -> int: ...
+    def foo(self) -> int:
+        return 1
 
 
 class StructurallyCompliant:
-    def foo(self) -> str: ...
+    def foo(self) -> str:
+        return "ok"
 
 
 class FullyCompliant:
-    def foo(self) -> int: ...
+    def foo(self) -> int:
+        return 1
 
 
 class NotCompliant:

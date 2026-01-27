@@ -103,13 +103,14 @@ module_c = ModuleC.blueprint
 
 
 def test_get_connection_set() -> None:
-    assert _BlueprintAtom.create(CatModule, args=("arg1"), kwargs={"k": "v"}) == _BlueprintAtom(
+    assert _BlueprintAtom.create(CatModule, args=("arg1",), kwargs={"k": "v"}) == _BlueprintAtom(
         module=CatModule,
         connections=(
             StreamRef(name="pet_cat", type=Petting, direction="in"),
             StreamRef(name="scratches", type=Scratch, direction="out"),
         ),
-        args=("arg1"),
+        module_refs=(),
+        args=("arg1",),
         kwargs={"k": "v"},
     )
 
@@ -125,6 +126,7 @@ def test_autoconnect() -> None:
                     StreamRef(name="data1", type=Data1, direction="out"),
                     StreamRef(name="data2", type=Data2, direction="out"),
                 ),
+                module_refs=(),
                 args=(),
                 kwargs={},
             ),
@@ -135,6 +137,7 @@ def test_autoconnect() -> None:
                     StreamRef(name="data2", type=Data2, direction="in"),
                     StreamRef(name="data3", type=Data3, direction="out"),
                 ),
+                module_refs=(),
                 args=(),
                 kwargs={},
             ),

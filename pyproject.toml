@@ -41,6 +41,7 @@ dependencies = [
     "sortedcontainers==2.4.0",
     "pydantic",
     "python-dotenv",
+    "annotation-protocol>=1.4.0",
 
     # Multiprocess
     "dask[complete]==2025.5.1",
@@ -78,6 +79,7 @@ skillspy = "dimos.utils.cli.skillspy.skillspy:main"
 agentspy = "dimos.utils.cli.agentspy.agentspy:main"
 humancli = "dimos.utils.cli.human.humanclianim:main"
 dimos = "dimos.robot.cli.dimos:main"
+doclinks = "dimos.utils.docs.doclinks:main"
 
 [project.optional-dependencies]
 misc = [
@@ -85,7 +87,6 @@ misc = [
     "cerebras-cloud-sdk",
     "yapf==0.40.2",
     "typeguard",
-    "annotation-protocol>=1.4.0",
     "empy==3.3.4",
     "catkin_pkg",
     "lark",

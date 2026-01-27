@@ -147,5 +147,5 @@ if TYPE_CHECKING:
     # the class below is only ever used for type hinting
     # why? because the RPCClient instance is going to have all the methods of a Module
     # but those methods/attributes are super dynamic, so the type hints can't figure that out
-    class ModuleProxy(RPCClient, Module):
+    class ModuleProxy(RPCClient, Module):  # type: ignore[misc]
         pass

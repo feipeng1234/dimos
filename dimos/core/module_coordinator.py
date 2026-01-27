@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 T = TypeVar("T", bound="Module")
 
 
-class ModuleCoordinator(Resource):
+class ModuleCoordinator(Resource):  # type: ignore[misc]
     _client: DimosCluster | None = None
     _n: int | None = None
     _memory_limit: str = "auto"

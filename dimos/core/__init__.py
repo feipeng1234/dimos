@@ -3,7 +3,7 @@ from __future__ import annotations
 import multiprocessing as mp
 import signal
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeAlias, cast
 
 from dask.distributed import Client, LocalCluster
 from rich.console import Console
@@ -27,6 +27,7 @@ from dimos.utils.actor_registry import ActorRegistry
 from dimos.utils.logging_config import setup_logger
 
 if TYPE_CHECKING:
+    # Avoid runtime import to prevent circular import; ruff's TC001 would otherwise move it.
     from dimos.core.rpc_client import ModuleProxy
 
 logger = setup_logger()
@@ -89,7 +90,7 @@ class CudaCleanupPlugin:
 def patch_actor(actor, cls) -> None: ...  # type: ignore[no-untyped-def]
 
 
-DimosCluster = Client
+DimosCluster: TypeAlias = Client
 
 
 def patchdask(dask_client: Client, local_cluster: LocalCluster) -> DimosCluster:
@@ -112,7 +113,7 @@ def patchdask(dask_client: Client, local_cluster: LocalCluster) -> DimosCluster:
         # Register actor deployment in shared memory
         ActorRegistry.update(str(actor), str(worker))
 
-        return RPCClient(actor, actor_class)
+        return cast("ModuleProxy", RPCClient(actor, actor_class))
 
     def check_worker_memory() -> None:
         """Check memory usage of all workers."""
