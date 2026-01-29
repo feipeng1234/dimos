@@ -62,6 +62,7 @@ import dimos.robot.unitree.connection.go2 as _go2_mod
 from dimos.robot.unitree.connection.go2 import GO2Connection, go2_connection
 from dimos.robot.unitree_webrtc.unitree_skill_container import unitree_skills
 from dimos.utils.monitoring import utilization
+from dimos.visualization.rerun.bridge import rerun_bridge
 from dimos.web.websocket_vis.websocket_vis_module import websocket_vis
 
 _GO2_URDF = Path(_go2_mod.__file__).parent.parent / "go2" / "go2.urdf"
@@ -106,6 +107,9 @@ unitree_go2 = autoconnect(
     replanning_a_star_planner(),
     wavefront_frontier_explorer(),
 ).global_config(n_dask_workers=6, robot_model="unitree_go2")
+
+unitree_go2_bridge = autoconnect(unitree_go2, rerun_bridge())
+
 
 unitree_go2_ros = unitree_go2.transports(
     {
