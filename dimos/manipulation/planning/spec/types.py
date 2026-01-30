@@ -26,9 +26,6 @@ from dimos.manipulation.planning.spec.enums import (
 )
 
 if TYPE_CHECKING:
-    import numpy as np
-    from numpy.typing import NDArray
-
     from dimos.msgs.geometry_msgs import PoseStamped
     from dimos.msgs.sensor_msgs import JointState
 
