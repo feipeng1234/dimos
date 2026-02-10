@@ -32,43 +32,41 @@ dependencies = [
     # Transport Protocols
     "dimos-lcm",
     "PyTurboJPEG==1.8.2",
-
     # Core
     "numpy>=1.26.4",
     "scipy>=1.15.1",
+    "pin>=3.3.0",  # Pinocchio IK library
     "reactivex",
     "asyncio==3.4.3",
     "sortedcontainers==2.4.0",
     "pydantic",
     "python-dotenv",
     "annotation-protocol>=1.4.0",
+    "lazy_loader",
 
     # Multiprocess
     "dask[complete]==2025.5.1",
     "plum-dispatch==2.5.7",
-
     # Logging
     "structlog>=25.5.0,<26",
     "colorlog==6.9.0",
-
     # Core Msgs
     "opencv-python",
-    "open3d-unofficial-arm", # works on non-arm as well (falls back to open3d)
-
+    "open3d-unofficial-arm; platform_machine == 'aarch64' and platform_system == 'Linux' ",
+    "open3d>=0.18.0; platform_machine != 'aarch64' or platform_system != 'Linux'",
     # CLI
     "pydantic-settings>=2.11.0,<3",
     "textual==3.7.1",
     "terminaltexteffects==0.12.2",
     "typer>=0.19.2,<1",
     "plotext==5.3.2",
-
     # Used for calculating the occupancy map.
     "numba>=0.60.0",    # First version supporting Python 3.12
     "llvmlite>=0.42.0", # Required by numba 0.60+
-
     # TODO: rerun shouldn't be required but rn its in core (there is NO WAY to use dimos without rerun rn)
     # remove this once rerun is optional in core
     "rerun-sdk>=0.20.0",
+    "toolz>=1.1.0",
 ]
 
 
@@ -79,6 +77,7 @@ skillspy = "dimos.utils.cli.skillspy.skillspy:main"
 agentspy = "dimos.utils.cli.agentspy.agentspy:main"
 humancli = "dimos.utils.cli.human.humanclianim:main"
 dimos = "dimos.robot.cli.dimos:main"
+rerun-bridge = "dimos.visualization.rerun.bridge:main"
 doclinks = "dimos.utils.docs.doclinks:main"
 
 [project.optional-dependencies]
@@ -196,6 +195,7 @@ manipulation = [
     # Visualization (Optional)
     "kaleido>=0.2.1",
     "plotly>=5.9.0",
+    "xacro",
 ]
 
 
@@ -267,16 +267,38 @@ sim = [
     "pygame>=2.6.1",
 ]
 
-jetson-jp6-cuda126 = [
-    # Jetson Jetpack 6.2 with CUDA 12.6 specific wheels Tegra 239 (aarch64 Linux) only
-    "torch==2.8.0 ; platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "torchvision==0.23.0 ; platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "onnxruntime-gpu==1.23.0 ; platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "xformers ; platform_machine == 'aarch64' and sys_platform == 'linux'",
-]
+# NOTE: jetson-jp6-cuda126 extra is disabled due to 404 errors from wheel URLs
+# The pypi.jetson-ai-lab.io URLs are currently unavailable. Update with working URLs when available.
+# jetson-jp6-cuda126 = [
+#     # Jetson Jetpack 6.2 with CUDA 12.6 specific wheels (aarch64 Linux only)
+#     "torch @ https://pypi.jetson-ai-lab.io/jp6/cu126/+f/.../torch-2.8.0-cp310-cp310-linux_aarch64.whl ; platform_machine == 'aarch64' and sys_platform == 'linux'",
+#     "torchvision @ https://pypi.jetson-ai-lab.io/jp6/cu126/+f/.../torchvision-0.23.0-cp310-cp310-linux_aarch64.whl ; platform_machine == 'aarch64' and sys_platform == 'linux'",
+#     "onnxruntime-gpu @ https://pypi.jetson-ai-lab.io/jp6/cu126/+f/.../onnxruntime_gpu-1.23.0-cp310-cp310-linux_aarch64.whl ; platform_machine == 'aarch64' and sys_platform == 'linux'",
+#     "xformers @ https://pypi.jetson-ai-lab.io/jp6/cu126/+f/.../xformers-0.0.33-cp39-abi3-linux_aarch64.whl ; platform_machine == 'aarch64' and sys_platform == 'linux'",
+# ]
 
 drone = [
     "pymavlink"
+]
+
+# Minimal dependencies for Docker modules that communicate with the DimOS host
+docker = [
+    "dimos-lcm",
+    "numpy>=1.26.4",
+    "scipy>=1.15.1",
+    "reactivex",
+    "dask[distributed]==2025.5.1",
+    "plum-dispatch==2.5.7",
+    "structlog>=25.5.0,<26",
+    "pydantic",
+    "pydantic-settings>=2.11.0,<3",
+    "typer>=0.19.2,<1",
+    "opencv-python-headless",
+    "lcm",
+    "sortedcontainers",
+    "PyTurboJPEG",
+    "rerun-sdk",
+    "open3d"
 ]
 
 base = [
@@ -366,6 +388,7 @@ markers = [
     "lcm: tests that run actual LCM bus (can't execute in CI)",
     "module: tests that need to run directly as modules",
     "gpu: tests that require GPU",
+    "cuda: tests which require CUDA (specifically CUDA not just GPU acceleration)",
     "tofix: temporarily disabled test",
     "e2e: end to end tests",
     "integration: slower integration tests",
@@ -397,12 +420,3 @@ default-groups = []
 
 [tool.uv.sources]
 contact-graspnet-pytorch = { git = "https://github.com/dimensionalOS/contact_graspnet_pytorch.git" }
-torch = { index = "jetson-jp6-cuda126", marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" }
-torchvision = { index = "jetson-jp6-cuda126", marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" }
-onnxruntime-gpu = { index = "jetson-jp6-cuda126", marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" }
-xformers = { index = "jetson-jp6-cuda126", marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" }
-
-[[tool.uv.index]]
-name = "jetson-jp6-cuda126"
-url = "https://pypi.jetson-ai-lab.io/jp6/cu126"
-explicit = true
