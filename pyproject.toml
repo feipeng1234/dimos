@@ -51,7 +51,7 @@ dependencies = [
     "colorlog==6.9.0",
     # Core Msgs
     "opencv-python",
-    "open3d",
+    "open3d-unofficial-arm", # works for non-arm too, will replace once open3d offical supports arm
     # CLI
     "pydantic-settings>=2.11.0,<3",
     "textual==3.7.1",

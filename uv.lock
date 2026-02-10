@@ -396,10 +396,10 @@ name = "bitsandbytes"
 version = "0.49.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11' and sys_platform != 'darwin' and sys_platform != 'win32'" },
-    { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11' and sys_platform != 'darwin' and sys_platform != 'win32'" },
-    { name = "packaging", marker = "sys_platform != 'darwin' and sys_platform != 'win32'" },
-    { name = "torch", marker = "sys_platform != 'darwin' and sys_platform != 'win32'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "packaging" },
+    { name = "torch" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/11/dd/5820e09213a3f7c0ee5aff20fce8b362ce935f9dd9958827274de4eaeec6/bitsandbytes-0.49.1-py3-none-manylinux_2_24_aarch64.whl", hash = "sha256:acd4730a0db3762d286707f4a3bc1d013d21dd5f0e441900da57ec4198578d4e", size = 31065659, upload-time = "2026-01-08T14:31:28.676Z" },
@@ -1739,7 +1739,7 @@ dependencies = [
     { name = "numba" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "open3d" },
+    { name = "open3d-unofficial-arm" },
     { name = "opencv-python" },
     { name = "pin" },
     { name = "plotext" },
@@ -2050,8 +2050,8 @@ requires-dist = [
     { name = "onnxruntime", marker = "extra == 'cpu'" },
     { name = "onnxruntime-gpu", marker = "extra == 'cuda'", specifier = ">=1.17.1" },
     { name = "open-clip-torch", marker = "extra == 'misc'", specifier = "==3.2.0" },
-    { name = "open3d" },
     { name = "open3d", marker = "extra == 'docker'" },
+    { name = "open3d-unofficial-arm" },
     { name = "openai", marker = "extra == 'agents'" },
     { name = "openai-whisper", marker = "extra == 'agents'" },
     { name = "opencv-contrib-python", marker = "extra == 'misc'", specifier = "==4.10.0.84" },
@@ -2386,7 +2386,7 @@ name = "exceptiongroup"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/50/79/66800aadf48771f6b62f7eb014e352e5d06856655206165d775e675a02c9/exceptiongroup-1.3.1.tar.gz", hash = "sha256:8b412432c6055b0b7d14c310000ae93352ed6754f70fa8f7c34141f91c4e3219", size = 30371, upload-time = "2025-11-21T23:01:54.787Z" }
 wheels = [
@@ -6030,6 +6030,26 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/37/c5/286c605e087e72ad83eab130451ce13b768caa4374d926dc735edc20da5a/open3d-0.19.0-cp312-cp312-macosx_10_15_universal2.whl", hash = "sha256:9e4a8d29443ba4c83010d199d56c96bf553dd970d3351692ab271759cbe2d7ac", size = 103202754, upload-time = "2025-01-08T07:26:27.169Z" },
     { url = "https://files.pythonhosted.org/packages/2b/95/3723e5ade77c234a1650db11cbe59fe25c4f5af6c224f8ea22ff088bb36a/open3d-0.19.0-cp312-cp312-manylinux_2_31_x86_64.whl", hash = "sha256:01e4590dc2209040292ebe509542fbf2bf869ea60bcd9be7a3fe77b65bad3192", size = 447665185, upload-time = "2025-01-08T07:23:39.769Z" },
     { url = "https://files.pythonhosted.org/packages/9f/c4/35a6e0a35aa72420e75dc28d54b24beaff79bcad150423e47c67d2ad8773/open3d-0.19.0-cp312-cp312-win_amd64.whl", hash = "sha256:665839837e1d3a62524804c31031462c3b548a2b6ed55214e6deb91522844f97", size = 69169961, upload-time = "2025-01-08T07:27:35.392Z" },
+]
+
+[[package]]
+name = "open3d-unofficial-arm"
+version = "0.19.0.post5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "configargparse" },
+    { name = "dash" },
+    { name = "flask" },
+    { name = "nbformat" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "werkzeug" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/02/87/95d3cf9017a0e89a708e611d003abeb66c88d7947fa7238962971cc8b0cb/open3d_unofficial_arm-0.19.0.post5-cp310-cp310-manylinux_2_35_aarch64.whl", hash = "sha256:26bc160f3326a74b232f026d741a576bf0d1fa7b1d5128c5e979d7b4d2d1b983", size = 48230542, upload-time = "2026-02-10T08:37:33.928Z" },
+    { url = "https://files.pythonhosted.org/packages/b7/98/e5f803c0ccc23ff68eee12d4b43aa48514dca604e3805f243f399050bd64/open3d_unofficial_arm-0.19.0.post5-cp311-cp311-manylinux_2_35_aarch64.whl", hash = "sha256:003db3e400cd8053e9428c6082af72e73082a28b3e69e9c49f69f83cf5205bb4", size = 48233477, upload-time = "2026-02-10T08:37:47.281Z" },
+    { url = "https://files.pythonhosted.org/packages/36/36/df78b304227d7249f3cdeaf2444da17d5826a2c7a679e71084b3aa0d1b9a/open3d_unofficial_arm-0.19.0.post5-cp312-cp312-manylinux_2_35_aarch64.whl", hash = "sha256:984d7f5757e9cb2f849ce43f43046a30a82c221be0778149642cdfe450bd3664", size = 48221813, upload-time = "2026-02-10T08:37:20.834Z" },
+    { url = "https://files.pythonhosted.org/packages/fa/93/25b667f4dea742d870cce76b404aab46ebd47bd66a3efc162bc86e4c81fc/open3d_unofficial_arm-0.19.0.post5-cp313-cp313-manylinux_2_35_aarch64.whl", hash = "sha256:ced1653305fa052015fea3c9d1d7672ce2ebb8f2251dfe0258ee7073e5932da7", size = 48223510, upload-time = "2026-02-10T08:38:00.654Z" },
 ]
 
 [[package]]
