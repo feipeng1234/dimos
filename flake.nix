@@ -129,6 +129,11 @@
           { vals.pkg=pkgs.libjpeg_turbo; flags.ldLibraryGroup=true; }
           { vals.pkg=pkgs.libpng;        flags={}; }
 
+          ### FAST-LIO2 native module deps
+          { vals.pkg=pkgs.pcl;                    flags.ldLibraryGroup=true; }
+          { vals.pkg=pkgs.nlohmann_json;          flags={}; }
+          { vals.pkg=pkgs.llvmPackages.openmp;    flags.ldLibraryGroup=true; }
+
           ### Docs generators
           { vals.pkg=pkgs.pikchr;        flags={}; }
           { vals.pkg=pkgs.graphviz;      flags={}; }
