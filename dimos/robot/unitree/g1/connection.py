@@ -31,14 +31,16 @@ class G1Connection(Module):
     cmd_vel: In[Twist]
     ip: str | None
     connection_type: str | None = None
+    network_interface: str = "eth0"
     _global_config: GlobalConfig
 
-    connection: UnitreeWebRTCConnection | None
+    connection: UnitreeWebRTCConnection | Any | None  # Any for onboard connection
 
     def __init__(
         self,
         ip: str | None = None,
         connection_type: str | None = None,
+        network_interface: str = "eth0",
         cfg: GlobalConfig = global_config,
         *args: Any,
         **kwargs: Any,
@@ -46,6 +48,7 @@ class G1Connection(Module):
         self._global_config = cfg
         self.ip = ip if ip is not None else self._global_config.robot_ip
         self.connection_type = connection_type or self._global_config.unitree_connection_type
+        self.network_interface = network_interface
         self.connection = None
         super().__init__(*args, **kwargs)
 
@@ -57,6 +60,15 @@ class G1Connection(Module):
             case "webrtc":
                 assert self.ip is not None, "IP address must be provided"
                 self.connection = UnitreeWebRTCConnection(self.ip)
+            case "onboard":
+                # Use native SDK for onboard control
+                from dimos.robot.unitree.g1.onboard_connection import G1OnboardConnection
+
+                mode = getattr(self._global_config, "g1_mode", "ai")
+                logger.info(f"Using onboard SDK connection on {self.network_interface}")
+                self.connection = G1OnboardConnection(
+                    network_interface=self.network_interface, mode=mode
+                )
             case "replay":
                 raise ValueError("Replay connection not implemented for G1 robot")
             case "mujoco":
