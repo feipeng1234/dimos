@@ -179,6 +179,134 @@ def test_roundtrip(moment1: Go2MapperMoment, voxel_size: float, expected_points:
     mapper.stop()
 
 
+def test_autoscale_skips_when_saturated() -> None:
+    """Test that autoscale skips frames when processing can't keep up.
+
+    Simulates a slow machine by pretending add_frame() took 500ms,
+    then feeding frames faster than that interval.
+    """
+    data_dir = get_data("unitree_go2_office_walk2")
+    lidar_store = TimedSensorReplay(f"{data_dir}/lidar")
+
+    mapper = VoxelGridMapper(autoscale=True, autoscale_min_frequency=1.0)
+
+    # Process first frame normally to bootstrap
+    frame = lidar_store.find_closest_seek(1.0)
+    assert frame is not None
+    mapper._on_frame(frame)
+    assert mapper._frames_processed == 1
+
+    # Fake that add_frame() took 500ms — simulates a slow machine
+    mapper._last_ingest_duration = 0.5
+
+    # Now feed 10 more frames with only 10ms between them (faster than 500ms threshold)
+    frames_fed = 1  # already fed one
+    for i in range(10):
+        frame = lidar_store.find_closest_seek(1.5 + i * 0.1)
+        if frame is not None:
+            time.sleep(0.01)  # 10ms between frames — way faster than 500ms
+            mapper._on_frame(frame)
+            frames_fed += 1
+
+    print(
+        f"\nAutoscale saturated: fed {frames_fed} frames, "
+        f"processed {mapper._frames_processed}, skipped {mapper._frames_skipped}"
+    )
+
+    # Most frames should be skipped since we faked 500ms processing time
+    # and only 100ms total elapsed
+    assert mapper._frames_skipped > 0
+    assert mapper._frames_processed < frames_fed
+    # Total should add up
+    assert mapper._frames_processed + mapper._frames_skipped == frames_fed
+    # Map should have data
+    assert mapper.size() > 0
+
+    mapper.stop()
+
+
+def test_autoscale_disabled_processes_all() -> None:
+    """Test that with autoscale=False, every frame is processed."""
+    data_dir = get_data("unitree_go2_office_walk2")
+    lidar_store = TimedSensorReplay(f"{data_dir}/lidar")
+
+    mapper = VoxelGridMapper(autoscale=False)
+
+    frames_fed = 0
+    for i in range(0, 10):
+        frame = lidar_store.find_closest_seek(i)
+        if frame is not None:
+            mapper._on_frame(frame)
+            frames_fed += 1
+
+    print(
+        f"\nNo autoscale: fed {frames_fed} frames, processed {mapper._frames_processed}, "
+        f"skipped {mapper._frames_skipped}"
+    )
+
+    # Every frame should be processed
+    assert mapper._frames_processed == frames_fed
+    assert mapper._frames_skipped == 0
+
+    mapper.stop()
+
+
+def test_autoscale_min_frequency_respected() -> None:
+    """Test that autoscale never drops below min_frequency."""
+    data_dir = get_data("unitree_go2_office_walk2")
+    lidar_store = TimedSensorReplay(f"{data_dir}/lidar")
+
+    # Set a high min_frequency to ensure frames aren't skipped too aggressively
+    mapper = VoxelGridMapper(autoscale=True, autoscale_min_frequency=100.0)
+
+    frames_fed = 0
+    for i in range(0, 10):
+        frame = lidar_store.find_closest_seek(i)
+        if frame is not None:
+            mapper._on_frame(frame)
+            frames_fed += 1
+
+    print(
+        f"\nHigh min_freq: fed {frames_fed} frames, processed {mapper._frames_processed}, "
+        f"skipped {mapper._frames_skipped}"
+    )
+
+    # With min_frequency=100Hz (max_interval=10ms), almost everything
+    # should be processed since add_frame likely takes >10ms
+    # The throttle interval is min(last_duration, 1/100) = min(last_duration, 0.01)
+    # so we throttle to 10ms, which means nearly all frames get through
+    assert mapper._frames_processed == frames_fed
+
+    mapper.stop()
+
+
+def test_autoscale_rerun_logging() -> None:
+    """Test that rerun telemetry is logged during autoscaled processing."""
+
+    data_dir = get_data("unitree_go2_office_walk2")
+    lidar_store = TimedSensorReplay(f"{data_dir}/lidar")
+
+    mapper = VoxelGridMapper(autoscale=True)
+
+    frame = lidar_store.find_closest_seek(1.0)
+    assert frame is not None
+
+    # Should not raise — rr.log calls are in _on_frame and publish_global_map
+    mapper._on_frame(frame)
+    mapper.publish_global_map()
+
+    assert mapper._frames_processed == 1
+    assert mapper._last_ingest_duration > 0
+    assert mapper._last_publish_duration > 0
+
+    print(
+        f"\nIngest: {mapper._last_ingest_duration * 1000:.1f}ms, "
+        f"Publish: {mapper._last_publish_duration * 1000:.1f}ms"
+    )
+
+    mapper.stop()
+
+
 def test_roundtrip_range_preserved(mapper: VoxelGridMapper) -> None:
     """Test that input coordinate ranges are preserved in output."""
     data_dir = get_data("unitree_go2_office_walk2")

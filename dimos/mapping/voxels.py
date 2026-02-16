@@ -21,6 +21,7 @@ import open3d.core as o3c  # type: ignore[import-untyped]
 from reactivex import interval, operators as ops
 from reactivex.disposable import Disposable
 from reactivex.subject import Subject
+import rerun as rr
 
 from dimos.core import In, Module, Out, rpc
 from dimos.core.global_config import GlobalConfig, global_config
@@ -42,6 +43,9 @@ class Config(ModuleConfig):
     block_count: int = 2_000_000
     device: str = "CUDA:0"
     carve_columns: bool = True
+    # Auto-scaling: skip frames when processing can't keep up
+    autoscale: bool = True
+    autoscale_min_frequency: float = 1.0  # never drop below this Hz
 
 
 class VoxelGridMapper(Module):
@@ -78,6 +82,13 @@ class VoxelGridMapper(Module):
         self._key_dtype = self._voxel_hashmap.key_tensor().dtype
         self._latest_frame_ts: float = 0.0
 
+        # Autoscale state
+        self._last_ingest_time: float = 0.0  # monotonic time of last add_frame()
+        self._last_ingest_duration: float = 0.0  # how long last add_frame() took
+        self._last_publish_duration: float = 0.0  # how long last publish took
+        self._frames_skipped: int = 0
+        self._frames_processed: int = 0
+
     @rpc
     def start(self) -> None:
         super().start()
@@ -106,12 +117,42 @@ class VoxelGridMapper(Module):
         super().stop()
 
     def _on_frame(self, frame: PointCloud2) -> None:
+        if self.config.autoscale and self._frames_processed > 0:
+            now = time.monotonic()
+            elapsed_since_last = now - self._last_ingest_time
+
+            # Self-regulate: skip frames we can't keep up with.
+            # Use last processing duration as the throttle interval,
+            # but cap at min_frequency so the map never goes completely stale.
+            max_interval = 1.0 / self.config.autoscale_min_frequency
+            throttle_interval = min(self._last_ingest_duration, max_interval)
+            if elapsed_since_last < throttle_interval:
+                self._frames_skipped += 1
+                return
+
+        t0 = time.monotonic()
         self.add_frame(frame)
-        if self.config.publish_interval == 0:
+        ingest_duration = time.monotonic() - t0
+
+        self._last_ingest_time = t0
+        self._last_ingest_duration = ingest_duration
+        self._frames_processed += 1
+
+        rr.log("voxel_mapper/ingest_time_ms", rr.Scalars(ingest_duration * 1000))
+        rr.log("voxel_mapper/map_size", rr.Scalars(self.size()))
+        rr.log("voxel_mapper/frames_skipped", rr.Scalars(self._frames_skipped))
+
+        if self.config.publish_interval == 0 and hasattr(self, "_publish_trigger"):
             self._publish_trigger.on_next(None)
 
     def publish_global_map(self) -> None:
+        t0 = time.monotonic()
         pc = self.get_global_pointcloud2()
+        publish_duration = time.monotonic() - t0
+
+        self._last_publish_duration = publish_duration
+        rr.log("voxel_mapper/publish_time_ms", rr.Scalars(publish_duration * 1000))
+
         self.global_map.publish(pc)
 
     def size(self) -> int:
