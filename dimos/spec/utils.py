@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import inspect
-import typing
 from typing import Any, Protocol, runtime_checkable
 
 from annotation_protocol import AnnotationProtocol  # type: ignore[import-not-found,import-untyped]
@@ -98,47 +97,6 @@ def spec_annotation_compliance(
     )
 
     return isinstance(obj, strict_proto)
-
-
-def _own_hints(cls: type) -> dict[str, Any]:
-    """Collect type hints from cls and its non-protocol bases only."""
-    hints: dict[str, Any] = {}
-    for base in reversed(cls.__mro__):
-        if base is object or is_protocol(base):
-            continue
-        base_hints = typing.get_type_hints(base, include_extras=True)
-        # Only include annotations defined directly on this base
-        for name in base.__annotations__:
-            if name in base_hints:
-                hints[name] = base_hints[name]
-    return hints
-
-
-def assert_implements_protocol(cls: type, protocol: type) -> None:
-    """Assert that cls has all annotations required by a Protocol.
-
-    Works with any Protocol (not just Spec subclasses). Checks that every
-    annotation defined by the protocol is present on cls with a matching type.
-    Ignores annotations inherited from protocol bases so that inheriting from
-    a protocol doesn't automatically satisfy the check.
-
-    Example:
-        class MyProto(Protocol):
-            x: Out[int]
-
-        class Good:
-            x: Out[int]
-
-        assert_implements_protocol(Good, MyProto)  # passes
-    """
-    proto_hints = typing.get_type_hints(protocol, include_extras=True)
-    cls_hints = _own_hints(cls)
-
-    for name, expected_type in proto_hints.items():
-        assert name in cls_hints, f"{cls.__name__} missing '{name}' required by {protocol.__name__}"
-        assert cls_hints[name] == expected_type, (
-            f"{cls.__name__}.{name}: expected {expected_type}, got {cls_hints[name]}"
-        )
 
 
 def get_protocol_method_signatures(proto: type[object]) -> dict[str, inspect.Signature]:

@@ -27,6 +27,7 @@ Usage::
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from dimos.core import Out  # noqa: TC001
 from dimos.core.native_module import NativeModule, NativeModuleConfig
@@ -97,3 +98,7 @@ __all__ = [
     "Mid360Config",
     "mid360_module",
 ]
+
+# Verify protocol port compliance (mypy will flag missing ports)
+if TYPE_CHECKING:
+    Mid360()
