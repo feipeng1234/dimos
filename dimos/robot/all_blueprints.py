@@ -111,7 +111,7 @@ all_modules = {
     "replanning_a_star_planner": "dimos.navigation.replanning_a_star.module",
     "rerun_bridge": "dimos.visualization.rerun.bridge",
     "ros_nav": "dimos.navigation.rosnav",
-    "agibot-nav-test": "dimos.robot.agibot.blueprints.test.agibot_nav_test",
+    "agibot-nav-test": "dimos.robot.agibot.blueprints.test.agibot_nav_test:agibot_nav_test",
     "simulation": "dimos.simulation.manipulators.sim_module",
     "spatial_memory": "dimos.perception.spatial_perception",
     "speak_skill": "dimos.agents.skills.speak_skill",
