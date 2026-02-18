@@ -70,7 +70,7 @@ class AGIbotNavValidator(Module):
     cmd_vel: In[TwistStamped]
     terrain_map_ext: In[PointCloud2]
     path: In[Path]
-    tf: In[TFMessage]
+    ros_tf: In[TFMessage]  # named ros_tf because self.tf is a built-in Module facility
 
     # OUT to nav container
     goal_pose: Out[PoseStamped]
@@ -82,7 +82,7 @@ class AGIbotNavValidator(Module):
             "cmd_vel": 0,
             "terrain_map_ext": 0,
             "path": 0,
-            "tf": 0,
+            "ros_tf": 0,
         }
         self._last_report: float = 0.0
 
@@ -94,7 +94,10 @@ class AGIbotNavValidator(Module):
         self.cmd_vel.subscribe(lambda msg: self._on_msg("cmd_vel", msg))
         self.terrain_map_ext.subscribe(lambda msg: self._on_msg("terrain_map_ext", msg))
         self.path.subscribe(lambda msg: self._on_msg("path", msg))
-        self.tf.subscribe(lambda msg: self._on_msg("tf", msg))
+        self.ros_tf.subscribe(self._on_ros_tf)
+
+        # Activate the built-in TF facility so transforms are broadcast
+        self.tf.start()
 
         logger.info("AGIbot nav validator started — listening for ROS topics")
 
@@ -102,6 +105,15 @@ class AGIbotNavValidator(Module):
     def stop(self) -> None:
         self._print_report()
         super().stop()
+
+    def _on_ros_tf(self, msg: TFMessage) -> None:
+        """Forward ROS /tf transforms into the built-in TF facility."""
+        self._counts["ros_tf"] += 1
+        self.tf.publish(*msg.transforms)
+        now = time.monotonic()
+        if now - self._last_report >= self.config.log_interval:
+            self._print_report()
+            self._last_report = now
 
     def _on_msg(self, topic: str, msg: object) -> None:
         self._counts[topic] += 1
@@ -129,7 +141,7 @@ agibot_nav_test = autoconnect(
         ("cmd_vel", TwistStamped): ROSTransport("/cmd_vel", TwistStamped),
         ("terrain_map_ext", PointCloud2): ROSTransport("/terrain_map_ext", PointCloud2),
         ("path", Path): ROSTransport("/path", Path),
-        ("tf", TFMessage): ROSTransport("/tf", TFMessage),
+        ("ros_tf", TFMessage): ROSTransport("/tf", TFMessage),
         # OUT: publish to nav container
         ("goal_pose", PoseStamped): ROSTransport("/goal_pose", PoseStamped),
     }
