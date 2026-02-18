@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# mypy: disable-error-code=redundant-cast
-
 from dataclasses import dataclass
 import logging
 import threading

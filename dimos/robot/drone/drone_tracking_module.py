@@ -13,8 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# mypy: disable-error-code=redundant-cast
-
 """Drone tracking module with visual servoing for object following."""
 
 import json
