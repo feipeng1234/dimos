@@ -18,9 +18,6 @@ import platform
 
 from dimos.protocol.service.system_configurator.base import (
     SystemConfigurator,
-    _is_root_user,
-    _read_sysctl_int,
-    _write_sysctl_int,
     configure_system,
     sudo_run,
 )
@@ -72,9 +69,6 @@ __all__ = [
     "MulticastConfiguratorLinux",
     "MulticastConfiguratorMacOS",
     "SystemConfigurator",
-    "_is_root_user",
-    "_read_sysctl_int",
-    "_write_sysctl_int",
     "configure_system",
     "lcm_configurators",
     "sudo_run",

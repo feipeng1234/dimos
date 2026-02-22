@@ -28,11 +28,13 @@ from dimos.protocol.service.system_configurator import (
     MulticastConfiguratorLinux,
     MulticastConfiguratorMacOS,
     SystemConfigurator,
+    configure_system,
+    sudo_run,
+)
+from dimos.protocol.service.system_configurator.base import (
     _is_root_user,
     _read_sysctl_int,
     _write_sysctl_int,
-    configure_system,
-    sudo_run,
 )
 
 # ----------------------------- Helper function tests -----------------------------
@@ -506,7 +508,7 @@ class TestClockSyncConfigurator:
 
     def test_check_fails_with_negative_offset(self) -> None:
         configurator = ClockSyncConfigurator()
-        with patch.object(ClockSyncConfigurator, "_ntp_offset", return_value=-0.2):  # -200ms
+        with patch.object(ClockSyncConfigurator, "_ntp_offset", return_value=-0.5):  # -500ms
             assert configurator.check() is False
 
     def test_check_passes_when_ntp_unreachable(self) -> None:

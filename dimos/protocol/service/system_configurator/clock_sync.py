@@ -42,11 +42,10 @@ class ClockSyncConfigurator(SystemConfigurator):
         self._offset: float | None = None  # seconds, filled by check()
         self._fix_cmd: list[str] = []  # resolved by check()
 
-    # ---- NTP query ----
-
     @staticmethod
     def _ntp_offset(server: str = "pool.ntp.org", port: int = 123, timeout: float = 2) -> float:
         """Return clock offset in seconds (local - NTP).  Raises on failure."""
+
         # Minimal SNTPv4 request: LI=0, VN=4, Mode=3 → first byte = 0x23
         msg = b"\x23" + b"\x00" * 47
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -73,8 +72,6 @@ class ClockSyncConfigurator(SystemConfigurator):
         rtt = t4 - t1
         offset: float = t_server - (t1 + rtt / 2)
         return offset
-
-    # ---- SystemConfigurator interface ----
 
     def _resolve_fix_cmd(self) -> list[str]:
         """Determine the best available NTP sync command for this platform."""
@@ -105,8 +102,6 @@ class ClockSyncConfigurator(SystemConfigurator):
         self._fix_cmd = self._resolve_fix_cmd()
         return False
 
-    # ---- SystemConfigurator interface ----
-
     def explanation(self) -> str | None:
         if self._offset is None:
             return None
@@ -123,4 +118,8 @@ class ClockSyncConfigurator(SystemConfigurator):
         if not self._fix_cmd:
             print(f"[clock-sync] No automatic fix available on {platform.system()}")
             return
-        sudo_run(*self._fix_cmd, check=True, text=True, capture_output=True)
+        cmd = list(self._fix_cmd)
+        # Recompute the corrected time at fix-time (not stale from check-time)
+        if cmd[:2] == ["date", "-s"] and self._offset is not None:
+            cmd[2] = f"@{time.time() - self._offset:.3f}"
+        sudo_run(*cmd, check=True, text=True, capture_output=True)

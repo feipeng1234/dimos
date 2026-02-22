@@ -111,7 +111,9 @@ class Blueprint:
     remapping_map: Mapping[tuple[type[Module], str], str | type[Module] | type[Spec]] = field(
         default_factory=lambda: MappingProxyType({})
     )
-    requirement_checks: tuple[Callable[[], str | None] | Any, ...] = field(default_factory=tuple)
+    requirement_checks: "tuple[Callable[[], str | None] | SystemConfigurator, ...]" = field(
+        default_factory=tuple
+    )
 
     @classmethod
     def create(cls, module: type[Module], *args: Any, **kwargs: Any) -> "Blueprint":
