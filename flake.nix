@@ -26,7 +26,7 @@
           { vals.pkg=pkgs.bashInteractive;    flags={}; }
           { vals.pkg=pkgs.coreutils;          flags={}; }
           { vals.pkg=pkgs.gh;                 flags={}; }
-          { vals.pkg=pkgs.stdenv.cc.cc.lib;   flags.ldLibraryGroup=true; }
+          { vals.pkg=pkgs.lib.lowPrio pkgs.stdenv.cc.cc.lib;   flags.ldLibraryGroup=true; }
           { vals.pkg=pkgs.stdenv.cc;          flags.ldLibraryGroup=true; }
           { vals.pkg=pkgs.gfortran.cc.lib;    flags.ldLibraryGroup=true; }
           { vals.pkg=pkgs.cctools;            flags={}; onlyIf=pkgs.stdenv.isDarwin; } # for pip install opencv-python
