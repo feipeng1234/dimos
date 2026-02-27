@@ -130,13 +130,18 @@ class ROSNavConfig(DockerModuleConfig):
 
     # --- Runtime mode settings ---
     # mode controls which ROS launch file the entrypoint selects:
-    #   "unity_sim"   — same launch file as simulation, but also starts the Unity exe
-    #                   (crashes at startup if the Unity binary is missing)
+    #   "simulation"  — system_simulation[_with_route_planner].launch.py + Unity if present
+    #   "unity_sim"   — same as simulation but hard-exits if Unity binary is missing
     #   "hardware"    — system_real_robot[_with_route_planner].launch.py
     #   "bagfile"     — system_bagfile[_with_route_planner].launch.py + use_sim_time
     # Setting bagfile_path automatically forces mode to "bagfile".
     mode: str = "hardware"
     bagfile_path: str = ""  # container-side path to bag; plays with --clock
+
+    # use_rviz: whether to launch RViz2 inside the container.
+    #   None (default) → True for simulation/unity_sim modes, False otherwise
+    #   (mirrors the unconditional RViz launch in run_both.sh for simulation)
+    use_rviz: bool = False
 
     def __post_init__(self) -> None:
         import os
@@ -145,6 +150,8 @@ class ROSNavConfig(DockerModuleConfig):
         self.docker_env["MODE"] = effective_mode
         if self.bagfile_path:
             self.docker_env["BAGFILE_PATH"] = self.bagfile_path
+
+        self.docker_env["USE_RVIZ"] = "true" if self.use_rviz else "false"
 
         # Pass host DISPLAY through for X11 forwarding (RViz, Unity)
         if display := os.environ.get("DISPLAY", ":0"):
@@ -180,8 +187,38 @@ class ROSNavConfig(DockerModuleConfig):
                 "/ros2_ws/src/ros-navigation-autonomy-stack/src/base_autonomy/vehicle_simulator/mesh/unity/",
                 "rw",
             ),
+            (
+                str(
+                    repo_root
+                    / "docker"
+                    / "navigation"
+                    / "ros-navigation-autonomy-stack"
+                    / "src"
+                    / "base_autonomy"
+                ),
+                "/ros2_ws/src/base_autonomy/",
+                "rw",
+            ),
             # X11 socket for display forwarding (RViz, Unity)
             ("/tmp/.X11-unix", "/tmp/.X11-unix", "rw"),
+            # Patch ros_tcp_endpoint server.py: fixes JSON null-terminator stripping bug
+            # that crashes every Unity TCP connection. The installed copy is pre-built into
+            # the image; mounting the fixed source over it avoids a full rebuild.
+            (
+                str(
+                    repo_root
+                    / "docker"
+                    / "navigation"
+                    / "ros-navigation-autonomy-stack"
+                    / "src"
+                    / "utilities"
+                    / "ROS-TCP-Endpoint"
+                    / "ros_tcp_endpoint"
+                    / "server.py"
+                ),
+                "/ros2_ws/install/ros_tcp_endpoint/lib/python3.10/site-packages/ros_tcp_endpoint/server.py",
+                "ro",
+            ),
         ]
 
         # Mount Xauthority cookie for X11 forwarding.

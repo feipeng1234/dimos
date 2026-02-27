@@ -209,17 +209,17 @@ if [ -z "${MODE:-}" ]; then
     if [ "${HARDWARE_MODE:-false}" = "true" ]; then
         MODE="hardware"
     else
-        MODE="simulation"
+        MODE="unity_sim"
     fi
 fi
 export MODE
 echo "[entrypoint] MODE=${MODE}"
 
-# ── Optionally launch Unity vehicle_simulator exe (MODE=unity_sim) ────────
-# Crashes if the binary is not found.
-if [ "$MODE" = "unity_sim" ]; then
-    cd /ros2_ws/src/ros-navigation-autonomy-stack
-    UNITY_EXECUTABLE="./src/base_autonomy/vehicle_simulator/mesh/unity/environment/Model.x86_64"
+# ── Optionally launch Unity vehicle_simulator exe ─────────────────────────
+# simulation  — try Unity; silently skip if binary absent (mirrors run_both.sh)
+# unity_sim   — same but hard-exit if binary absent (useful for CI / explicit test)
+UNITY_EXECUTABLE="/ros2_ws/src/ros-navigation-autonomy-stack/src/base_autonomy/vehicle_simulator/mesh/unity/environment/Model.x86_64"
+if [ "$MODE" = "unity_sim" ] || [ "$MODE" = "simulation" ]; then
     if [ -f "$UNITY_EXECUTABLE" ]; then
         echo "[entrypoint] Starting Unity: $UNITY_EXECUTABLE"
         "$UNITY_EXECUTABLE" &
@@ -292,7 +292,7 @@ if [ -n "${BAGFILE_PATH:-}" ]; then
         echo "[entrypoint]          use_sim_time may not be enabled in the nav stack."
     fi
     echo "[entrypoint] Playing bag: ros2 bag play --clock $BAGFILE_PATH"
-    ros2 bag play --clock "$BAGFILE_PATH" &
+    ros2 bag play "$BAGFILE_PATH" --clock &
 fi
 
 # ── Optionally launch RViz2 ───────────────────────────────────────────────
@@ -315,6 +315,20 @@ fi
 # Converts /foxglove_teleop Twist → /cmd_vel TwistStamped
 if [ -f "/usr/local/bin/twist_relay.py" ]; then
     python3 /usr/local/bin/twist_relay.py &
+fi
+
+# ── Nav demo (simulation only) ────────────────────────────────────────────
+# Mirrors run_both.sh: sends an initial goal and keeps the ROS nav stack armed.
+# Uses rclpy directly so /cmd_vel is subscribed with BEST_EFFORT QoS (matching
+# the nav stack publisher) instead of the default RELIABLE used by ROSTransport.
+if [ "$MODE" = "simulation" ] || [ "$MODE" = "unity_sim" ]; then
+    DEMO="/workspace/dimos/dimos/navigation/demo_ros_navigation.py"
+    if [ -f "$DEMO" ]; then
+        echo "[entrypoint] Starting nav demo: $DEMO"
+        python3 "$DEMO" &
+    else
+        echo "[entrypoint] WARNING: nav demo not found at $DEMO"
+    fi
 fi
 
 # ── Hand off to the DimOS module runner ───────────────────────────────────

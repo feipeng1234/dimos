@@ -62,6 +62,9 @@ services:
       # Mount config files for easy editing
       - ./config:/ros2_ws/config:rw
 
+      # Mount config files for easy editing
+      - ./config:/ros2_ws/config:rw
+
     # Device access (for joystick controllers)
     devices:
       - /dev/input:/dev/input
@@ -318,7 +321,7 @@ services:
         echo "Bagfile playback mode (use_sim_time=true)"
         echo ""
         echo "Launch files ready. Play your bagfile with:"
-        echo "  ros2 bag play --clock /ros2_ws/bagfiles/<your_bag>"
+        echo "  ros2 bag play /ros2_ws/bagfiles/<your_bag> --clock"
         echo ""
         # Launch with SLAM method based on LOCALIZATION_METHOD
         if [ "$LOCALIZATION_METHOD" = "fastlio" ]; then

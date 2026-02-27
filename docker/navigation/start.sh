@@ -349,7 +349,7 @@ elif [ "$MODE" = "bagfile" ]; then
         echo "  - RViz2 visualization"
     fi
     echo ""
-    echo -e "${YELLOW}Remember to play bagfile with: ros2 bag play --clock <bagfile>${NC}"
+    echo -e "${YELLOW}Remember to play bagfile with: ros2 bag play <bagfile>${NC} --clock"
     echo ""
     echo "To enter the container from another terminal:"
     echo -e "    ${YELLOW}docker exec -it ${CONTAINER_NAME} bash${NC}"
