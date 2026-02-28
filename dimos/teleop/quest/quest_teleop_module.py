@@ -36,7 +36,7 @@ from fastapi.staticfiles import StaticFiles
 
 from dimos.core.core import rpc
 from dimos.core.module import Module, ModuleConfig
-from dimos.core.stream import In, Out
+from dimos.core.stream import Out
 from dimos.msgs.geometry_msgs import PoseStamped
 from dimos.msgs.sensor_msgs import Joy
 from dimos.teleop.quest.quest_types import Buttons, QuestControllerState
