@@ -238,7 +238,9 @@ def _run_simulation(config: GlobalConfig, shm: ShmReader) -> None:
     if _has_display:
         # Open an interactive viewer window. mujoco.Renderer (EGL) is independent
         # of the GLFW viewer window so both can coexist.
-        with viewer.launch_passive(model, data, show_left_ui=False, show_right_ui=False) as m_viewer:
+        with viewer.launch_passive(
+            model, data, show_left_ui=False, show_right_ui=False
+        ) as m_viewer:
             m_viewer.cam.lookat = config.mujoco_camera_position_float[0:3]
             m_viewer.cam.distance = config.mujoco_camera_position_float[3]
             m_viewer.cam.azimuth = config.mujoco_camera_position_float[4]
@@ -255,7 +257,8 @@ def _run_simulation(config: GlobalConfig, shm: ShmReader) -> None:
 if __name__ == "__main__":
 
     def signal_handler(_signum: int, _frame: Any) -> None:
-        sys.exit(0)
+        # os._exit is the documented way of exiting a child process immediatly.
+        os._exit(0)
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
