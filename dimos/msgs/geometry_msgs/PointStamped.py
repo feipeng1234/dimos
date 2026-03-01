@@ -25,11 +25,6 @@ from dimos_lcm.geometry_msgs import Point as LCMPoint, PointStamped as LCMPointS
 from dimos.types.timestamped import Timestamped
 
 
-def sec_nsec(ts):  # type: ignore[no-untyped-def]
-    s = int(ts)
-    return [s, int((ts - s) * 1_000_000_000)]
-
-
 class Point(LCMPoint):
     """DimOS wrapper for geometry_msgs.Point (3D position).
 
@@ -76,7 +71,7 @@ class PointStamped(Point, Timestamped):
         """Encode to LCM binary format."""
         lcm_msg = LCMPointStamped()
         lcm_msg.point = self  # Works because Point inherits from LCMPoint
-        [lcm_msg.header.stamp.sec, lcm_msg.header.stamp.nsec] = sec_nsec(self.ts)  # type: ignore[no-untyped-call]
+        [lcm_msg.header.stamp.sec, lcm_msg.header.stamp.nsec] = self.ros_timestamp()
         lcm_msg.header.frame_id = self.frame_id
         return lcm_msg.lcm_encode()  # type: ignore[no-any-return]
 
