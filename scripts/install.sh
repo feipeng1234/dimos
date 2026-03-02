@@ -366,35 +366,19 @@ install_nix() {
     info "Nix is not installed. See: https://nixos.org/download/"
     printf "\n"
 
-    local method
-    method=$(prompt_select "Which Nix installer would you like to use?" \
-        "Determinate Systems (recommended, enables flakes by default)" \
-        "Official nixos.org installer (multi-user daemon)" \
-        "Skip — I'll install Nix myself later")
+    if ! prompt_confirm "Install Nix now? (official nixos.org multi-user installer)" "yes"; then
+        warn "skipping Nix installation — falling back to system packages"
+        SETUP_METHOD="system"
+        return
+    fi
 
-    case "$method" in
-        *Determinate*)
-            info "installing Nix via Determinate Systems..."
-            if [[ "$DRY_RUN" == "1" ]]; then
-                dim "[dry-run] curl -sSf https://install.determinate.systems/nix | sh -s -- install"
-                HAS_NIX=1; return
-            fi
-            curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
-            ;;
-        *nixos.org*)
-            info "installing Nix via official installer..."
-            if [[ "$DRY_RUN" == "1" ]]; then
-                dim "[dry-run] sh <(curl -L https://nixos.org/nix/install) --daemon"
-                HAS_NIX=1; return
-            fi
-            sh <(curl --proto '=https' --tlsv1.2 -L https://nixos.org/nix/install) --daemon
-            ;;
-        *Skip*|*)
-            warn "skipping Nix installation — falling back to system packages"
-            SETUP_METHOD="system"
-            return
-            ;;
-    esac
+    info "installing Nix via official installer..."
+    if [[ "$DRY_RUN" == "1" ]]; then
+        dim "[dry-run] sh <(curl --proto '=https' --tlsv1.2 -L https://nixos.org/nix/install) --daemon"
+        HAS_NIX=1; return
+    fi
+
+    sh <(curl --proto '=https' --tlsv1.2 -L https://nixos.org/nix/install) --daemon
 
     [[ -f /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]] && \
         . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
