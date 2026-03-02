@@ -99,11 +99,13 @@ prompt_select() {
     if [[ "$NON_INTERACTIVE" == "1" ]]; then echo "${options[0]}"; return; fi
     printf "\n" >/dev/tty
     if [[ -n "$GUM" ]]; then
-        "$GUM" choose --header "$msg" \
+        local result
+        result=$("$GUM" choose --header "$msg" \
             --cursor "● " --cursor.foreground="44" \
             --header.foreground="255" --header.bold \
             --selected.foreground="44" \
-            "${options[@]}" </dev/tty
+            "${options[@]}" </dev/tty) || { printf "\n" >/dev/tty; die "cancelled"; }
+        echo "$result"
     else
         printf "%s%s%s\n" "$BOLD" "$msg" "$RESET" >/dev/tty
         local i=1
@@ -112,7 +114,7 @@ prompt_select() {
             ((i++))
         done
         printf "  choice [1]: " >/dev/tty
-        local choice; read -r choice </dev/tty || choice="1"
+        local choice; read -r choice </dev/tty || { printf "\n" >/dev/tty; die "cancelled"; }
         choice="${choice:-1}"
         local idx=$((choice - 1))
         if [[ $idx -ge 0 ]] && [[ $idx -lt ${#options[@]} ]]; then
@@ -129,14 +131,15 @@ prompt_multi() {
     if [[ "$NON_INTERACTIVE" == "1" ]]; then printf '%s\n' "${options[@]}"; return; fi
     printf "\n" >/dev/tty
     if [[ -n "$GUM" ]]; then
-        local selected_csv
+        local selected_csv result
         selected_csv=$(IFS=,; echo "${options[*]}")
-        "$GUM" choose --no-limit --header "$msg" \
+        result=$("$GUM" choose --no-limit --header "$msg" \
             --cursor "❯ " --cursor.foreground="44" \
             --header.foreground="255" --header.bold \
             --selected.foreground="44" \
             --selected="$selected_csv" \
-            "${options[@]}" </dev/tty
+            "${options[@]}" </dev/tty) || { printf "\n" >/dev/tty; die "cancelled"; }
+        echo "$result"
     else
         printf "%s%s%s (comma-separated, enter for all)\n" "$BOLD" "$msg" "$RESET" >/dev/tty
         local i=1
@@ -164,6 +167,10 @@ prompt_confirm() {
     if [[ -n "$GUM" ]]; then
         local flag; [[ "$default" == "yes" ]] && flag="--default=yes" || flag="--default=no"
         "$GUM" confirm "$msg" $flag --prompt.foreground="44" --selected.background="44" </dev/tty
+        local ec=$?
+        # gum confirm: 0=yes, 1=no, 130=ctrl+c
+        [[ $ec -eq 130 ]] && { printf "\n" >/dev/tty; die "cancelled"; }
+        return $ec
     else
         local yn
         if [[ "$default" == "yes" ]]; then printf "%s [Y/n] " "$msg" >/dev/tty
