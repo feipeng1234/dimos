@@ -151,7 +151,7 @@ class ROSNavConfig(DockerModuleConfig):
     mode: str = "hardware"
     use_route_planner: bool = False
     localization_method: str = "arise_slam"
-    robot_config_path: str = "mechanum_drive"
+    robot_config_path: str = "unitree/unitree_g1"
     robot_ip: str = ""
     bagfile_path: str | Path = ""  # host-side path to bag; remapped into container at runtime
 
