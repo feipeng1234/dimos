@@ -404,8 +404,8 @@ install_nix() {
 prompt_setup_method() {
     if [[ "$NO_NIX" == "1" ]]; then SETUP_METHOD="system"; return; fi
     if [[ "$USE_NIX" == "1" ]]; then
-        [[ "$HAS_NIX" == "1" ]] && { ok "Nix detected — using for system deps"; SETUP_METHOD="nix"; return; }
-        install_nix; SETUP_METHOD="nix"; return
+        [[ "$HAS_NIX" == "1" ]] && { ok "Nix detected — using for system deps"; SETUP_METHOD="nix"; USE_NIX=1; return; }
+        install_nix; SETUP_METHOD="nix"; USE_NIX=1; return
     fi
 
     local choice
@@ -424,7 +424,7 @@ prompt_setup_method() {
     case "$choice" in
         *Nix*|*nix*)
             [[ "$HAS_NIX" != "1" ]] && install_nix
-            SETUP_METHOD="nix"; ok "will use Nix for system dependencies" ;;
+            SETUP_METHOD="nix"; USE_NIX=1; ok "will use Nix for system dependencies" ;;
         *)
             SETUP_METHOD="system"; ok "will use system package manager" ;;
     esac
