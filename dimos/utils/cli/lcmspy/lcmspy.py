@@ -21,7 +21,7 @@ from dimos.protocol.service.lcmservice import LCMConfig, LCMService
 from dimos.utils.human import human_bytes
 
 
-class Topic:
+class TopicSpy:
     history_window: float = 60.0
 
     def __init__(self, name: str, history_window: float = 60.0) -> None:
@@ -30,12 +30,16 @@ class Topic:
         # Two fixed-size circular buffers: one bucket per second.
         # Avoids unbounded memory and the need to copy/lock the deque on reads.
         self._num_buckets = max(int(history_window), 1)
+        # example data:
+        # _bucket_second: [-1, -1, 1772155430, 1772155431, -1, ...]  # which real second each slot holds
+        # _count:         [ 0,  0,         47,          23,  0, ...]  # messages received that second
+        # _bytes:         [ 0,  0,      94000,       46000,  0, ...]  # bytes received that second
         self._count: list[int] = [0] * self._num_buckets
         self._bytes: list[int] = [0] * self._num_buckets
         self._bucket_second: list[int] = [-1] * self._num_buckets
         self.total_traffic_bytes = 0
 
-    def msg(self, data: bytes) -> None:
+    def lcm_msg_callback(self, data: bytes) -> None:
         data_size = len(data)
         second = int(time.time())
         idx = second % self._num_buckets
@@ -97,42 +101,43 @@ class LCMSpyConfig(LCMConfig):
     topic_history_window: float = 60.0
 
 
-class LCMSpy(LCMService, Topic):
+class LCMSpy(LCMService, TopicSpy):
     default_config = LCMSpyConfig
-    topic = dict[str, Topic]
+    config: LCMSpyConfig
+    topics: dict[str, TopicSpy]
     graph_log_window: float = 1.0
-    topic_class: type[Topic] = Topic
+    topic_class: type[TopicSpy] = TopicSpy
 
-    def __init__(self, **kwargs) -> None:  # type: ignore[no-untyped-def]
+    def __init__(self, **kwargs: object) -> None:
         super().__init__(**kwargs)
-        Topic.__init__(self, name="total", history_window=self.config.topic_history_window)  # type: ignore[attr-defined]
-        self.topic = {}  # type: ignore[assignment]
+        TopicSpy.__init__(self, name="total", history_window=self.config.topic_history_window)
+        self.topics = {}
 
     def start(self) -> None:
         super().start()
-        self.l.subscribe(".*", self.msg)  # type: ignore[union-attr]
+        self.l.subscribe(".*", self.lcm_msg_callback)  # type: ignore[union-attr]
 
     def stop(self) -> None:
         """Stop the LCM spy and clean up resources"""
         super().stop()
 
-    def msg(self, topic, data) -> None:  # type: ignore[no-untyped-def, override]
-        Topic.msg(self, data)
+    def lcm_msg_callback(self, topic: str, data: bytes) -> None:  # type: ignore[override]
+        TopicSpy.lcm_msg_callback(self, data)
 
-        if topic not in self.topic:  # type: ignore[operator]
+        if topic not in self.topics:
             print(self.config)
-            self.topic[topic] = self.topic_class(  # type: ignore[assignment, call-arg]
+            self.topics[topic] = self.topic_class(
                 topic,
-                history_window=self.config.topic_history_window,  # type: ignore[attr-defined]
+                history_window=self.config.topic_history_window,
             )
-        self.topic[topic].msg(data)  # type: ignore[attr-defined, type-arg]
+        self.topics[topic].lcm_msg_callback(data)
 
 
-class GraphTopic(Topic):
-    def __init__(self, *args, **kwargs) -> None:  # type: ignore[no-untyped-def]
-        super().__init__(*args, **kwargs)
-        self.freq_history = deque(maxlen=20)  # type: ignore[var-annotated]
-        self.bandwidth_history = deque(maxlen=20)  # type: ignore[var-annotated]
+class GraphTopicSpy(TopicSpy):
+    def __init__(self, name: str, history_window: float = 60.0) -> None:
+        super().__init__(name, history_window)
+        self.freq_history: deque[float] = deque(maxlen=20)
+        self.bandwidth_history: deque[float] = deque(maxlen=20)
 
     def update_graphs(self, step_window: float = 1.0) -> None:
         """Update historical data for graphing"""
@@ -147,16 +152,16 @@ class GraphLCMSpyConfig(LCMSpyConfig):
     graph_log_window: float = 1.0
 
 
-class GraphLCMSpy(LCMSpy, GraphTopic):
+class GraphLCMSpy(LCMSpy, GraphTopicSpy):
     default_config = GraphLCMSpyConfig
-
+    config: GraphLCMSpyConfig
     graph_log_thread: threading.Thread | None = None
     graph_log_stop_event: threading.Event = threading.Event()
-    topic_class: type[Topic] = GraphTopic
+    topic_class: type[TopicSpy] = GraphTopicSpy
 
-    def __init__(self, **kwargs) -> None:  # type: ignore[no-untyped-def]
+    def __init__(self, **kwargs: object) -> None:
         super().__init__(**kwargs)
-        GraphTopic.__init__(self, name="total", history_window=self.config.topic_history_window)  # type: ignore[attr-defined]
+        GraphTopicSpy.__init__(self, name="total", history_window=self.config.topic_history_window)
 
     def start(self) -> None:
         super().start()
@@ -165,11 +170,12 @@ class GraphLCMSpy(LCMSpy, GraphTopic):
 
     def graph_log(self) -> None:
         while not self.graph_log_stop_event.is_set():
-            self.update_graphs(self.config.graph_log_window)  # type: ignore[attr-defined]  # Update global history
+            self.update_graphs(self.config.graph_log_window)
             # Copy to list to avoid RuntimeError: dictionary changed size during iteration
-            for topic in list(self.topic.values()):  # type: ignore[call-arg]
-                topic.update_graphs(self.config.graph_log_window)  # type: ignore[attr-defined]
-            time.sleep(self.config.graph_log_window)  # type: ignore[attr-defined]
+            topic: GraphTopicSpy
+            for topic in list(self.topics.values()):  #  type: ignore[assignment]
+                topic.update_graphs(self.config.graph_log_window)
+            time.sleep(self.config.graph_log_window)
 
     def stop(self) -> None:
         """Stop the graph logging and LCM spy"""

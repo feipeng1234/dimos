@@ -17,7 +17,7 @@ import time
 import pytest
 
 from dimos.protocol.pubsub.impl.lcmpubsub import PickleLCM, Topic
-from dimos.utils.cli.lcmspy.lcmspy import GraphLCMSpy, GraphTopic, LCMSpy, Topic as TopicSpy
+from dimos.utils.cli.lcmspy.lcmspy import GraphLCMSpy, GraphTopicSpy, LCMSpy, TopicSpy
 
 
 @pytest.fixture
@@ -59,7 +59,7 @@ def test_spy_basic(pickle_lcm, lcmspy_instance) -> None:
     time.sleep(0.5)
 
     # Test statistics for video topic
-    video_topic_spy = lcmspy_instance.topic["/video"]
+    video_topic_spy = lcmspy_instance.topics["/video"]
     assert video_topic_spy is not None
 
     # Test frequency (should be around 10 Hz for 5 messages in ~0.5 seconds)
@@ -78,7 +78,7 @@ def test_spy_basic(pickle_lcm, lcmspy_instance) -> None:
     print(f"Video topic average message size: {avg_size:.2f} bytes")
 
     # Test statistics for odom topic
-    odom_topic_spy = lcmspy_instance.topic["/odom"]
+    odom_topic_spy = lcmspy_instance.topics["/odom"]
     assert odom_topic_spy is not None
 
     freq = odom_topic_spy.freq(1.0)
@@ -106,7 +106,7 @@ def test_topic_statistics_direct() -> None:
     test_data = [b"small", b"medium sized message", b"very long message for testing purposes"]
 
     for _i, data in enumerate(test_data):
-        topic.msg(data)
+        topic.lcm_msg_callback(data)
         time.sleep(0.1)  # Simulate time passing
 
     # Test statistics over 1 second window
@@ -140,16 +140,16 @@ def test_topic_cleanup() -> None:
     assert topic.kbps(60.0) == 0.0
 
     # A fresh message should be visible
-    topic.msg(b"recent")
+    topic.lcm_msg_callback(b"recent")
     assert topic.freq(60.0) > 0.0
 
 
 def test_graph_topic_basic() -> None:
     """Test GraphTopic basic functionality"""
-    topic = GraphTopic("/test_graph")
+    topic = GraphTopicSpy("/test_graph")
 
     # Add some messages and update graphs
-    topic.msg(b"test message")
+    topic.lcm_msg_callback(b"test message")
     topic.update_graphs(1.0)
 
     # Should have history data
@@ -162,12 +162,12 @@ def test_graph_topic_basic() -> None:
 def test_graph_lcmspy_basic(graph_lcmspy_instance) -> None:
     """Test GraphLCMSpy basic functionality"""
     # Simulate a message
-    graph_lcmspy_instance.msg("/test", b"test data")
+    graph_lcmspy_instance.lcm_msg_callback("/test", b"test data")
     time.sleep(0.2)  # Wait for graph update
 
     # Should create GraphTopic with history
-    topic = graph_lcmspy_instance.topic["/test"]
-    assert isinstance(topic, GraphTopic)
+    topic = graph_lcmspy_instance.topics["/test"]
+    assert isinstance(topic, GraphTopicSpy)
     assert len(topic.freq_history) > 0
     assert len(topic.bandwidth_history) > 0
 
@@ -175,13 +175,13 @@ def test_graph_lcmspy_basic(graph_lcmspy_instance) -> None:
 def test_lcmspy_global_totals(lcmspy_instance) -> None:
     """Test that LCMSpy tracks global totals as a Topic itself"""
     # Send messages to different topics
-    lcmspy_instance.msg("/video", b"video frame data")
-    lcmspy_instance.msg("/odom", b"odometry data")
-    lcmspy_instance.msg("/imu", b"imu data")
+    lcmspy_instance.lcm_msg_callback("/video", b"video frame data")
+    lcmspy_instance.lcm_msg_callback("/odom", b"odometry data")
+    lcmspy_instance.lcm_msg_callback("/imu", b"imu data")
 
     # Verify each test topic received at least one message
     for t in ("/video", "/odom", "/imu"):
-        assert lcmspy_instance.topic[t].total_traffic_bytes > 0
+        assert lcmspy_instance.topics[t].total_traffic_bytes > 0
 
     # Check global statistics
     global_freq = lcmspy_instance.freq(1.0)
@@ -200,8 +200,8 @@ def test_lcmspy_global_totals(lcmspy_instance) -> None:
 def test_graph_lcmspy_global_totals(graph_lcmspy_instance) -> None:
     """Test that GraphLCMSpy tracks global totals with history"""
     # Send messages
-    graph_lcmspy_instance.msg("/video", b"video frame data")
-    graph_lcmspy_instance.msg("/odom", b"odometry data")
+    graph_lcmspy_instance.lcm_msg_callback("/video", b"video frame data")
+    graph_lcmspy_instance.lcm_msg_callback("/odom", b"odometry data")
     time.sleep(0.2)  # Wait for graph update
 
     # Update global graphs
