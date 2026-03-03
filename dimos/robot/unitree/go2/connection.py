@@ -229,6 +229,8 @@ class GO2Connection(Module, spec.Camera, spec.Pointcloud):
         self._camera_info_thread.start()
 
         self.standup()
+        time.sleep(3)
+        self.connection.balance_stand()
         # self.record("go2_bigoffice")
 
     @rpc

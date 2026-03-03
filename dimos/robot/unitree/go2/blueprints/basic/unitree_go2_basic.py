@@ -18,13 +18,14 @@ import platform
 from typing import Any
 
 from dimos.constants import DEFAULT_CAPACITY_COLOR_IMAGE
-from dimos.core.blueprints import autoconnect
+from dimos.core.blueprints import Blueprint, autoconnect
 from dimos.core.global_config import global_config
 from dimos.core.transport import pSHMTransport
 from dimos.msgs.sensor_msgs import Image
 from dimos.protocol.pubsub.impl.lcmpubsub import LCM
 from dimos.protocol.service.system_configurator import ClockSyncConfigurator
 from dimos.robot.unitree.go2.connection import go2_connection
+from dimos.robot.unitree.go2.fleet_connection import go2_fleet_connection
 from dimos.web.websocket_vis.websocket_vis_module import websocket_vis
 
 # Mac has some issue with high bandwidth UDP, so we use pSHMTransport for color_image
@@ -112,16 +113,49 @@ match global_config.viewer_backend:
     case _:
         with_vis = _transports_base
 
-unitree_go2_basic = (
-    autoconnect(
-        with_vis,
-        go2_connection(),
-        websocket_vis(),
+
+def make_unitree_go2_basic(ip: str | None = None) -> Blueprint:
+    """Create a Go2 basic blueprint with optional IP.
+
+    Args:
+        ip: Robot IP address. If None, falls back to global_config.robot_ip.
+    """
+    return (
+        autoconnect(
+            with_vis,
+            go2_connection(ip=ip),
+            websocket_vis(),
+        )
+        .global_config(n_workers=4, robot_model="unitree_go2")
+        .configurators(ClockSyncConfigurator())
     )
-    .global_config(n_workers=4, robot_model="unitree_go2")
-    .configurators(ClockSyncConfigurator())
-)
+
+
+# Default instance for backwards compatibility
+unitree_go2_basic = make_unitree_go2_basic()
+
+
+def make_unitree_go2_fleet(ips: list[str]) -> Blueprint:
+    """Create a Go2 fleet blueprint — same cmd_vel broadcast to all robots.
+
+    Video/odometry/lidar are published from the first robot only.
+
+    Args:
+        ips: List of robot IP addresses.
+    """
+    return (
+        autoconnect(
+            with_vis,
+            go2_fleet_connection(ips=ips),
+            websocket_vis(),
+        )
+        .global_config(n_workers=4, robot_model="unitree_go2")
+        .configurators(ClockSyncConfigurator())
+    )
+
 
 __all__ = [
+    "make_unitree_go2_basic",
+    "make_unitree_go2_fleet",
     "unitree_go2_basic",
 ]
