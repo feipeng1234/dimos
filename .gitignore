@@ -38,6 +38,7 @@ __pycache__
 node_modules
 /package.json
 /package-lock.json
+pnpm-lock.yaml
 
 # Ignore build artifacts
 dist/
