@@ -136,6 +136,7 @@ function post(body) {
 (async () => {
   await post({jsonrpc:'2.0',id:1,method:'initialize',params:{protocolVersion:'2024-11-05',capabilities:{},clientInfo:{name:'openclaw-dimos',version:'0.0.1'}}});
   const res = await post({jsonrpc:'2.0',id:2,method:'tools/list',params:{}});
+  if (!res.result || !Array.isArray(res.result.tools)) { process.stderr.write('Unexpected response: ' + JSON.stringify(res)); process.exit(1); }
   process.stdout.write(JSON.stringify(res.result.tools));
 })().catch(e => { process.stderr.write(e.message); process.exit(1); });
 `;
@@ -146,6 +147,9 @@ function post(body) {
   return JSON.parse(result);
 }
 
+/** Track whether we have sent an initialize handshake from the main process. */
+let initialized = false;
+
 /** Call an MCP tool via HTTP POST to the DimOS server. */
 async function callTool(
   host: string,
@@ -154,6 +158,14 @@ async function callTool(
   args: Record<string, unknown>,
 ): Promise<string> {
   const url = mcpUrl(host, port);
+  if (!initialized) {
+    await rpc(url, "initialize", {
+      protocolVersion: "2024-11-05",
+      capabilities: {},
+      clientInfo: { name: "openclaw-dimos", version: "0.0.1" },
+    });
+    initialized = true;
+  }
   const result = (await rpc(url, "tools/call", { name, arguments: args })) as {
     content?: Array<{ type: string; text?: string }>;
   };

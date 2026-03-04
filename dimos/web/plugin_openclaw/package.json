@@ -3,7 +3,9 @@
   "version": "0.0.1",
   "description": "Exposes dimos MCP tools to the OpenClaw agent",
   "type": "module",
-  "dependencies": {},
+  "dependencies": {
+    "@sinclair/typebox": ">=0.32.0"
+  },
   "devDependencies": {},
   "peerDependencies": {
     "openclaw": ">=2026.1.26"
