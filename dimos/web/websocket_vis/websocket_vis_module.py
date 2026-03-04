@@ -377,7 +377,7 @@ class WebsocketVisModule(Module):
         self._emit("path", path_data)
 
     def _on_global_costmap(self, msg: OccupancyGrid) -> None:
-        print(f'''_on_global_costmap:msg = {msg}''')
+        # print(f'''_on_global_costmap:msg = {msg}''')
         costmap_data = self._process_costmap(msg)
         self.vis_state["costmap"] = costmap_data
         self._emit("costmap", costmap_data)

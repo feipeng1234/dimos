@@ -77,7 +77,7 @@ match global_config.viewer_backend:
 unitree_g1_primitive_no_cam = (
     autoconnect(
         _with_vis,
-        voxel_mapper(voxel_size=0.1),
+        voxel_mapper(voxel_size=0.9),
         cost_mapper(),
         wavefront_frontier_explorer(),
         # Visualization

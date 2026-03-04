@@ -147,7 +147,6 @@ class G1HighLevelDdsSdk(Module, HighLevelG1Spec):
 
     @rpc
     def move(self, twist: Twist, duration: float = 0.0) -> bool:
-        print(f'''sending move''')
         assert self.loco_client is not None
         vx = twist.linear.x
         vy = twist.linear.y

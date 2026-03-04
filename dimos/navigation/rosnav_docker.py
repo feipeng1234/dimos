@@ -104,8 +104,9 @@ class ROSNavConfig(DockerModuleConfig):
     sensor_to_base_link_transform: Transform = field(
         default_factory=lambda: Transform(frame_id="sensor", child_frame_id="base_link")
     )
-
+    
     # --- Docker settings ---
+    docker_startup_timeout = 180
     docker_image: str = "dimos_autonomy_stack:humble"
     docker_shm_size: str = "8g"
     docker_entrypoint: str = "/usr/local/bin/dimos_module_entrypoint.sh"
@@ -415,7 +416,9 @@ class ROSNav(
         self.goal_active.publish(dimos_pose)
 
     def _on_ros_cmd_vel(self, msg: ROSTwistStamped) -> None:
-        self.cmd_vel.publish(_twist_from_ros(msg.twist))
+        # FIXME: debugging only (testing )
+        # self.cmd_vel.publish(_twist_from_ros(msg.twist))
+        pass
 
     def _on_ros_registered_scan(self, msg: ROSPointCloud2) -> None:
         self.lidar.publish(_pc2_from_ros(msg))
@@ -424,7 +427,9 @@ class ROSNav(
         self.global_pointcloud.publish(_pc2_from_ros(msg))
 
     def _on_ros_overall_map(self, msg: ROSPointCloud2) -> None:
-        self.overall_map.publish(_pc2_from_ros(msg))
+        # FIXME: disabling for now for perf onboard G1 (and cause we don't have an overall map rn)
+        # self.overall_map.publish(_pc2_from_ros(msg))
+        pass
 
     def _on_ros_image(self, msg: "ROSCompressedImage") -> None:
         self.image.publish(_image_from_ros_compressed(msg))
@@ -718,14 +723,19 @@ def _pc2_from_ros(msg: "ROSPointCloud2") -> PointCloud2:
     if msg.width == 0 or msg.height == 0:
         return PointCloud2(frame_id=frame_id, ts=ts)
 
+    # ROS PointField datatype → (numpy dtype suffix, byte size)
+    _DTYPE_MAP = {1: "i1", 2: "u1", 3: "i2", 4: "u2", 5: "i4", 6: "u4", 7: "f4", 8: "f8"}
+    _SIZE_MAP = {1: 1, 2: 1, 3: 2, 4: 2, 5: 4, 6: 4, 7: 4, 8: 8}
+
     x_off = y_off = z_off = None
+    x_dt = y_dt = z_dt = 7  # default: FLOAT32
     for f in msg.fields:
         if f.name == "x":
-            x_off = f.offset
+            x_off, x_dt = f.offset, f.datatype
         elif f.name == "y":
-            y_off = f.offset
+            y_off, y_dt = f.offset, f.datatype
         elif f.name == "z":
-            z_off = f.offset
+            z_off, z_dt = f.offset, f.datatype
 
     if any(o is None for o in [x_off, y_off, z_off]):
         raise ValueError("ROS PointCloud2 missing x/y/z fields")
@@ -733,22 +743,40 @@ def _pc2_from_ros(msg: "ROSPointCloud2") -> PointCloud2:
     num_points = msg.width * msg.height
     raw = bytes(msg.data)
     step = msg.point_step
+    end = ">" if msg.is_bigendian else "<"
 
-    # Fast path: standard x/y/z layout at offsets 0/4/8
-    if x_off == 0 and y_off == 4 and z_off == 8 and step >= 12:
+    # Fast path: float32 x/y/z at offsets 0/4/8 (little-endian)
+    if (x_off == 0 and y_off == 4 and z_off == 8 and step >= 12
+            and x_dt == 7 and y_dt == 7 and z_dt == 7 and not msg.is_bigendian):
         if step == 12:
             points = np.frombuffer(raw, dtype=np.float32).reshape(-1, 3)
         else:
             dt = np.dtype([("x", "<f4"), ("y", "<f4"), ("z", "<f4"), ("_pad", f"V{step - 12}")])
             s = np.frombuffer(raw, dtype=dt, count=num_points)
             points = np.column_stack((s["x"], s["y"], s["z"]))
+    # Fast path: float64 x/y/z at offsets 0/8/16 (little-endian)
+    elif (x_off == 0 and y_off == 8 and z_off == 16 and step >= 24
+            and x_dt == 8 and y_dt == 8 and z_dt == 8 and not msg.is_bigendian):
+        if step == 24:
+            points = np.frombuffer(raw, dtype=np.float64).reshape(-1, 3).astype(np.float32)
+        else:
+            dt = np.dtype([("x", "<f8"), ("y", "<f8"), ("z", "<f8"), ("_pad", f"V{step - 24}")])
+            s = np.frombuffer(raw, dtype=dt, count=num_points)
+            points = np.column_stack((s["x"], s["y"], s["z"])).astype(np.float32)
     else:
+        # General path: respect datatype per field
+        x_np = np.dtype(end + _DTYPE_MAP.get(x_dt, "f4"))
+        y_np = np.dtype(end + _DTYPE_MAP.get(y_dt, "f4"))
+        z_np = np.dtype(end + _DTYPE_MAP.get(z_dt, "f4"))
+        x_sz = _SIZE_MAP.get(x_dt, 4)
+        y_sz = _SIZE_MAP.get(y_dt, 4)
+        z_sz = _SIZE_MAP.get(z_dt, 4)
         points = np.zeros((num_points, 3), dtype=np.float32)
         for i in range(num_points):
             base = i * step
-            points[i, 0] = struct.unpack("<f", raw[base + x_off : base + x_off + 4])[0]
-            points[i, 1] = struct.unpack("<f", raw[base + y_off : base + y_off + 4])[0]
-            points[i, 2] = struct.unpack("<f", raw[base + z_off : base + z_off + 4])[0]
+            points[i, 0] = float(np.frombuffer(raw[base + x_off : base + x_off + x_sz], dtype=x_np)[0])
+            points[i, 1] = float(np.frombuffer(raw[base + y_off : base + y_off + y_sz], dtype=y_np)[0])
+            points[i, 2] = float(np.frombuffer(raw[base + z_off : base + z_off + z_sz], dtype=z_np)[0])
 
     return PointCloud2.from_numpy(points, frame_id=frame_id, timestamp=ts)
 
