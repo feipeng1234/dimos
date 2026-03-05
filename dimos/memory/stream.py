@@ -214,7 +214,12 @@ class Stream(Generic[T]):
 
     # ── Materialize ───────────────────────────────────────────────────
 
-    def store(self, name: str | None = None) -> Stream[T]:
+    def store(
+        self,
+        name: str | None = None,
+        payload_type: type | None = None,
+        session: Session | None = None,
+    ) -> Stream[T]:
         # Already stored streams are a no-op
         if self._backend is not None and name is None:
             return self
@@ -357,6 +362,7 @@ class EmbeddingStream(Stream[T]):
         query: Embedding | list[float] | str | Any,
         *,
         k: int,
+        raw: bool = False,
     ) -> Stream[Any]:
         """Search by vector similarity.
 
@@ -364,8 +370,11 @@ class EmbeddingStream(Stream[T]):
         images/other objects.  Text and non-vector inputs are auto-embedded
         using the model that created this stream.
 
-        Auto-projects to the source stream when lineage exists, so results
-        contain the source data (e.g. Images) rather than Embedding objects.
+        By default, auto-projects to the source stream so results contain the
+        source data (e.g. Images) rather than Embedding objects.  Set
+        ``raw=True`` to skip auto-projection and get ``EmbeddingObservation``
+        results with ``.similarity``, ``.pose``, ``.ts``, and ``.data``
+        (auto-projected to parent via ``_source_data_loader``).
         """
         from dimos.models.embedding.base import Embedding as EmbeddingCls
 
@@ -373,7 +382,7 @@ class EmbeddingStream(Stream[T]):
             emb = self._require_model().embed_text(query)
             if isinstance(emb, list):
                 emb = emb[0]
-            return self.search_embedding(emb, k=k)
+            return self.search_embedding(emb, k=k, raw=raw)
 
         if isinstance(query, EmbeddingCls):
             vec = query.to_numpy().tolist()
@@ -384,7 +393,7 @@ class EmbeddingStream(Stream[T]):
             emb = self._require_model().embed(query)
             if isinstance(emb, list):
                 emb = emb[0]
-            return self.search_embedding(emb, k=k)
+            return self.search_embedding(emb, k=k, raw=raw)
 
         clone = self._with_filter(EmbeddingSearchFilter(vec, k))
         filtered: EmbeddingStream[T] = EmbeddingStream(
@@ -393,6 +402,9 @@ class EmbeddingStream(Stream[T]):
             session=clone._session,
             embedding_model=self._embedding_model,
         )
+
+        if raw:
+            return filtered
 
         # Auto-project to source stream when lineage exists
         session = filtered._session

@@ -54,8 +54,10 @@ class EmbeddingObservation(Observation):
 
     .data auto-projects to the source stream's payload type.
     .embedding gives the Embedding vector.
+    .similarity is populated (0..1) when fetched via search_embedding (vec0 cosine).
     """
 
+    similarity: float | None = field(default=None, repr=True)
     _embedding: Embedding | None = field(default=None, repr=False)
     _embedding_loader: Callable[[], Embedding] | None = field(
         default=None, repr=False, compare=False

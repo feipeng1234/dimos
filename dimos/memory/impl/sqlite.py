@@ -72,12 +72,11 @@ if TYPE_CHECKING:
 
 
 def _decompose_pose(pose: Any) -> tuple[float, float, float, float, float, float, float] | None:
-    """Extract (x, y, z, qx, qy, qz, qw) from a PoseStamped or similar."""
+    """Extract (x, y, z, qx, qy, qz, qw) from a PoseStamped."""
     if pose is None:
         return None
-    # PoseStamped has .pose.position and .pose.orientation
-    p = pose.pose.position
-    q = pose.pose.orientation
+    p = pose.position
+    q = pose.orientation
     return (p.x, p.y, p.z, q.x, q.y, q.z, q.w)
 
 
@@ -93,18 +92,11 @@ def _reconstruct_pose(
     """Rebuild a PoseStamped from column values."""
     if x is None:
         return None
-    from dimos.msgs.geometry_msgs.Point import Point
-    from dimos.msgs.geometry_msgs.Pose import Pose
     from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
-    from dimos.msgs.geometry_msgs.Quaternion import Quaternion
-    from dimos.msgs.std_msgs.Header import Header
 
     return PoseStamped(
-        header=Header(),
-        pose=Pose(
-            position=Point(x=x, y=y or 0.0, z=z or 0.0),
-            orientation=Quaternion(x=qx or 0.0, y=qy or 0.0, z=qz or 0.0, w=qw or 1.0),
-        ),
+        position=[x, y or 0.0, z or 0.0],
+        orientation=[qx or 0.0, qy or 0.0, qz or 0.0, qw or 1.0],
     )
 
 
@@ -187,11 +179,8 @@ def _compile_ids(
             params.extend(fts_params)
         elif isinstance(f, NearFilter):
             joins.append(f"JOIN {table}_rtree AS r ON r.id = {table}.id")
-            pose_parts = _decompose_pose(f.pose)
-            if pose_parts is not None:
-                x, y, z = pose_parts[0], pose_parts[1], pose_parts[2]
-            else:
-                x, y, z = 0.0, 0.0, 0.0
+            p = f.pose.position
+            x, y, z = p.x, p.y, p.z
             where_parts.append(
                 "r.min_x >= ? AND r.max_x <= ? AND "
                 "r.min_y >= ? AND r.max_y <= ? AND "
@@ -250,11 +239,8 @@ def _compile_query(query: StreamQuery, table: str) -> tuple[str, list[Any]]:
                 "r.min_y >= ? AND r.max_y <= ? AND "
                 "r.min_z >= ? AND r.max_z <= ?"
             )
-            pose_parts = _decompose_pose(f.pose)
-            if pose_parts is not None:
-                x, y, z = pose_parts[0], pose_parts[1], pose_parts[2]
-            else:
-                x, y, z = 0.0, 0.0, 0.0
+            p = f.pose.position
+            x, y, z = p.x, p.y, p.z
             params.extend(
                 [
                     x - f.radius,
@@ -299,11 +285,8 @@ def _compile_count(query: StreamQuery, table: str) -> tuple[str, list[Any]]:
     for f in query.filters:
         if isinstance(f, NearFilter):
             joins.append(f"JOIN {table}_rtree AS r ON r.id = {table}.id")
-            pose_parts = _decompose_pose(f.pose)
-            if pose_parts is not None:
-                x, y, z = pose_parts[0], pose_parts[1], pose_parts[2]
-            else:
-                x, y, z = 0.0, 0.0, 0.0
+            p = f.pose.position
+            x, y, z = p.x, p.y, p.z
             where_parts.append(
                 "r.min_x >= ? AND r.max_x <= ? AND "
                 "r.min_y >= ? AND r.max_y <= ? AND "
@@ -338,16 +321,13 @@ def _compile_count(query: StreamQuery, table: str) -> tuple[str, list[Any]]:
 
 def _apply_near_post_filter(rows: list[Observation], near: NearFilter) -> list[Observation]:
     """Post-filter R*Tree candidates by exact Euclidean distance."""
-    pose_parts = _decompose_pose(near.pose)
-    if pose_parts is None:
-        return []
-    tx, ty, tz = pose_parts[0], pose_parts[1], pose_parts[2]
+    tp = near.pose.position
     result: list[Observation] = []
     for obs in rows:
         if obs.pose is None:
             continue
-        op = obs.pose.pose.position
-        dist = ((op.x - tx) ** 2 + (op.y - ty) ** 2 + (op.z - tz) ** 2) ** 0.5
+        op = obs.pose.position
+        dist = ((op.x - tp.x) ** 2 + (op.y - tp.y) ** 2 + (op.z - tp.z) ** 2) ** 0.5
         if dist <= near.radius:
             result.append(obs)
     return result
@@ -529,7 +509,7 @@ class SqliteEmbeddingBackend(SqliteStreamBackend):
             return
         self._conn.execute(
             f"CREATE VIRTUAL TABLE IF NOT EXISTS {self._table}_vec "
-            f"USING vec0(embedding float[{self._vec_dimensions}])"
+            f"USING vec0(embedding float[{self._vec_dimensions}] distance_metric=cosine)"
         )
         self._conn.commit()
 
@@ -560,7 +540,8 @@ class SqliteEmbeddingBackend(SqliteStreamBackend):
         if not vec_rows:
             return []
 
-        rowids = [r[0] for r in vec_rows]
+        dist_map = {r[0]: r[1] for r in vec_rows}
+        rowids = list(dist_map.keys())
         placeholders = ",".join("?" * len(rowids))
 
         where_parts: list[str] = [f"{self._table}.id IN ({placeholders})"]
@@ -581,6 +562,11 @@ class SqliteEmbeddingBackend(SqliteStreamBackend):
         rows = self._conn.execute(sql, params).fetchall()
 
         observations = [self._row_to_obs(r) for r in rows]
+
+        # Populate similarity scores from vec0 cosine distance (0=identical, 2=opposite)
+        for obs in observations:
+            if isinstance(obs, EmbeddingObservation):
+                obs.similarity = max(0.0, min(1.0, 1.0 - dist_map.get(obs.id, 0.0)))
 
         near = _has_near_filter(query)
         if near is not None:

@@ -38,6 +38,7 @@ class SpatialEntry(Timestamped):
     pose: PoseStamped
 
 
+@dataclass
 class SpatialImage(SpatialEntry):
     image: Image
 
@@ -87,13 +88,13 @@ class EmbeddingMemory(Module[Config]):
             ops.map(self._store_spatial_entry),
         ).subscribe(print)
 
-    def _try_create_spatial_entry(self, img: Image) -> Observable[SpatialEntry]:
+    def _try_create_spatial_entry(self, img: Image) -> Observable[SpatialImage]:
         pose = self.tf.get_pose("world", "base_link")
         if not pose:
             return rx.empty()
-        return rx.of(SpatialEntry(image=img, pose=pose))
+        return rx.of(SpatialImage(image=img, pose=pose))
 
-    def _embed_spatial_entry(self, spatial_entry: SpatialEntry) -> SpatialEmbedding:
+    def _embed_spatial_entry(self, spatial_entry: SpatialImage) -> SpatialEmbedding:
         embedding = cast("Embedding", self.config.embedding_model.embed(spatial_entry.image))
         return SpatialEmbedding(
             image=spatial_entry.image,

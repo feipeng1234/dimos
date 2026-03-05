@@ -27,16 +27,25 @@ if TYPE_CHECKING:
 def ingest(
     stream: Stream[Any],
     source: Iterable[tuple[float, Any]],
+    *,
+    pose_source: Any | None = None,
 ) -> int:
     """Ingest (timestamp, payload) pairs into a stream.
 
     Accepts any iterable of ``(ts, data)`` — e.g. ``replay.iterate_ts(seek=5, duration=60)``.
+
+    Args:
+        pose_source: Optional replay with ``find_closest(ts)`` returning a pose
+            to attach to each frame (e.g. odom replay).
 
     Returns:
         Number of items ingested.
     """
     count = 0
     for ts, payload in source:
-        stream.append(payload, ts=ts)
+        pose = None
+        if pose_source is not None:
+            pose = pose_source.find_closest(ts)
+        stream.append(payload, ts=ts, pose=pose)
         count += 1
     return count

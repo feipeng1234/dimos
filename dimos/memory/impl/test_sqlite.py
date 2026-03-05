@@ -701,6 +701,71 @@ class TestProjectTo:
         assert isinstance(results[0], EmbeddingObservation)
 
 
+class TestSimilarityScores:
+    def test_search_populates_similarity(self, session: SqliteSession) -> None:
+        """search_embedding should populate .similarity on EmbeddingObservation."""
+        es = session.embedding_stream("sim_test", vec_dimensions=4)
+        vecs = [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.9, 0.1, 0.0, 0.0],
+        ]
+        for i, v in enumerate(vecs):
+            es.append(Embedding(np.array(v, dtype=np.float32)), ts=float(i))
+
+        results = es.search_embedding([1.0, 0.0, 0.0, 0.0], k=3).fetch()
+        assert len(results) == 3
+        for obs in results:
+            assert isinstance(obs, EmbeddingObservation)
+            assert obs.similarity is not None
+            assert 0.0 <= obs.similarity <= 1.0
+
+        # Exact match should have highest similarity
+        by_sim = sorted(results, key=lambda o: o.similarity, reverse=True)
+        assert by_sim[0].id == 1  # [1,0,0,0] is exact match
+
+    def test_similarity_none_without_search(self, session: SqliteSession) -> None:
+        """Plain fetch() should leave similarity as None."""
+        es = session.embedding_stream("sim_none", vec_dimensions=3)
+        es.append(Embedding(np.array([1.0, 0.0, 0.0], dtype=np.float32)), ts=1.0)
+
+        results = es.fetch()
+        assert len(results) == 1
+        assert isinstance(results[0], EmbeddingObservation)
+        assert results[0].similarity is None
+
+    def test_raw_returns_embedding_obs(self, session: SqliteSession, images: list[Image]) -> None:
+        """search_embedding(raw=True) returns EmbeddingObservation with similarity."""
+
+        class FakeEmbedder(EmbeddingModel):
+            device = "cpu"
+
+            def embed(self, *imgs: Image) -> Embedding | list[Embedding]:  # type: ignore[override]
+                results = []
+                for img in imgs:
+                    val = float(img.data.mean()) / 255.0
+                    results.append(Embedding(np.array([val, 1.0 - val, 0.0], dtype=np.float32)))
+                return results if len(results) > 1 else results[0]
+
+            def embed_text(self, *texts: str) -> Embedding | list[Embedding]:
+                raise NotImplementedError
+
+        imgs = session.stream("sim_proj_imgs", Image)
+        imgs.append(images[0], ts=1.0)
+        imgs.append(images[1], ts=2.0)
+
+        embs = imgs.transform(EmbeddingTransformer(FakeEmbedder())).store("sim_proj_embs")
+
+        # raw=True: get raw EmbeddingObservation with similarity
+        results = embs.search_embedding([0.5, 0.5, 0.0], k=2, raw=True).fetch()
+        assert len(results) == 2
+        for obs in results:
+            assert isinstance(obs, EmbeddingObservation)
+            assert obs.similarity is not None
+            # .data auto-projects to source Image via _source_data_loader
+            assert isinstance(obs.data, Image)
+
+
 class TestObservationSet:
     def test_fetch_returns_observation_set(
         self, session: SqliteSession, images: list[Image]
