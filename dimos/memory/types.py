@@ -33,6 +33,7 @@ class Observation:
     ts: float | None = None
     pose: PoseStamped | None = None
     tags: dict[str, Any] = field(default_factory=dict)
+    parent_id: int | None = field(default=None, repr=False)
     _data: Any = field(default=_UNSET, repr=False)
     _data_loader: Callable[[], Any] | None = field(default=None, repr=False, compare=False)
 

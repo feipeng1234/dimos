@@ -65,6 +65,7 @@ class StreamBackend(Protocol):
         ts: float | None,
         pose: Any | None,
         tags: dict[str, Any] | None,
+        parent_id: int | None = None,
     ) -> Observation: ...
     @property
     def appended_subject(self) -> Subject[Observation]: ...  # type: ignore[type-arg]
@@ -125,9 +126,10 @@ class Stream(Generic[T]):
         ts: float | None = None,
         pose: PoseLike | None = None,
         tags: dict[str, Any] | None = None,
+        parent_id: int | None = None,
     ) -> Observation:
         backend = self._require_backend()
-        return backend.do_append(payload, ts, pose, tags)
+        return backend.do_append(payload, ts, pose, tags, parent_id)
 
     # ── Temporal filters ──────────────────────────────────────────────
 
@@ -403,11 +405,13 @@ class _CollectorStream(Stream[R]):
         ts: float | None = None,
         pose: PoseLike | None = None,
         tags: dict[str, Any] | None = None,
+        parent_id: int | None = None,
     ) -> Observation:
         obs = Observation(
             id=self._next_id,
             ts=ts,
             tags=tags or {},
+            parent_id=parent_id,
             _data=payload,
         )
         self._next_id += 1

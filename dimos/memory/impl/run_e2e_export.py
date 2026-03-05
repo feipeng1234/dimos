@@ -88,11 +88,11 @@ for query_text in queries:
     results = embeddings.search_embedding(query_emb, k=5).fetch()
 
     slug = query_text.replace(" ", "_")[:30]
-    for i, r in enumerate(results):
-        img_obs = sharp.at(r.ts, tolerance=0.01).one()
-        fname = OUT_DIR / f"{slug}_{i + 1}_id{r.id}_ts{r.ts:.0f}.jpg"
-        img_obs.data.save(str(fname))
-        print(f"  [{i + 1}] id={r.id} ts={r.ts:.2f} → {fname.name}")
+    for rank, result in enumerate(results):
+        # .data auto-projects to parent image via parent_id lineage
+        fname = OUT_DIR / f"{slug}_{rank + 1}_id{result.id}_ts{result.ts:.0f}.jpg"
+        result.data.save(str(fname))
+        print(f"  [{rank + 1}] id={result.id} ts={result.ts:.2f} → {fname.name}")
 
 session.close()
 store.close()

@@ -121,7 +121,7 @@ def _deserialize_tags(text: str) -> dict[str, Any]:
 # ── SQL building ──────────────────────────────────────────────────────
 
 # Columns selected from the meta table (no payload).
-_META_COLS = "id, ts, pose_x, pose_y, pose_z, pose_qx, pose_qy, pose_qz, pose_qw, tags"
+_META_COLS = "id, ts, pose_x, pose_y, pose_z, pose_qx, pose_qy, pose_qz, pose_qw, tags, parent_id"
 
 
 def _compile_filter(f: Filter, table: str) -> tuple[str, list[Any]]:
@@ -312,6 +312,7 @@ class SqliteStreamBackend:
         ts: float | None,
         pose: Any | None,
         tags: dict[str, Any] | None,
+        parent_id: int | None = None,
     ) -> Observation:
         if ts is None:
             ts = time.time()
@@ -325,14 +326,14 @@ class SqliteStreamBackend:
         if pose_cols is not None:
             cur = self._conn.execute(
                 f"INSERT INTO {self._table} "
-                "(ts, pose_x, pose_y, pose_z, pose_qx, pose_qy, pose_qz, pose_qw, tags) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (ts, *pose_cols, tags_json),
+                "(ts, pose_x, pose_y, pose_z, pose_qx, pose_qy, pose_qz, pose_qw, tags, parent_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (ts, *pose_cols, tags_json, parent_id),
             )
         else:
             cur = self._conn.execute(
-                f"INSERT INTO {self._table} (ts, tags) VALUES (?, ?)",
-                (ts, tags_json),
+                f"INSERT INTO {self._table} (ts, tags, parent_id) VALUES (?, ?, ?)",
+                (ts, tags_json, parent_id),
             )
         row_id = cur.lastrowid
         assert row_id is not None
@@ -360,6 +361,7 @@ class SqliteStreamBackend:
             ts=ts,
             pose=pose,
             tags=tags or {},
+            parent_id=parent_id,
             _data=payload,
         )
         self._subject.on_next(obs)
@@ -382,7 +384,7 @@ class SqliteStreamBackend:
         return result[0] if result else 0  # type: ignore[no-any-return]
 
     def _row_to_obs(self, row: Any) -> Observation:
-        row_id, ts, px, py, pz, qx, qy, qz, qw, tags_json = row
+        row_id, ts, px, py, pz, qx, qy, qz, qw, tags_json, pid = row
         pose = _reconstruct_pose(px, py, pz, qx, qy, qz, qw)
         conn = self._conn
         table = self._table
@@ -399,6 +401,7 @@ class SqliteStreamBackend:
             ts=ts,
             pose=pose,
             tags=_deserialize_tags(tags_json),
+            parent_id=pid,
             _data_loader=loader,
         )
 
@@ -426,10 +429,11 @@ class SqliteEmbeddingBackend(SqliteStreamBackend):
         ts: float | None,
         pose: Any | None,
         tags: dict[str, Any] | None,
+        parent_id: int | None = None,
     ) -> Observation:
         from dimos.models.embedding.base import Embedding
 
-        obs = super().do_append(payload, ts, pose, tags)
+        obs = super().do_append(payload, ts, pose, tags, parent_id)
 
         # Also insert into vec0 table if payload is an Embedding
         if isinstance(payload, Embedding):
@@ -510,11 +514,12 @@ class SqliteEmbeddingBackend(SqliteStreamBackend):
         return observations
 
     def _row_to_obs(self, row: Any) -> Observation:
-        row_id, ts, px, py, pz, qx, qy, qz, qw, tags_json = row
+        row_id, ts, px, py, pz, qx, qy, qz, qw, tags_json, pid = row
         pose = _reconstruct_pose(px, py, pz, qx, qy, qz, qw)
         conn = self._conn
         table = self._table
         codec = self._codec
+        parent_table = self._parent_table
 
         def loader() -> Any:
             r = conn.execute(f"SELECT data FROM {table}_payload WHERE id = ?", (row_id,)).fetchone()
@@ -522,12 +527,36 @@ class SqliteEmbeddingBackend(SqliteStreamBackend):
                 raise LookupError(f"No payload for id={row_id}")
             return codec.decode(r[0])
 
+        source_loader = None
+        if pid is not None and parent_table is not None:
+
+            def _source_loader(parent_tbl: str = parent_table, parent_row_id: int = pid) -> Any:
+                r = conn.execute(
+                    f"SELECT data FROM {parent_tbl}_payload WHERE id = ?", (parent_row_id,)
+                ).fetchone()
+                if r is None:
+                    raise LookupError(f"No parent payload for id={parent_row_id}")
+                # Resolve parent codec from _streams metadata
+                meta = conn.execute(
+                    "SELECT payload_module FROM _streams WHERE name = ?", (parent_tbl,)
+                ).fetchone()
+                if meta and meta[0]:
+                    parent_type = module_path_to_type(meta[0])
+                    parent_codec = codec_for_type(parent_type)
+                else:
+                    parent_codec = codec
+                return parent_codec.decode(r[0])
+
+            source_loader = _source_loader
+
         return EmbeddingObservation(
             id=row_id,
             ts=ts,
             pose=pose,
             tags=_deserialize_tags(tags_json),
+            parent_id=pid,
             _data_loader=loader,
+            _source_data_loader=source_loader,
         )
 
 
@@ -552,8 +581,9 @@ class SqliteTextBackend(SqliteStreamBackend):
         ts: float | None,
         pose: Any | None,
         tags: dict[str, Any] | None,
+        parent_id: int | None = None,
     ) -> Observation:
-        obs = super().do_append(payload, ts, pose, tags)
+        obs = super().do_append(payload, ts, pose, tags, parent_id)
 
         text = str(payload) if payload is not None else ""
         self._conn.execute(
@@ -747,9 +777,14 @@ class SqliteSession(Session):
         live: bool = False,
         backfill_only: bool = False,
     ) -> Stream[Any]:
+        # Resolve source table name for parent lineage
+        source_table = None
+        if source._backend is not None:
+            source_table = source._backend.stream_name
+
         target: Stream[Any]
         if isinstance(transformer, EmbeddingTransformer):
-            target = self.embedding_stream(name, payload_type)
+            target = self.embedding_stream(name, payload_type, parent_table=source_table)
         else:
             target = self.stream(name, payload_type)
 

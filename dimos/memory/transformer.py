@@ -67,9 +67,9 @@ class PerItemTransformer(Transformer[T, R]):
             return
         if isinstance(result, list):
             for item in result:
-                target.append(item, ts=obs.ts, pose=obs.pose, tags=obs.tags)
+                target.append(item, ts=obs.ts, pose=obs.pose, tags=obs.tags, parent_id=obs.id)
         else:
-            target.append(result, ts=obs.ts, pose=obs.pose, tags=obs.tags)
+            target.append(result, ts=obs.ts, pose=obs.pose, tags=obs.tags, parent_id=obs.id)
 
 
 class QualityWindowTransformer(Transformer[T, T]):
@@ -104,7 +104,11 @@ class QualityWindowTransformer(Transformer[T, T]):
             if (ts - window_start) >= self._window:
                 if best_obs is not None:
                     target.append(
-                        best_obs.data, ts=best_obs.ts, pose=best_obs.pose, tags=best_obs.tags
+                        best_obs.data,
+                        ts=best_obs.ts,
+                        pose=best_obs.pose,
+                        tags=best_obs.tags,
+                        parent_id=best_obs.id,
                     )
                 window_start = ts
                 best_score = -1.0
@@ -116,7 +120,13 @@ class QualityWindowTransformer(Transformer[T, T]):
                 best_obs = obs
 
         if best_obs is not None:
-            target.append(best_obs.data, ts=best_obs.ts, pose=best_obs.pose, tags=best_obs.tags)
+            target.append(
+                best_obs.data,
+                ts=best_obs.ts,
+                pose=best_obs.pose,
+                tags=best_obs.tags,
+                parent_id=best_obs.id,
+            )
 
     def on_append(self, obs: Observation, target: Stream[T]) -> None:
         ts = obs.ts or 0.0
@@ -131,6 +141,7 @@ class QualityWindowTransformer(Transformer[T, T]):
                     ts=self._best_obs.ts,
                     pose=self._best_obs.pose,
                     tags=self._best_obs.tags,
+                    parent_id=self._best_obs.id,
                 )
             self._window_start = ts
             self._best_score = -1.0
@@ -166,10 +177,10 @@ class EmbeddingTransformer(Transformer[Any, "Embedding"]):
             if not isinstance(embeddings, list):
                 embeddings = [embeddings]
             for obs, emb in zip(page, embeddings, strict=True):
-                target.append(emb, ts=obs.ts, pose=obs.pose, tags=obs.tags)
+                target.append(emb, ts=obs.ts, pose=obs.pose, tags=obs.tags, parent_id=obs.id)
 
     def on_append(self, obs: Observation, target: Stream[Embedding]) -> None:
         emb = self.model.embed(obs.data)
         if isinstance(emb, list):
             emb = emb[0]
-        target.append(emb, ts=obs.ts, pose=obs.pose, tags=obs.tags)
+        target.append(emb, ts=obs.ts, pose=obs.pose, tags=obs.tags, parent_id=obs.id)
