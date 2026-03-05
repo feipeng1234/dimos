@@ -18,7 +18,6 @@ from concurrent.futures import ThreadPoolExecutor
 import threading
 from typing import TYPE_CHECKING, Any
 
-from dimos.core.docker_runner import DockerModule, is_docker_module
 from dimos.core.global_config import GlobalConfig, global_config
 from dimos.core.resource import Resource
 from dimos.core.worker_manager import WorkerManager
@@ -77,6 +76,8 @@ class ModuleCoordinator(Resource):  # type: ignore[misc]
         self._client.close_all()  # type: ignore[union-attr]
 
     def deploy(self, module_class: type[ModuleT], *args, **kwargs) -> ModuleProxy:  # type: ignore[no-untyped-def]
+        from dimos.core.docker_runner import DockerModule, is_docker_module
+
         if not self._client:
             raise ValueError("Trying to dimos.deploy before the client has started")
 
@@ -91,6 +92,8 @@ class ModuleCoordinator(Resource):  # type: ignore[misc]
     def deploy_parallel(
         self, module_specs: list[tuple[type[ModuleT], tuple[Any, ...], dict[str, Any]]]
     ) -> list[ModuleProxy]:
+        from dimos.core.docker_runner import DockerModule, is_docker_module
+
         if not self._client:
             raise ValueError("Not started")
 

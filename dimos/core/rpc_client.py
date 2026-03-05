@@ -91,7 +91,7 @@ class ModuleProxyProtocol(Protocol):
     def get_rpc_calls(self, *methods: str) -> RpcCall | tuple[RpcCall, ...]: ...
 
 
-class RPCClient(ModuleProxyProtocol):
+class RPCClient:
     def __init__(self, actor_instance, actor_class) -> None:  # type: ignore[no-untyped-def]
         self.rpc = LCMRPC()
         self.actor_class = actor_class

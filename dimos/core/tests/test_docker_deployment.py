@@ -78,7 +78,7 @@ class TestIsDockerModule:
 
 
 class TestModuleCoordinatorDockerRouting:
-    @patch("dimos.core.module_coordinator.DockerModule")
+    @patch("dimos.core.docker_runner.DockerModule")
     @patch("dimos.core.module_coordinator.WorkerManager")
     def test_deploy_routes_docker_module(self, mock_worker_manager_cls, mock_docker_module_cls):
         mock_worker_mgr = MagicMock()
@@ -103,7 +103,7 @@ class TestModuleCoordinatorDockerRouting:
 
         coordinator.stop()
 
-    @patch("dimos.core.module_coordinator.DockerModule")
+    @patch("dimos.core.docker_runner.DockerModule")
     @patch("dimos.core.module_coordinator.WorkerManager")
     def test_deploy_docker_propagates_constructor_failure(
         self, mock_worker_manager_cls, mock_docker_module_cls
@@ -139,7 +139,7 @@ class TestModuleCoordinatorDockerRouting:
 
         coordinator.stop()
 
-    @patch("dimos.core.module_coordinator.DockerModule")
+    @patch("dimos.core.docker_runner.DockerModule")
     @patch("dimos.core.module_coordinator.WorkerManager")
     def test_deploy_parallel_separates_docker_and_regular(
         self, mock_worker_manager_cls, mock_docker_module_cls
@@ -175,7 +175,7 @@ class TestModuleCoordinatorDockerRouting:
 
         coordinator.stop()
 
-    @patch("dimos.core.module_coordinator.DockerModule")
+    @patch("dimos.core.docker_runner.DockerModule")
     @patch("dimos.core.module_coordinator.WorkerManager")
     def test_stop_cleans_up_docker_modules(self, mock_worker_manager_cls, mock_docker_module_cls):
         mock_worker_mgr = MagicMock()

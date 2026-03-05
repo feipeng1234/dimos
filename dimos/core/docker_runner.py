@@ -143,7 +143,6 @@ def _tail_logs(cfg: DockerModuleConfig, name: str, n: int = LOG_TAIL_LINES) -> s
     return out + ("\n" + err if err else "")
 
 
-
 def _extract_module_config(cfg: DockerModuleConfig) -> dict[str, Any]:
     """Extract JSON-serializable config fields for the container (excludes docker_* fields)."""
     out: dict[str, Any] = {}
@@ -171,6 +170,7 @@ class DockerModule(ModuleProxyProtocol):
 
     Communication: All RPC happens via LCM multicast (requires --network=host).
     """
+
     config: DockerModuleConfig
 
     def __init__(self, module_class: type[Module], *args: Any, **kwargs: Any) -> None:
@@ -192,7 +192,9 @@ class DockerModule(ModuleProxyProtocol):
         self.remote_name = module_class.__name__
         # Derive container name from image name: "my-registry/foo:v2" → "dimos_foo_v2"
         image_ref = config.docker_image.rsplit("/", 1)[-1]
-        self._container_name = config.docker_container_name or f"dimos_{image_ref.replace(':', '_')}"
+        self._container_name = (
+            config.docker_container_name or f"dimos_{image_ref.replace(':', '_')}"
+        )
 
         self.rpc = LCMRPC()
         self.rpcs = set(module_class.rpcs.keys())  # type: ignore[attr-defined]
@@ -208,7 +210,10 @@ class DockerModule(ModuleProxyProtocol):
                     build_image(config)
                 else:
                     logger.info(f"Pulling {config.docker_image}")
-                    r = _run([_docker_bin(config), "pull", config.docker_image], timeout=DOCKER_RUN_TIMEOUT)
+                    r = _run(
+                        [_docker_bin(config), "pull", config.docker_image],
+                        timeout=DOCKER_RUN_TIMEOUT,
+                    )
                     if r.returncode != 0:
                         raise RuntimeError(
                             f"Failed to pull image '{config.docker_image}'.\n"
@@ -222,7 +227,10 @@ class DockerModule(ModuleProxyProtocol):
                     reconnect = True
                 else:
                     logger.info(f"Stopping existing container: {self._container_name}")
-                    _run([_docker_bin(config), "stop", self._container_name], timeout=DOCKER_STOP_TIMEOUT)
+                    _run(
+                        [_docker_bin(config), "stop", self._container_name],
+                        timeout=DOCKER_STOP_TIMEOUT,
+                    )
 
             if not reconnect:
                 _remove_container(config, self._container_name)
@@ -251,9 +259,7 @@ class DockerModule(ModuleProxyProtocol):
         self._bound_rpc_calls[method] = callable
         # Forward to container — Module.set_rpc_method unpickles the RpcCall
         # and wires it with the container's own LCMRPC
-        self.rpc.call_sync(
-            f"{self.remote_name}/set_rpc_method", ([method, callable], {})
-        )
+        self.rpc.call_sync(f"{self.remote_name}/set_rpc_method", ([method, callable], {}))
 
     def get_rpc_calls(self, *methods: str) -> RpcCall | tuple[RpcCall, ...]:
         missing = set(methods) - self._bound_rpc_calls.keys()
@@ -282,7 +288,10 @@ class DockerModule(ModuleProxyProtocol):
                 unsub()
         self._unsub_fns.clear()
         with suppress(Exception):
-            _run([_docker_bin(self.config), "stop", self._container_name], timeout=DOCKER_STOP_TIMEOUT)
+            _run(
+                [_docker_bin(self.config), "stop", self._container_name],
+                timeout=DOCKER_STOP_TIMEOUT,
+            )
         with suppress(Exception):
             _remove_container(self.config, self._container_name)
         self._running = False
