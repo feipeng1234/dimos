@@ -410,8 +410,8 @@ class Stream(Generic[T]):
                   backfill_only: bool = False,
                   ) -> Stream[R]: ...
 
-    # Materialize
-    def store(self, name: str | None = None) -> Stream[T]: ...
+    # Materialize (on TransformStream, accepts optional session= fallback)
+    def store(self, name: str | None = None, session: Session | None = None) -> Stream[T]: ...
 
     # Cross-stream (lineage join — returns tuples of (self_obs, target_obs))
     def join(self, target: Stream) -> Stream[tuple[Observation, Observation]]: ...
@@ -450,6 +450,10 @@ class Session:
     def text_stream(self, name: str, payload_type: type | None = None, *,
                     tokenizer: str = "unicode61",
                     pose_provider: PoseProvider | None = None) -> TextStream: ...
+    def materialize_transform(self, name: str, source: Stream,
+                              transformer: Transformer,
+                              *, live: bool = False,
+                              backfill_only: bool = False) -> Stream: ...
     def list_streams(self) -> list[StreamInfo]: ...
     def close(self) -> None: ...
 
@@ -468,10 +472,21 @@ A `Stream` can be backed by different things — the user never sees this:
 
 The impl decides how to execute based on the backing chain.
 
+## Implementation Notes
+
+- **No ORM** — raw `sqlite3` with direct SQL. The `Stream` filter chain *is* the query builder.
+- **Session threading** — streams created by `session.stream()` get `_session` set. `TransformStream` inherits it from its source. `store()` also accepts an explicit `session=` fallback.
+- **Serialization** — payloads are `pickle`, poses are `pickle`, tags are JSON.
+- **Near filter** — compiled as no-op SQL (`1=1`), filtered post-query in Python via pose distance.
+
+## Resolved Questions
+
+1. **`.append()` on non-stored streams?** → `TypeError` (requires backend).
+2. **Multiple `.store()` calls?** → Idempotent — returns existing stream if already stored.
+3. ~~**Memory pressure from in-memory transforms?**~~ → Solved via `fetch_pages`.
+
 ## Open Questions
 
-1. **`.append()` on non-stored streams?** Runtime error, or silently ignore? Probably `TypeError`.
-
-2. **Multiple `.store()` calls?** Should be idempotent — second call is a no-op if already stored under the same name.
-
-3. ~~**Memory pressure from in-memory transforms?**~~ Solved — `Stream` is iterable, pages internally via `fetch_pages`.
+1. **`project_to` / lineage** — `parent_id` column exists but not yet wired.
+2. **Incremental transforms** — re-running a stored transform should resume from last processed item.
+3. **`__iter__`** — spec shows `Stream.__iter__` but not yet implemented.

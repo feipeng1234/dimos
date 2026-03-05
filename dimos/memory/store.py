@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .stream import Stream, TextStream
+    from .transformer import Transformer
     from .types import PoseProvider, StreamInfo
 
 
@@ -48,6 +49,18 @@ class Session(ABC):
 
     @abstractmethod
     def list_streams(self) -> list[StreamInfo]: ...
+
+    @abstractmethod
+    def materialize_transform(
+        self,
+        name: str,
+        source: Stream[Any],
+        transformer: Transformer[Any, Any],
+        *,
+        live: bool = False,
+        backfill_only: bool = False,
+    ) -> Stream[Any]:
+        """Create a stored stream from a transform pipeline."""
 
     @abstractmethod
     def close(self) -> None: ...

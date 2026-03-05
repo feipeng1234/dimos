@@ -278,6 +278,47 @@ class TestTransformInMemory:
         assert [r.data for r in results] == ["a", "b", "c"]
 
 
+class TestTransformStore:
+    def test_transform_store_backfill(self, session: SqliteSession) -> None:
+        s = session.stream("data", str)
+        s.append("hello", ts=1.0)
+        s.append("world", ts=2.0)
+
+        stored = s.transform(lambda x: x.upper()).store("upper_data")
+        rows = stored.fetch()
+        assert len(rows) == 2
+        assert rows[0].data == "HELLO"
+        assert rows[1].data == "WORLD"
+
+        # Also queryable by name
+        reloaded = session.stream("upper_data")
+        assert reloaded.count() == 2
+
+    def test_transform_store_live(self, session: SqliteSession) -> None:
+        s = session.stream("data", str)
+        s.append("existing", ts=1.0)
+
+        # live=True skips backfill, only processes new items
+        stored = s.transform(lambda x: x.upper(), live=True).store("live_upper")
+        assert stored.count() == 0  # no backfill
+
+        s.append("new", ts=2.0)
+        assert stored.count() == 1
+        assert stored.last().data == "NEW"
+
+    def test_transform_store_backfill_only(self, session: SqliteSession) -> None:
+        s = session.stream("data", str)
+        s.append("existing", ts=1.0)
+
+        stored = s.transform(lambda x: x.upper(), backfill_only=True).store("backfill_upper")
+        assert stored.count() == 1
+        assert stored.one().data == "EXISTING"
+
+        # New appends should NOT propagate
+        s.append("new", ts=2.0)
+        assert stored.count() == 1  # still 1
+
+
 class TestStoreReopen:
     def test_data_persists(self, tmp_path: object) -> None:
         from pathlib import Path

@@ -34,6 +34,7 @@ from reactivex.subject import Subject
 
 from dimos.memory.store import Session, Store
 from dimos.memory.stream import EmbeddingStream, Stream, TextStream
+from dimos.memory.transformer import EmbeddingTransformer, Transformer
 from dimos.memory.types import (
     AfterFilter,
     AtFilter,
@@ -508,7 +509,7 @@ class SqliteSession(Session):
         self._register_stream(name, payload_type, "stream")
 
         backend = SqliteStreamBackend(self._conn, name, pose_provider=pose_provider)
-        s: Stream[Any] = Stream(backend=backend)
+        s: Stream[Any] = Stream(backend=backend, session=self)
         self._streams[name] = s
         return s
 
@@ -530,7 +531,7 @@ class SqliteSession(Session):
         backend = SqliteTextBackend(
             self._conn, name, tokenizer=tokenizer, pose_provider=pose_provider
         )
-        ts: TextStream[Any] = TextStream(backend=backend)
+        ts: TextStream[Any] = TextStream(backend=backend, session=self)
         self._streams[name] = ts
         return ts
 
@@ -559,7 +560,7 @@ class SqliteSession(Session):
         if vec_dimensions is not None:
             backend._ensure_vec_table()
 
-        es: EmbeddingStream[Any] = EmbeddingStream(backend=backend)
+        es: EmbeddingStream[Any] = EmbeddingStream(backend=backend, session=self)
         self._streams[name] = es
         return es
 
@@ -571,6 +572,32 @@ class SqliteSession(Session):
             count = count_row[0] if count_row else 0
             result.append(StreamInfo(name=name, payload_type=ptype, count=count))
         return result
+
+    def materialize_transform(
+        self,
+        name: str,
+        source: Stream[Any],
+        transformer: Transformer[Any, Any],
+        *,
+        live: bool = False,
+        backfill_only: bool = False,
+    ) -> Stream[Any]:
+        # Determine stream type from transformer
+        target: Stream[Any]
+        if isinstance(transformer, EmbeddingTransformer):
+            target = self.embedding_stream(name)
+        else:
+            target = self.stream(name)
+
+        # Backfill existing data
+        if transformer.supports_backfill and not live:
+            transformer.process(source, target)
+
+        # Subscribe to live updates
+        if transformer.supports_live and not backfill_only:
+            source.appended.subscribe(on_next=lambda obs: transformer.on_append(obs, target))
+
+        return target
 
     def close(self) -> None:
         for s in self._streams.values():

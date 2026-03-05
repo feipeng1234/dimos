@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     from dimos.models.embedding.base import Embedding
     from dimos.msgs.geometry_msgs.Pose import PoseLike
 
+    from .store import Session
     from .transformer import Transformer
 
 T = TypeVar("T")
@@ -83,9 +84,11 @@ class Stream(Generic[T]):
         backend: StreamBackend | None = None,
         *,
         query: StreamQuery | None = None,
+        session: Session | None = None,
     ) -> None:
         self._backend = backend
         self._query = query or StreamQuery()
+        self._session: Session | None = session
 
     def _clone(self, **overrides: Any) -> Stream[T]:
         """Return a new Stream with updated query fields."""
@@ -100,6 +103,7 @@ class Stream(Generic[T]):
         clone: Stream[T] = self.__class__.__new__(self.__class__)
         clone._backend = self._backend
         clone._query = new_query
+        clone._session = self._session
         return clone
 
     def _with_filter(self, f: Filter) -> Stream[T]:
@@ -205,6 +209,9 @@ class Stream(Generic[T]):
     # ── Materialize ───────────────────────────────────────────────────
 
     def store(self, name: str | None = None) -> Stream[T]:
+        # Already stored streams are a no-op
+        if self._backend is not None and name is None:
+            return self
         raise TypeError(
             "store() requires a session context. This stream is not associated with a session."
         )
@@ -349,15 +356,22 @@ class TransformStream(Stream[R]):
             self._transformer.process(self._source, collector)
         return collector.results
 
-    def store(self, name: str | None = None) -> Stream[R]:
-        # Delegated to session — TransformStream.store() is overridden
-        # by the session when the source stream has a backend
-        source_backend = self._source._backend
-        if source_backend is None:
-            raise TypeError("Cannot store a transform whose source has no backend session")
-        # The backend's session handles materialization
-        raise NotImplementedError(
-            "store() on TransformStream must be handled by the session/backend"
+    def store(self, name: str | None = None, session: Session | None = None) -> Stream[R]:
+        resolved = session or self._source._session
+        if resolved is None:
+            raise TypeError(
+                "Cannot store: no session available. "
+                "Either use session.stream() to create the source, "
+                "or pass session= to store()."
+            )
+        if name is None:
+            raise TypeError("store() requires a name for transform outputs")
+        return resolved.materialize_transform(
+            name=name,
+            source=self._source,
+            transformer=self._transformer,
+            live=self._live,
+            backfill_only=self._backfill_only,
         )
 
 
