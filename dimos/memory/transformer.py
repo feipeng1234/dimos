@@ -182,6 +182,40 @@ class CaptionTransformer(Transformer[Any, str]):
         target.append(caption, ts=obs.ts, pose=obs.pose, tags=obs.tags, parent_id=obs.id)
 
 
+class TextEmbeddingTransformer(Transformer[Any, "Embedding"]):
+    """Wraps an EmbeddingModel to embed text payloads (strings) into vectors.
+
+    Use this for semantic search over logs, captions, or any text data.
+    When stored, the output stream becomes an EmbeddingStream with vector index.
+    """
+
+    supports_backfill: bool = True
+    supports_live: bool = True
+
+    def __init__(self, model: EmbeddingModel) -> None:
+        from dimos.models.embedding.base import Embedding as EmbeddingCls
+
+        self.model = model
+        self.output_type: type | None = EmbeddingCls
+
+    def process(self, source: Stream[Any], target: Stream[Embedding]) -> None:
+        for page in source.fetch_pages():
+            texts = [str(obs.data) for obs in page]
+            if not texts:
+                continue
+            embeddings = self.model.embed_text(*texts)
+            if not isinstance(embeddings, list):
+                embeddings = [embeddings]
+            for obs, emb in zip(page, embeddings, strict=True):
+                target.append(emb, ts=obs.ts, pose=obs.pose, tags=obs.tags, parent_id=obs.id)
+
+    def on_append(self, obs: Observation, target: Stream[Embedding]) -> None:
+        emb = self.model.embed_text(str(obs.data))
+        if isinstance(emb, list):
+            emb = emb[0]
+        target.append(emb, ts=obs.ts, pose=obs.pose, tags=obs.tags, parent_id=obs.id)
+
+
 class EmbeddingTransformer(Transformer[Any, "Embedding"]):
     """Wraps an EmbeddingModel as a Transformer that produces Embedding output.
 

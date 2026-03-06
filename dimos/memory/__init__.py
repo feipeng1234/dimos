@@ -5,6 +5,7 @@ from dimos.memory.transformer import (
     CaptionTransformer,
     EmbeddingTransformer,
     PerItemTransformer,
+    TextEmbeddingTransformer,
     Transformer,
 )
 from dimos.memory.types import (
@@ -29,6 +30,7 @@ __all__ = [
     "Store",
     "Stream",
     "StreamInfo",
+    "TextEmbeddingTransformer",
     "TextStream",
     "Transformer",
     "codec_for_type",

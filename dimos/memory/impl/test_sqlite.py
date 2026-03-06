@@ -20,7 +20,7 @@ import numpy as np
 import pytest
 
 from dimos.memory.impl.sqlite import SqliteSession, SqliteStore
-from dimos.memory.transformer import EmbeddingTransformer
+from dimos.memory.transformer import EmbeddingTransformer, TextEmbeddingTransformer
 from dimos.memory.types import _UNSET, EmbeddingObservation, Observation
 from dimos.models.embedding.base import Embedding, EmbeddingModel
 from dimos.msgs.sensor_msgs.Image import Image
@@ -246,6 +246,150 @@ class TestTextStream:
         rows = s.search_text("motor", k=10).fetch()
         assert len(rows) == 2
         assert all("Motor" in r.data for r in rows)
+
+
+class TestTextStorage:
+    """Test storing plain text (str) in streams."""
+
+    def test_store_and_fetch_str(self, session: SqliteSession) -> None:
+        s = session.stream("raw_logs", str)
+        s.append("Robot started navigation to kitchen", ts=1.0)
+        s.append("Obstacle detected at waypoint 3", ts=2.0)
+        s.append("Navigation complete", ts=3.0)
+
+        assert s.count() == 3
+        rows = s.fetch()
+        assert rows[0].data == "Robot started navigation to kitchen"
+        assert rows[2].data == "Navigation complete"
+
+    def test_str_with_tags_and_filters(self, session: SqliteSession) -> None:
+        s = session.stream("tagged_logs", str)
+        s.append("Motor fault on joint 3", ts=1.0, tags={"level": "error"})
+        s.append("Battery at 80%", ts=2.0, tags={"level": "info"})
+        s.append("Motor overheating", ts=3.0, tags={"level": "error"})
+
+        errors = s.filter_tags(level="error").fetch()
+        assert len(errors) == 2
+        assert all("Motor" in e.data for e in errors)
+
+    def test_str_persists_reopen(self, tmp_path: object) -> None:
+        from pathlib import Path
+
+        assert isinstance(tmp_path, Path)
+        db_path = str(tmp_path / "logs.db")
+
+        store1 = SqliteStore(db_path)
+        s1 = store1.session()
+        s1.stream("logs", str).append("hello world", ts=1.0)
+        s1.close()
+        store1.close()
+
+        store2 = SqliteStore(db_path)
+        s2 = store2.session()
+        rows = s2.stream("logs", str).fetch()
+        assert len(rows) == 1
+        assert rows[0].data == "hello world"
+        s2.close()
+        store2.close()
+
+
+class TestTextEmbeddingTransformer:
+    """Test text → embedding → semantic search pipeline."""
+
+    def test_text_to_embedding_backfill(self, session: SqliteSession) -> None:
+        """Backfill: store text, transform to embeddings, search by text."""
+
+        class FakeTextEmbedder(EmbeddingModel):
+            device = "cpu"
+
+            def embed(self, *imgs: Image) -> Embedding | list[Embedding]:  # type: ignore[override]
+                raise NotImplementedError
+
+            def embed_text(self, *texts: str) -> Embedding | list[Embedding]:
+                results = []
+                for text in texts:
+                    # Simple fake: hash text to a stable vector
+                    h = hash(text) % 1000 / 1000.0
+                    results.append(Embedding(np.array([h, 1.0 - h, 0.0, 0.0], dtype=np.float32)))
+                return results if len(results) > 1 else results[0]
+
+        logs = session.stream("te_logs", str)
+        logs.append("Robot navigated to kitchen", ts=1.0)
+        logs.append("Battery low warning", ts=2.0)
+        logs.append("Robot navigated to bedroom", ts=3.0)
+
+        embedder = FakeTextEmbedder()
+        emb_stream = logs.transform(TextEmbeddingTransformer(embedder)).store("te_log_embeddings")
+
+        assert emb_stream.count() == 3
+
+        # Search — the model embeds the query text into the same space
+        results = emb_stream.search_embedding("Robot navigated to kitchen", k=1).fetch()
+        assert len(results) == 1
+        # Auto-projects to source — data should be original text
+        assert isinstance(results[0].data, str)
+
+    def test_text_embedding_live(self, session: SqliteSession) -> None:
+        """Live mode: new text is embedded automatically."""
+
+        class FakeTextEmbedder(EmbeddingModel):
+            device = "cpu"
+
+            def embed(self, *imgs: Image) -> Embedding | list[Embedding]:  # type: ignore[override]
+                raise NotImplementedError
+
+            def embed_text(self, *texts: str) -> Embedding | list[Embedding]:
+                results = []
+                for text in texts:
+                    h = hash(text) % 1000 / 1000.0
+                    results.append(Embedding(np.array([h, 1.0 - h, 0.0], dtype=np.float32)))
+                return results if len(results) > 1 else results[0]
+
+        logs = session.stream("te_live_logs", str)
+        emb_stream = logs.transform(TextEmbeddingTransformer(FakeTextEmbedder()), live=True).store(
+            "te_live_embs"
+        )
+
+        assert emb_stream.count() == 0  # no backfill
+
+        logs.append("New log entry", ts=1.0)
+        assert emb_stream.count() == 1
+
+        logs.append("Another log entry", ts=2.0)
+        assert emb_stream.count() == 2
+
+    def test_text_embedding_search_projects_to_source(self, session: SqliteSession) -> None:
+        """search_embedding auto-projects back to source text stream."""
+
+        class FakeTextEmbedder(EmbeddingModel):
+            device = "cpu"
+
+            def embed(self, *imgs: Image) -> Embedding | list[Embedding]:  # type: ignore[override]
+                raise NotImplementedError
+
+            def embed_text(self, *texts: str) -> Embedding | list[Embedding]:
+                results = []
+                for text in texts:
+                    # "kitchen" texts get similar vectors
+                    if "kitchen" in text.lower():
+                        results.append(Embedding(np.array([1.0, 0.0, 0.0], dtype=np.float32)))
+                    else:
+                        results.append(Embedding(np.array([0.0, 1.0, 0.0], dtype=np.float32)))
+                return results if len(results) > 1 else results[0]
+
+        logs = session.stream("te_proj_logs", str)
+        logs.append("Robot entered kitchen", ts=1.0)
+        logs.append("Battery warning", ts=2.0)
+        logs.append("Cleaning kitchen floor", ts=3.0)
+
+        emb_stream = logs.transform(TextEmbeddingTransformer(FakeTextEmbedder())).store(
+            "te_proj_embs"
+        )
+
+        # Search for kitchen-related logs
+        results = emb_stream.search_embedding("kitchen", k=2).fetch()
+        assert len(results) == 2
+        assert all("kitchen" in r.data.lower() for r in results)
 
 
 class TestEmbeddingStream:

@@ -46,7 +46,12 @@ from dimos.memory.codec import (
 )
 from dimos.memory.store import Session, Store
 from dimos.memory.stream import EmbeddingStream, Stream, TextStream
-from dimos.memory.transformer import CaptionTransformer, EmbeddingTransformer, Transformer
+from dimos.memory.transformer import (
+    CaptionTransformer,
+    EmbeddingTransformer,
+    TextEmbeddingTransformer,
+    Transformer,
+)
 from dimos.memory.types import (
     AfterFilter,
     AtFilter,
@@ -888,7 +893,7 @@ class SqliteSession(Session):
             source_table = source._backend.stream_name
 
         target: Stream[Any]
-        if isinstance(transformer, EmbeddingTransformer):
+        if isinstance(transformer, (EmbeddingTransformer, TextEmbeddingTransformer)):
             target = self.embedding_stream(name, payload_type, parent_table=source_table)
             target._embedding_model = transformer.model
         elif isinstance(transformer, CaptionTransformer):
