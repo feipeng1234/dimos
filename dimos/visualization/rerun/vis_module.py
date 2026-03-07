@@ -22,7 +22,7 @@ from dimos.core.global_config import ViewerBackend
 from dimos.protocol.pubsub.impl.lcmpubsub import LCM
 
 
-def viz_module(
+def vis_module(
     viewer_backend: ViewerBackend,
     rerun_config: dict[str, Any] | None = None,
     foxglove_config: dict[str, Any] | None = None,
@@ -30,7 +30,7 @@ def viz_module(
     """
     Example usage:
         from dimos.core.global_config import global_config
-        viz = viz_module(
+        viz = vis_module(
             .viewer_backend,
             rerun_config={
                 "visual_override": {
