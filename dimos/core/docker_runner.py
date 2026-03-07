@@ -489,7 +489,15 @@ class DockerModule(ModuleProxyProtocol):
         kwargs = {"config": _extract_module_config(cfg)}
         payload = {"module_path": module_path, "args": list(self._args), "kwargs": kwargs}
         # DimOS base image entrypoint already runs "dimos.core.docker_runner run"
-        return ["--payload", json.dumps(payload, separators=(",", ":"))]
+        try:
+            payload_json = json.dumps(payload, separators=(",", ":"))
+        except TypeError as e:
+            raise TypeError(
+                f"Cannot serialize DockerModule payload to JSON: {e}\n"
+                f"Ensure all constructor args/kwargs for {self._module_class.__name__} are "
+                f"JSON-serializable, or use docker_command to bypass automatic payload generation."
+            ) from e
+        return ["--payload", payload_json]
 
     def _wait_for_rpc(self) -> None:
         """Poll until the container's RPC server is reachable."""

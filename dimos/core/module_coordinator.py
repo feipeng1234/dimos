@@ -14,7 +14,6 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 import threading
 from typing import TYPE_CHECKING, Any
 
@@ -173,11 +172,18 @@ class ModuleCoordinator(Resource):  # type: ignore[misc]
         return results
 
     def start_all_modules(self) -> None:
+        from dimos.utils.safe_thread_map import safe_thread_map
+
         modules = list(self._deployed_modules.values())
         if not modules:
             raise ValueError("No modules deployed. Call deploy() before start_all_modules().")
-        with ThreadPoolExecutor(max_workers=len(modules)) as executor:
-            list(executor.map(lambda m: m.start(), modules))
+
+        def _on_start_errors(
+            _outcomes: list[Any], _successes: list[Any], errors: list[Exception]
+        ) -> None:
+            raise ExceptionGroup("start_all_modules failed", errors)
+
+        safe_thread_map(modules, lambda m: m.start(), _on_start_errors)
 
         for module in modules:
             if hasattr(module, "on_system_modules"):
