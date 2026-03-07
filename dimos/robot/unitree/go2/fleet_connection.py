@@ -59,8 +59,7 @@ class Go2FleetConnection(GO2Connection):
             ips = [ip.strip() for ip in raw.split(",") if ip.strip()]
         self._extra_ips = ips[1:]
         self._extra_connections: list[Go2ConnectionProtocol] = []
-        # Primary robot handled by parent
-        super().__init__(ip=ips[0], cfg=cfg, *args, **kwargs)
+        super().__init__(*args, ip=ips[0], cfg=cfg, **kwargs)
 
     @rpc
     def start(self) -> None:
@@ -82,6 +81,7 @@ class Go2FleetConnection(GO2Connection):
         # one robot's error should not prevent others from stopping
         for conn in self._extra_connections:
             try:
+                conn.liedown()
                 conn.stop()
             except Exception as e:
                 logger.error(f"Error stopping fleet Go2: {e}")

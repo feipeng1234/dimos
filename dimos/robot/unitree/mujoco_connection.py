@@ -229,8 +229,8 @@ class MujocoConnection:
     def liedown(self) -> bool:
         return True
 
-    def balance_stand(self) -> None:
-        pass
+    def balance_stand(self) -> bool:
+        return True
 
     def disable_obstacle_avoidance(self) -> None:
         pass
