@@ -77,7 +77,8 @@ def _compute_build_hash(cfg: DockerModuleConfig) -> str:
     digest.update(cfg.docker_file.read_bytes())
     for key, val in sorted(cfg.docker_build_args.items()):
         digest.update(f"{key}={val}".encode())
-    digest.update(f"ssh={cfg.docker_build_ssh}".encode())
+    for arg in cfg.docker_build_extra_args:
+        digest.update(arg.encode())
     return digest.hexdigest()
 
 
@@ -115,10 +116,9 @@ def build_image(cfg: DockerModuleConfig) -> None:
     context = cfg.docker_build_context or cfg.docker_file.parent
     cmd = [cfg.docker_bin, "build", "-t", cfg.docker_image, "-f", str(dockerfile)]
     cmd.extend(["--label", f"{_BUILD_HASH_LABEL}={build_hash}"])
-    if cfg.docker_build_ssh:
-        cmd.extend(["--ssh", "default"])
     for k, v in cfg.docker_build_args.items():
         cmd.extend(["--build-arg", f"{k}={v}"])
+    cmd.extend(cfg.docker_build_extra_args)
     cmd.append(str(context))
 
     logger.info(f"Building Docker image: {cfg.docker_image}")
