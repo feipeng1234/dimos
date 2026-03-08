@@ -326,7 +326,9 @@ if [ "$MODE" = "unity_sim" ] || [ -z "$MODE" ]; then
     MODE="simulation"
 fi
 
-LAUNCH_ARGS="enable_bridge:=false"
+VEHICLE_HEIGHT="${VEHICLE_HEIGHT:-0.75}"
+
+LAUNCH_ARGS="enable_bridge:=false vehicleHeight:=${VEHICLE_HEIGHT}"
 if [ "$LOCALIZATION_METHOD" = "fastlio" ]; then
     LAUNCH_ARGS="use_fastlio2:=true ${LAUNCH_ARGS}"
 elif [ "$LOCALIZATION_METHOD" = "arise_slam" ]; then

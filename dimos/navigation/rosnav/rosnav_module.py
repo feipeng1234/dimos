@@ -68,7 +68,6 @@ except ModuleNotFoundError:
 
 from dimos_lcm.std_msgs import Bool
 
-from dimos import spec
 from dimos.agents.annotation import skill
 from dimos.core.core import rpc
 from dimos.core.docker_runner import DockerModuleConfig
@@ -84,7 +83,7 @@ from dimos.msgs.geometry_msgs import (
 from dimos.msgs.nav_msgs import Path as NavPath
 from dimos.msgs.sensor_msgs import Image, ImageFormat, PointCloud2
 from dimos.msgs.tf2_msgs.TFMessage import TFMessage
-from dimos.navigation.base import NavigationInterface, NavigationState
+from dimos.navigation.base import NavigationState
 from dimos.utils.data import get_data
 from dimos.utils.logging_config import setup_logger
 from dimos.utils.transform_utils import euler_to_quaternion
@@ -144,6 +143,12 @@ class ROSNavConfig(DockerModuleConfig):
             *(["/dev/dri:/dev/dri"] if Path("/dev/dri").exists() else []),
         ]
     )
+
+    # --- Vehicle geometry ---
+    # Height of the robot's base_link above the ground plane (metres).
+    # The CMU nav stack uses this to position the simulated sensor origin;
+    # it is forwarded to the ROS launch as the ``vehicleHeight`` parameter.
+    vehicle_height: float = 0.75
 
     # --- Runtime mode settings ---
     # mode controls which ROS launch file the entrypoint selects:
@@ -216,6 +221,7 @@ class ROSNavConfig(DockerModuleConfig):
         self.docker_env["LOCALIZATION_METHOD"] = self.localization_method
         self.docker_env["ROBOT_CONFIG_PATH"] = self.robot_config_path
         self.docker_env["ROBOT_IP"] = self.robot_ip
+        self.docker_env["VEHICLE_HEIGHT"] = str(self.vehicle_height)
 
         # Pass host DISPLAY through for X11 forwarding (RViz, Unity)
         if display := os.environ.get("DISPLAY", ":0"):
@@ -410,10 +416,10 @@ class ROSNav(Module):
         self.cmd_vel.publish(_twist_from_ros(msg.twist))
 
     def _on_ros_registered_scan(self, msg: ROSPointCloud2) -> None:
-        self.lidar.publish(_shift_pc2_z(_pc2_from_ros(msg)))
+        self.lidar.publish(_pc2_from_ros(msg))
 
     def _on_ros_global_map(self, msg: ROSPointCloud2) -> None:
-        self.global_pointcloud.publish(_shift_pc2_z(_pc2_from_ros(msg)))
+        self.global_pointcloud.publish(_pc2_from_ros(msg))
 
     def _on_ros_overall_map(self, msg: ROSPointCloud2) -> None:
         # FIXME: disabling for now for perf onboard G1 (and cause we don't have an overall map rn)
@@ -702,20 +708,6 @@ def _image_from_ros_compressed(msg: "ROSCompressedImage") -> Image:
     if bgr is None:
         return Image(frame_id=frame_id, ts=ts)
     return Image(data=bgr, format=ImageFormat.BGR, frame_id=frame_id, ts=ts)
-
-
-def _shift_pc2_z(pc2: PointCloud2, z_offset: float=1.5) -> PointCloud2:
-    """Shift all points in a PointCloud2 by z_offset along the Z axis using open3d."""
-    import open3d.core as o3c
-
-    pcd_t = pc2._pcd_tensor
-    if "positions" not in pcd_t.point or len(pcd_t.point["positions"]) == 0:
-        return pc2
-    pts = pcd_t.point["positions"].numpy().copy()
-    pts[:, 2] += z_offset
-    shifted = pcd_t.clone()
-    shifted.point["positions"] = o3c.Tensor(pts, dtype=o3c.float32)
-    return PointCloud2(pointcloud=shifted, ts=pc2.ts, frame_id=pc2.frame_id)
 
 
 def _pc2_from_ros(msg: "ROSPointCloud2") -> PointCloud2:

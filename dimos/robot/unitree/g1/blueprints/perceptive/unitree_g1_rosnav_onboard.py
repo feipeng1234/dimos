@@ -22,21 +22,19 @@ from dimos.navigation.replanning_a_star.module import replanning_a_star_planner
 from dimos.navigation.rosnav.rosnav_module import ROSNav
 from dimos.robot.unitree.g1.blueprints.basic.unitree_g1_onboard import unitree_g1_onboard
 
-unitree_g1_rosnav_onboard = (
-    autoconnect(
-        unitree_g1_onboard,
-        replanning_a_star_planner(),
-        ROSNav.blueprint(
-            mode="hardware",
-            unitree_ip=os.getenv("ROBOT_IP", "192.168.12.1"),
-            unitree_conn=os.getenv("ROSNAV_UNITREE_CONN", "LocalAP"),
-            lidar_interface=os.getenv("ROSNAV_LIDAR_INTERFACE", "eth0"),
-            lidar_computer_ip=os.getenv("ROSNAV_LIDAR_COMPUTER_IP", "192.168.123.5"),
-            lidar_gateway=os.getenv("ROSNAV_LIDAR_GATEWAY", "192.168.123.1"),
-            lidar_ip=os.getenv("ROSNAV_LIDAR_IP", "192.168.123.120"),
-        ),
-    )
-    .global_config(n_workers=8, robot_model="unitree_g1")
-)
+unitree_g1_rosnav_onboard = autoconnect(
+    unitree_g1_onboard,
+    replanning_a_star_planner(),
+    ROSNav.blueprint(
+        mode="hardware",
+        vehicle_height=1.24,
+        unitree_ip=os.getenv("ROBOT_IP", "192.168.12.1"),
+        unitree_conn=os.getenv("ROSNAV_UNITREE_CONN", "LocalAP"),
+        lidar_interface=os.getenv("ROSNAV_LIDAR_INTERFACE", "eth0"),
+        lidar_computer_ip=os.getenv("ROSNAV_LIDAR_COMPUTER_IP", "192.168.123.5"),
+        lidar_gateway=os.getenv("ROSNAV_LIDAR_GATEWAY", "192.168.123.1"),
+        lidar_ip=os.getenv("ROSNAV_LIDAR_IP", "192.168.123.120"),
+    ),
+).global_config(n_workers=8, robot_model="unitree_g1")
 
 __all__ = ["unitree_g1_rosnav_onboard"]
