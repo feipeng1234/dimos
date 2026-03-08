@@ -21,9 +21,6 @@ from typing import TYPE_CHECKING, Any
 
 from dimos.core.core import rpc
 from dimos.core.global_config import GlobalConfig, global_config
-from dimos.core.transport import LCMTransport, pSHMTransport
-from dimos.msgs.geometry_msgs import Twist
-from dimos.msgs.sensor_msgs import CameraInfo
 from dimos.robot.unitree.go2.connection import (
     GO2Connection,
     Go2ConnectionProtocol,
@@ -31,8 +28,7 @@ from dimos.robot.unitree.go2.connection import (
 )
 
 if TYPE_CHECKING:
-    from dimos.core.module_coordinator import ModuleCoordinator
-    from dimos.core.rpc_client import ModuleProxy
+    from dimos.msgs.geometry_msgs import Twist
 
 logger = logging.getLogger(__name__)
 
@@ -59,10 +55,11 @@ class Go2FleetConnection(GO2Connection):
             ips = [ip.strip() for ip in raw.split(",") if ip.strip()]
         self._extra_ips = ips[1:]
         self._extra_connections: list[Go2ConnectionProtocol] = []
-        super().__init__(*args, ip=ips[0], cfg=cfg, **kwargs)
+        super().__init__(ips[0], cfg, *args, **kwargs)
 
     @rpc
     def start(self) -> None:
+        self._extra_connections.clear()
         for ip in self._extra_ips:
             logger.info(f"Connecting to fleet Go2 at {ip}...")
             conn = make_connection(ip, self._global_config)
@@ -82,6 +79,9 @@ class Go2FleetConnection(GO2Connection):
         for conn in self._extra_connections:
             try:
                 conn.liedown()
+            except Exception as e:
+                logger.error(f"Error lying down fleet Go2: {e}")
+            try:
                 conn.stop()
             except Exception as e:
                 logger.error(f"Error stopping fleet Go2: {e}")
@@ -92,48 +92,41 @@ class Go2FleetConnection(GO2Connection):
     def _all_connections(self) -> list[Go2ConnectionProtocol]:
         return [self.connection, *self._extra_connections]
 
+    def _broadcast(self, method: str, *args: object, **kwargs: object) -> list[bool]:
+        """Call a method on all connections, isolating errors per robot."""
+        results: list[bool] = []
+        for conn in self._all_connections:
+            try:
+                results.append(getattr(conn, method)(*args, **kwargs))
+            except Exception as e:
+                logger.error(f"Fleet {method} failed: {e}")
+                results.append(False)
+        return results
+
     @rpc
     def move(self, twist: Twist, duration: float = 0.0) -> bool:
-        results = [conn.move(twist, duration) for conn in self._all_connections]
-        return all(results)
+        return all(self._broadcast("move", twist, duration))
 
     @rpc
     def standup(self) -> bool:
-        results = [conn.standup() for conn in self._all_connections]
-        return all(results)
+        return all(self._broadcast("standup"))
 
     @rpc
     def liedown(self) -> bool:
-        results = [conn.liedown() for conn in self._all_connections]
-        return all(results)
+        return all(self._broadcast("liedown"))
 
     @rpc
     def publish_request(self, topic: str, data: dict[str, Any]) -> dict[Any, Any]:
         """Publish a request to all robots, return primary's response."""
         for conn in self._extra_connections:
-            conn.publish_request(topic, data)
+            try:
+                conn.publish_request(topic, data)
+            except Exception as e:
+                logger.error(f"Fleet publish_request failed: {e}")
         return self.connection.publish_request(topic, data)
 
 
 go2_fleet_connection = Go2FleetConnection.blueprint
 
 
-def deploy(dimos: ModuleCoordinator, ips: list[str], prefix: str = "") -> ModuleProxy:
-    from dimos.constants import DEFAULT_CAPACITY_COLOR_IMAGE
-
-    connection = dimos.deploy(Go2FleetConnection, ips)
-
-    connection.pointcloud.transport = pSHMTransport(
-        f"{prefix}/lidar", default_capacity=DEFAULT_CAPACITY_COLOR_IMAGE
-    )
-    connection.color_image.transport = pSHMTransport(
-        f"{prefix}/image", default_capacity=DEFAULT_CAPACITY_COLOR_IMAGE
-    )
-    connection.cmd_vel.transport = LCMTransport(f"{prefix}/cmd_vel", Twist)
-    connection.camera_info.transport = LCMTransport(f"{prefix}/camera_info", CameraInfo)
-    connection.start()
-
-    return connection
-
-
-__all__ = ["Go2FleetConnection", "deploy", "go2_fleet_connection"]
+__all__ = ["Go2FleetConnection", "go2_fleet_connection"]
