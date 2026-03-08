@@ -307,11 +307,43 @@ class Stream(Generic[T]):
             )
         )
 
-    # ── Iteration ─────────────────────────────────────────────────────
+    # ── List-like interface ────────────────────────────────────────────
 
     def __iter__(self) -> Iterator[Observation[T]]:
         for page in self.fetch_pages():
             yield from page
+
+    def __len__(self) -> int:
+        return self.count()
+
+    @overload
+    def __getitem__(self, index: int) -> Observation[T]: ...
+
+    @overload
+    def __getitem__(self, index: slice) -> list[Observation[T]]: ...
+
+    def __getitem__(self, index: int | slice) -> Observation[T] | list[Observation[T]]:
+        if isinstance(index, int):
+            if index < 0:
+                # Negative index: need count to resolve
+                n = self.count()
+                index = n + index
+                if index < 0:
+                    raise IndexError("stream index out of range")
+            results = self.offset(index).limit(1).fetch()
+            if not results:
+                raise IndexError("stream index out of range")
+            return results[0]
+        # Slice
+        start, stop, step = index.indices(self.count())
+        s = self.offset(start).limit(stop - start)
+        results = s.fetch()
+        if step != 1:
+            return list(results)[::step]
+        return list(results)
+
+    def __bool__(self) -> bool:
+        return self.exists()
 
     # ── Terminals ─────────────────────────────────────────────────────
 
