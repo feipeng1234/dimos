@@ -182,7 +182,7 @@ class Stream(Generic[T]):
 
     # ── Spatial filter ────────────────────────────────────────────────
 
-    def near(self, pose: PoseLike | Stream[Any], radius: float) -> Stream[T]:
+    def near(self, pose: PoseLike | Stream[Any], radius: float = 0.0) -> Stream[T]:
         if isinstance(pose, Stream):
             center, max_dist = pose.bounding_sphere()
             return self._with_filter(NearFilter(center, max_dist + radius))
@@ -603,7 +603,11 @@ class TransformStream(Stream[R]):
         collector = _CollectorStream[R]()
         if self._transformer.supports_backfill and not self._live:
             self._transformer.process(self._source, collector)
-        return ObservationSet(collector.results, session=self._source._session)
+        return ObservationSet(
+            collector.results,
+            session=self._source._session,
+            payload_type=self._transformer.output_type,
+        )
 
     def store(
         self,
