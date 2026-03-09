@@ -67,7 +67,7 @@ def _static_sim_pinhole(rr: Any) -> list[Any]:
 
 
 _vis_sim = vis_module(
-    viewer_backend=global_config.viewer_backend,
+    viewer_backend=global_config.viewer,
     rerun_config={
         "pubsubs": [LCM(autoconf=True)],
         "visual_override": {

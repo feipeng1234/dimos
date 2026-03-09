@@ -55,7 +55,7 @@ def _static_base_link(rr: Any) -> list[Any]:
 
 
 _vis = vis_module(
-    viewer_backend=global_config.viewer_backend,
+    viewer_backend=global_config.viewer,
     rerun_config={
         "pubsubs": [LCM(autoconf=True)],
         "visual_override": {

@@ -129,7 +129,7 @@ def test_rosnav_simulation_streams():
             ROSNav.blueprint(mode="simulation"),
             StreamCollector.blueprint(),
         )
-        .global_config(viewer_backend="none")
+        .global_config(viewer="none")
         .build()
     )
 

@@ -31,7 +31,7 @@ def vis_module(
     Example usage:
         from dimos.core.global_config import global_config
         viz = vis_module(
-            .viewer_backend,
+            global_config.viewer,
             rerun_config={
                 "visual_override": {
                     "world/camera_info": lambda camera_info: camera_info.to_rerun(
