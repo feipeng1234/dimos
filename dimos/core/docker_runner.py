@@ -39,7 +39,7 @@ if TYPE_CHECKING:
 logger = setup_logger()
 
 DOCKER_RUN_TIMEOUT = 120  #     Timeout for `docker run` command execution
-DOCKER_PULL_TIMEOUT_DEFAULT = 600  # Default timeout for `docker pull`
+DOCKER_PULL_TIMEOUT_DEFAULT = None  # No timeout for `docker pull` (images can be large)
 DOCKER_CMD_TIMEOUT = 20  #       Timeout for quick Docker commands (inspect, rm, logs)
 DOCKER_STATUS_TIMEOUT = 10  #    Timeout for container status checks
 DOCKER_STOP_TIMEOUT = 30  #      Timeout for `docker stop` command (graceful shutdown)
@@ -77,9 +77,9 @@ class DockerModuleConfig(ModuleConfig):
     )  # (host, container, proto)
 
     # Runtime resources
-    docker_gpus: str | None = "all"
-    docker_shm_size: str = "2g"
-    docker_restart_policy: str = "on-failure:3"
+    docker_gpus: str | None = None
+    docker_shm_size: str = "4g"
+    docker_restart_policy: str = "no"
 
     # Env + volumes + devices
     docker_env_files: list[str] = field(default_factory=list)
@@ -99,7 +99,7 @@ class DockerModuleConfig(ModuleConfig):
     docker_extra_args: list[str] = field(default_factory=list)
 
     # Timeouts
-    docker_pull_timeout: float = DOCKER_PULL_TIMEOUT_DEFAULT
+    docker_pull_timeout: float | None = DOCKER_PULL_TIMEOUT_DEFAULT
     docker_startup_timeout: float = 120.0
     docker_poll_interval: float = 1.0
     # Build timeout in seconds. None means no timeout (default: unlimited).
@@ -322,14 +322,15 @@ class DockerModule(ModuleProxyProtocol):
         self._cleanup()
 
     def _cleanup(self) -> None:
-        """Release all resources. Safe to call multiple times or from partial init."""
+        """Release all resources. Idempotent — safe to call from partial init or after stop()."""
         with suppress(Exception):
             self.rpc.stop()
-        for unsub in self._unsub_fns:
+        for unsub in getattr(self, "_unsub_fns", []):
             with suppress(Exception):
                 unsub()
-        self._unsub_fns.clear()
-        if not self.config.docker_reconnect_container:
+        with suppress(Exception):
+            self._unsub_fns.clear()
+        if not getattr(getattr(self, "config", None), "docker_reconnect_container", False):
             with suppress(Exception):
                 _run(
                     [self.config.docker_bin, "stop", self._container_name],
