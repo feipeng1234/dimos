@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 from dimos.core.rpc_client import RPCClient
 from dimos.core.worker import Worker
 from dimos.utils.logging_config import setup_logger
-from dimos.utils.safe_thread_map import safe_thread_map
+from dimos.utils.safe_thread_map import ExceptionGroup, safe_thread_map
 
 if TYPE_CHECKING:
     from dimos.core.module import ModuleT

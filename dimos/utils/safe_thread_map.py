@@ -14,7 +14,23 @@
 from __future__ import annotations
 
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+import sys
 from typing import TYPE_CHECKING, Any, TypeVar
+
+if sys.version_info < (3, 11):
+
+    class ExceptionGroup(Exception):  # type: ignore[no-redef]  # noqa: N818
+        """Minimal ExceptionGroup polyfill for Python 3.10."""
+
+        exceptions: tuple[BaseException, ...]
+
+        def __init__(self, message: str, exceptions: Sequence[BaseException]) -> None:
+            super().__init__(message)
+            self.exceptions = tuple(exceptions)
+else:
+    import builtins
+
+    ExceptionGroup = builtins.ExceptionGroup  # type: ignore[misc]
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence

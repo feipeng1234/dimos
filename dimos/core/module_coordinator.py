@@ -22,7 +22,7 @@ from dimos.core.global_config import GlobalConfig, global_config
 from dimos.core.resource import Resource
 from dimos.core.worker_manager import WorkerManager
 from dimos.utils.logging_config import setup_logger
-from dimos.utils.safe_thread_map import safe_thread_map
+from dimos.utils.safe_thread_map import ExceptionGroup, safe_thread_map
 
 if TYPE_CHECKING:
     from dimos.core.module import Module, ModuleT
