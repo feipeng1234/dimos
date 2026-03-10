@@ -208,7 +208,7 @@ class GraspGenModule(Module[GraspGenConfig]):
                 return grasps_np, scores_np
 
             pc_mean = object_pc_filtered.mean(axis=0)
-            T_center = tra.translation_matrix(-pc_mean)
+            T_center = tra.translation_matrix(-pc_mean)  # type: ignore[no-untyped-call]
             grasps_centered = np.array([T_center @ g for g in grasps_np])
             scene_pc_centered = tra.transform_points(scene_pc, T_center)
 

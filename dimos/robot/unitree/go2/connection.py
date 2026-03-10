@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import logging
+import sys
 from threading import Thread
 import time
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar
@@ -46,6 +47,11 @@ from dimos.robot.unitree.connection import UnitreeWebRTCConnection
 from dimos.utils.data import get_data
 from dimos.utils.decorators.decorators import simple_mcache
 from dimos.utils.testing.replay import TimedSensorReplay, TimedSensorStorage
+
+if sys.version_info < (3, 13):
+    from typing_extensions import TypeVar
+else:
+    from typing import TypeVar
 
 logger = logging.getLogger(__name__)
 
