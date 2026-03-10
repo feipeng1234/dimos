@@ -96,6 +96,11 @@ class WorkerManager:
             _on_errors,
         )
 
+    def suppress_console(self) -> None:
+        """Tell all workers to redirect stdout/stderr to /dev/null."""
+        for worker in self._workers:
+            worker.suppress_console()
+
     @property
     def workers(self) -> list[Worker]:
         return list(self._workers)
