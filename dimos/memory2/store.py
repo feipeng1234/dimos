@@ -80,14 +80,14 @@ class Session(ABC):
         self._backends: dict[str, Backend[Any]] = {}
 
     @abstractmethod
-    def _create_backend(self, name: str) -> Backend[Any]:
+    def _create_backend(self, name: str, payload_type: type[Any] | None = None) -> Backend[Any]:
         """Create a backend for the named stream. Called once per stream name."""
         ...
 
     def stream(self, name: str, payload_type: type[T] | None = None) -> Stream[T]:
         """Get or create a named stream. Returns the same Stream on repeated calls."""
         if name not in self._streams:
-            backend = self._create_backend(name)
+            backend = self._create_backend(name, payload_type)
             self._backends[name] = backend
             self._streams[name] = Stream(source=backend)
         return cast("Stream[T]", self._streams[name])

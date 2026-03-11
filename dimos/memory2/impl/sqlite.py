@@ -70,7 +70,7 @@ class SqliteSession(Session):
         super().__init__()
         self._conn = conn
 
-    def _create_backend(self, name: str) -> Backend[Any]:
+    def _create_backend(self, name: str, payload_type: type[Any] | None = None) -> Backend[Any]:
         return SqliteBackend(self._conn, name)
 
     def close(self) -> None:

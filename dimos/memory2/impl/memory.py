@@ -162,7 +162,7 @@ class ListBackend(Generic[T]):
 class MemorySession(Session):
     """In-memory session. Each stream is backed by a ListBackend."""
 
-    def _create_backend(self, name: str) -> Backend[Any]:
+    def _create_backend(self, name: str, payload_type: type[Any] | None = None) -> Backend[Any]:
         return ListBackend(name)
 
 
