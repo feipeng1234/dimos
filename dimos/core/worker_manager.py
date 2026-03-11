@@ -86,7 +86,13 @@ class WorkerManager:
             return RPCClient(actor, module_class)
 
         with ThreadPoolExecutor(max_workers=len(assignments)) as pool:
-            results = list(pool.map(_deploy, assignments, timeout=30))
+            try:
+                results = list(pool.map(_deploy, assignments, timeout=90))
+            except TimeoutError:
+                names = [m.__name__ for _, m, _, _ in assignments]
+                logger.error(f"Timed out deploying modules: {', '.join(names)}")
+                self.close_all()
+                raise SystemExit(1)
 
         return results
 
