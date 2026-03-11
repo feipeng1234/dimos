@@ -60,12 +60,16 @@ class LCMConfig:
 _LCM_LOOP_TIMEOUT = 50
 
 
+class NotStartedError(Exception):
+    """Raised when LCM is accessed before start() or after stop()."""
+
+
 # this class just sets up cpp LCM instance
 # and runs its handle loop in a thread
 # higher order stuff is done by pubsub/impl/lcmpubsub.py
 class LCMService(Service[LCMConfig]):
     default_config = LCMConfig
-    l: lcm.LCM | None
+    _l: lcm.LCM | None
     _stop_event: threading.Event
     _l_lock: threading.Lock
     _thread: threading.Thread | None
@@ -75,26 +79,37 @@ class LCMService(Service[LCMConfig]):
     def __init__(self, **kwargs) -> None:  # type: ignore[no-untyped-def]
         super().__init__(**kwargs)
 
-        # we support passing an existing LCM instance
-        if self.config.lcm:
-            self.l = self.config.lcm
-        else:
-            self.l = lcm.LCM(self.config.url) if self.config.url else lcm.LCM()
-
+        # autoconf must run in __init__ (not start()) so that stdin prompts
+        # are asked during blueprint build, before the module moves to a worker
         try:
             autoconf(check_only=not self.config.autoconf)
         except Exception as e:
             print(f"Error checking system configuration: {e}")
 
+        self._l: lcm.LCM | None = None
         self._l_lock = threading.Lock()
         self._stop_event = threading.Event()
         self._thread = None
+        self._owns_lcm_obj = False
+
+    @property
+    def l(self) -> lcm.LCM:  # noqa: E743
+        if not self._l:
+            raise NotStartedError(
+                """LCM either not started or already stopped. Call .start() before accessing the .l property."""
+            )
+
+        return self._l
+
+    @l.setter
+    def l(self, value: lcm.LCM) -> None:  # noqa: E743
+        self._l = value
 
     def __getstate__(self):  # type: ignore[no-untyped-def]
         """Exclude unpicklable runtime attributes when serializing."""
         state = self.__dict__.copy()
         # Remove unpicklable attributes
-        state.pop("l", None)
+        state.pop("_l", None)
         state.pop("_stop_event", None)
         state.pop("_thread", None)
         state.pop("_l_lock", None)
@@ -106,37 +121,36 @@ class LCMService(Service[LCMConfig]):
         """Restore object from pickled state."""
         self.__dict__.update(state)
         # Reinitialize runtime attributes
-        self.l = None
+        self._l = None
         self._stop_event = threading.Event()
         self._thread = None
-        self._l_lock = threading.Lock()
         self._call_thread_pool = None
         self._call_thread_pool_lock = threading.RLock()
 
     def start(self) -> None:
-        # Reinitialize LCM if it's None (e.g., after unpickling)
-        if self.l is None:
-            if self.config.lcm:
-                self.l = self.config.lcm
-            else:
-                self.l = lcm.LCM(self.config.url) if self.config.url else lcm.LCM()
-
+        if self._thread is not None and self._thread.is_alive():
+            return
         self._stop_event.clear()
+        self._l = (
+            self._l
+            or self.config.lcm
+            or (lcm.LCM(self.config.url) if self.config.url else lcm.LCM())
+        )
+        self._owns_lcm_obj = not isinstance(self.config.lcm, lcm.LCM)
         self._thread = threading.Thread(target=self._lcm_loop)
         self._thread.daemon = True
         self._thread.start()
 
     def _lcm_loop(self) -> None:
         """LCM message handling loop."""
+
         while not self._stop_event.is_set():
             try:
-                with self._l_lock:
-                    if self.l is None:
-                        break
-                    self.l.handle_timeout(_LCM_LOOP_TIMEOUT)
+                # no lock because the only thing that would change self._l is .stop()/.start()/setstate and this thread won't be running while those are happening
+                self.l.handle_timeout(_LCM_LOOP_TIMEOUT)
             except Exception as e:
                 stack_trace = traceback.format_exc()
-                print(f"Error in LCM handling: {e}\n{stack_trace}")
+                logger.error(f"Error in LCM handling: {e}\n{stack_trace}")
 
     def stop(self) -> None:
         """Stop the LCM loop."""
@@ -148,12 +162,9 @@ class LCMService(Service[LCMConfig]):
                 if self._thread.is_alive():
                     logger.warning("LCM thread did not stop cleanly within timeout")
 
-        # Clean up LCM instance if we created it
-        if not self.config.lcm:
-            with self._l_lock:
-                if self.l is not None:
-                    del self.l
-                    self.l = None
+        if self._owns_lcm_obj:
+            del self._l
+            self._l = None  # as an indicator that the LCM is closed
 
         with self._call_thread_pool_lock:
             if self._call_thread_pool:

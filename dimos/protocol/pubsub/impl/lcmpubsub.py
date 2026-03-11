@@ -25,7 +25,7 @@ from dimos.protocol.pubsub.encoders import (
 )
 from dimos.protocol.pubsub.patterns import Glob
 from dimos.protocol.pubsub.spec import AllPubSub
-from dimos.protocol.service.lcmservice import LCMConfig, LCMService, autoconf
+from dimos.protocol.service.lcmservice import LCMConfig, LCMService, NotStartedError, autoconf
 from dimos.utils.logging_config import setup_logger
 
 if TYPE_CHECKING:
@@ -86,15 +86,16 @@ class LCMPubSubBase(LCMService, AllPubSub[Topic, Any]):
     default_config = LCMConfig
     _stop_event: threading.Event
     _thread: threading.Thread | None
+    _que_capacity: int = 10000
 
     def publish(self, topic: Topic | str, message: bytes) -> None:
         """Publish a message to the specified channel."""
-        if self.l is None:
-            logger.error("Tried to publish after LCM was closed")
+        lcm_obj = self._l
+        if not lcm_obj:
+            logger.error("Tried to publish after LCM was stopped (or never started)")
             return
-
         topic_str = str(topic) if isinstance(topic, Topic) else topic
-        self.l.publish(topic_str, message)
+        lcm_obj.publish(topic_str, message)
 
     def subscribe_all(self, callback: Callable[[bytes, Topic], Any]) -> Callable[[], None]:
         return self.subscribe(Topic(re.compile(".*")), callback)  # type: ignore[arg-type]
@@ -102,13 +103,10 @@ class LCMPubSubBase(LCMService, AllPubSub[Topic, Any]):
     def subscribe(
         self, topic: Topic, callback: Callable[[bytes, Topic], None]
     ) -> Callable[[], None]:
-        if self.l is None:
+        lcm_obj = self._l
+        if not lcm_obj:
             logger.error("Tried to subscribe after LCM was closed")
-
-            def noop() -> None:
-                pass
-
-            return noop
+            return lambda: None
 
         if topic.is_pattern:
 
@@ -121,18 +119,19 @@ class LCMPubSubBase(LCMService, AllPubSub[Topic, Any]):
             if not pattern_str.endswith("*"):
                 pattern_str = f"{pattern_str}(#.*)?"
 
-            lcm_subscription = self.l.subscribe(pattern_str, handler)
+            lcm_subscription = lcm_obj.subscribe(pattern_str, handler)
         else:
             topic_str = str(topic)
-            lcm_subscription = self.l.subscribe(topic_str, lambda _, msg: callback(msg, topic))
+            lcm_subscription = lcm_obj.subscribe(topic_str, lambda _, msg: callback(msg, topic))
 
         # Set queue capacity to 10000 to handle high-volume bursts
-        lcm_subscription.set_queue_capacity(10000)
+        lcm_subscription.set_queue_capacity(self._que_capacity)
 
         def unsubscribe() -> None:
-            if self.l is None:
-                return
-            self.l.unsubscribe(lcm_subscription)
+            try:
+                self.l.unsubscribe(lcm_subscription)
+            except NotStartedError:
+                pass
 
         return unsubscribe
 
