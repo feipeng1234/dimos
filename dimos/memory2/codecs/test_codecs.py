@@ -85,22 +85,26 @@ def _jpeg_eq(original: Any, decoded: Any) -> bool:
     return bool(np.mean(np.abs(decoded.data.astype(float) - original.data.astype(float))) < 5)
 
 
-def _jpeg_case() -> Case:
-    from dimos.memory2.codecs.jpeg import JpegCodec
-    from dimos.utils.testing import TimedSensorReplay
+def _jpeg_case() -> Case | None:
+    try:
+        from dimos.memory2.codecs.jpeg import JpegCodec
+        from dimos.utils.testing import TimedSensorReplay
 
-    replay = TimedSensorReplay("unitree_go2_bigoffice/video")
-    frames = [replay.find_closest_seek(float(i)) for i in range(1, 4)]
+        replay = TimedSensorReplay("unitree_go2_bigoffice/video")
+        frames = [replay.find_closest_seek(float(i)) for i in range(1, 4)]
+        codec = JpegCodec(quality=95)
+    except ImportError:
+        return None
 
     return Case(
         name="jpeg",
-        codec=JpegCodec(quality=95),
+        codec=codec,
         values=frames,
         eq=_jpeg_eq,
     )
 
 
-testcases = [_pickle_case(), _lcm_case(), _jpeg_case()]
+testcases = [c for c in [_pickle_case(), _lcm_case(), _jpeg_case()] if c is not None]
 
 
 # ── Tests ──────────────────────────────────────────────────────────
@@ -148,6 +152,7 @@ class TestCodecFor:
         assert isinstance(codec_for(PoseStamped), LcmCodec)
 
     def test_image_type_returns_jpeg(self) -> None:
+        pytest.importorskip("turbojpeg")
         from dimos.memory2.codecs.jpeg import JpegCodec
         from dimos.msgs.sensor_msgs.Image import Image
 

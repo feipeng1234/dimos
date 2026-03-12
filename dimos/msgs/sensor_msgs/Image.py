@@ -27,7 +27,6 @@ import numpy as np
 import reactivex as rx
 from reactivex import operators as ops
 import rerun as rr
-from turbojpeg import TurboJPEG  # type: ignore[import-untyped]
 
 from dimos.types.timestamped import Timestamped, TimestampedBufferCollection, to_human_readable
 from dimos.utils.reactive import quality_barrier
@@ -510,6 +509,8 @@ class Image(Timestamped):
         Returns:
             LCM-encoded bytes with JPEG-compressed image data
         """
+        from turbojpeg import TurboJPEG  # type: ignore[import-untyped]
+
         jpeg = TurboJPEG()
         msg = LCMImage()
 
@@ -555,6 +556,8 @@ class Image(Timestamped):
         Returns:
             Image instance
         """
+        from turbojpeg import TurboJPEG  # type: ignore[import-untyped]
+
         jpeg = TurboJPEG()
         msg = LCMImage.lcm_decode(data)
 
