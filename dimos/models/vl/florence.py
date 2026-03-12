@@ -28,9 +28,8 @@ class CaptionDetail(Enum):
     """Florence-2 caption detail level."""
 
     BRIEF = "<CAPTION>"
-    NORMAL = "<CAPTION>"
-    DETAILED = "<DETAILED_CAPTION>"
-    MORE_DETAILED = "<MORE_DETAILED_CAPTION>"
+    NORMAL = "<DETAILED_CAPTION>"
+    DETAILED = "<MORE_DETAILED_CAPTION>"
 
 
 class Florence2Model(HuggingFaceModel, Captioner):

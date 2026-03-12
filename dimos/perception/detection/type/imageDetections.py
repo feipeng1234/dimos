@@ -43,6 +43,8 @@ class ImageDetections(Generic[T], TableStr):
 
     @property
     def ts(self) -> float:
+        if self.image is None:
+            return 0.0
         return self.image.ts
 
     def __init__(self, image: Image | None = None, detections: list[T] | None = None) -> None:

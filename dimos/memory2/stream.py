@@ -195,7 +195,7 @@ class Stream(Resource, Generic[T]):
         """Filter by arbitrary predicate on the full Observation."""
         return self._with_filter(PredicateFilter(pred))
 
-    def map(self, fn: Callable[[Observation[T]], Observation[R]]) -> Stream[Any]:
+    def map(self, fn: Callable[[Observation[T]], Observation[R]]) -> Stream[R]:
         """Transform each observation's data via callable."""
         return self.transform(FnTransformer(lambda obs: fn(obs)))
 

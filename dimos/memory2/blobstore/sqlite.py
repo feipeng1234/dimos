@@ -33,6 +33,7 @@ class SqliteBlobStore(BlobStore):
         );
 
     Does NOT own the connection — lifecycle managed externally.
+    Does NOT commit; the caller (typically SqliteBackend) is responsible for commits.
     """
 
     def __init__(self, conn: sqlite3.Connection) -> None:

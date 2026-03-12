@@ -111,6 +111,8 @@ def _compile_filter(f: Filter, stream: str, prefix: str = "") -> tuple[str, list
         clauses = []
         params: list[Any] = []
         for k, v in f.tags.items():
+            if not _IDENT_RE.match(k):
+                raise ValueError(f"Invalid tag key: {k!r}")
             clauses.append(f"json_extract({prefix}tags, '$.{k}') = ?")
             params.append(v)
         return (" AND ".join(clauses), params)
@@ -192,6 +194,8 @@ def _compile_query(
 
     # ORDER BY
     if query.order_field:
+        if not _IDENT_RE.match(query.order_field):
+            raise ValueError(f"Invalid order_field: {query.order_field!r}")
         direction = "DESC" if query.order_desc else "ASC"
         sql += f" ORDER BY {prefix}{query.order_field} {direction}"
     else:
@@ -269,12 +273,11 @@ class SqliteBackend(Configurable[BackendConfig], Generic[T]):
 
     def _make_loader(self, row_id: int) -> Any:
         bs = self.config.blob_store
-        assert bs is not None
+        if bs is None:
+            raise RuntimeError("BlobStore required but not configured")
         name, codec = self._name, self._codec
-        owner_tid = threading.get_ident()
 
         def loader() -> Any:
-            assert threading.get_ident() == owner_tid
             raw = bs.get(name, row_id)
             return codec.decode(raw)
 
@@ -337,7 +340,8 @@ class SqliteBackend(Configurable[BackendConfig], Generic[T]):
             assert row_id is not None
 
             bs = self.config.blob_store
-            assert bs is not None
+            if bs is None:
+                raise RuntimeError("BlobStore required but not configured")
             bs.put(self._name, row_id, encoded)
 
             # R*Tree spatial index
@@ -410,7 +414,6 @@ class SqliteBackend(Configurable[BackendConfig], Generic[T]):
             return
 
         ids = [h[0] for h in hits]
-        dict(hits)
 
         # Batch-fetch metadata
         join = self._join_blobs

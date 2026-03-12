@@ -112,4 +112,4 @@ with store.session() as session:
 | Backend         | Status   | Storage                                |
 |-----------------|----------|----------------------------------------|
 | `ListBackend`   | Complete | In-memory (lists + brute-force search) |
-| `SqliteBackend` | Stub     | SQLite (WAL, FTS5, vec0)               |
+| `SqliteBackend` | Complete | SQLite (WAL, FTS5, vec0)               |

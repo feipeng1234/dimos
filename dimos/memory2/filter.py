@@ -81,8 +81,8 @@ class AtFilter(Filter):
 
 @dataclass(frozen=True)
 class NearFilter(Filter):
-    pose: Any
-    radius: float
+    pose: Any = field(hash=False)
+    radius: float = 0.0
 
     def matches(self, obs: Observation[Any]) -> bool:
         if obs.pose is None or self.pose is None:
@@ -109,7 +109,7 @@ def _xyz(p: Any) -> tuple[float, float, float]:
 
 @dataclass(frozen=True)
 class TagsFilter(Filter):
-    tags: dict[str, Any]
+    tags: dict[str, Any] = field(default_factory=dict, hash=False)
 
     def matches(self, obs: Observation[Any]) -> bool:
         for k, v in self.tags.items():
@@ -122,7 +122,7 @@ class TagsFilter(Filter):
 class PredicateFilter(Filter):
     """Wraps an arbitrary predicate function for use with .filter()."""
 
-    fn: Callable[[Observation[Any]], bool]
+    fn: Callable[[Observation[Any]], bool] = field(hash=False)
 
     def matches(self, obs: Observation[Any]) -> bool:
         return bool(self.fn(obs))
