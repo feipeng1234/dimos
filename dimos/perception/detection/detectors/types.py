@@ -14,8 +14,8 @@
 
 from abc import ABC, abstractmethod
 
-from dimos.msgs.sensor_msgs import Image
-from dimos.perception.detection.type import ImageDetections2D
+from dimos.msgs.sensor_msgs.Image import Image
+from dimos.perception.detection.type.detection2d.imageDetections2D import ImageDetections2D
 
 
 class Detector(ABC):

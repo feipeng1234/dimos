@@ -32,12 +32,13 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from dimos.msgs.sensor_msgs import JointState
+from dimos.msgs.sensor_msgs.JointState import JointState
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-    from dimos.manipulation.planning.spec import JointPath, WorldRobotID, WorldSpec
+    from dimos.manipulation.planning.spec.protocols import WorldSpec
+    from dimos.manipulation.planning.spec.types import JointPath, WorldRobotID
 
 
 def interpolate_path(

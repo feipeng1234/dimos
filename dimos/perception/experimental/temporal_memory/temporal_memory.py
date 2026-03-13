@@ -38,8 +38,7 @@ from dimos.core.module import Module, ModuleConfig
 from dimos.core.stream import In, Out
 from dimos.models.vl.base import VlModel
 from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
-from dimos.msgs.sensor_msgs import Image
-from dimos.msgs.sensor_msgs.Image import sharpness_barrier
+from dimos.msgs.sensor_msgs.Image import Image, sharpness_barrier
 from dimos.msgs.visualization_msgs.EntityMarkers import EntityMarkers, Marker
 from dimos.utils.logging_config import get_run_log_dir, setup_logger
 
