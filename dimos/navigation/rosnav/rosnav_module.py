@@ -99,7 +99,6 @@ logger = setup_logger(level=logging.INFO)
 # ---------------------------------------------------------------------------
 
 
-@dataclass
 class ROSNavConfig(DockerModuleConfig):
     # --- Module settings ---
     local_pointcloud_freq: float = 2.0
@@ -110,7 +109,7 @@ class ROSNavConfig(DockerModuleConfig):
 
     # --- Docker settings ---
     docker_restart_policy: str = "no"  # Don't auto-restart; host process manages lifecycle
-    docker_startup_timeout = 180
+    docker_startup_timeout: float = 180
     docker_image: str = "dimos_rosnav:humble"
     docker_shm_size: str = "8g"
     docker_entrypoint: str = "/usr/local/bin/entrypoint.sh"
@@ -198,7 +197,7 @@ class ROSNavConfig(DockerModuleConfig):
     unitree_ip: str = "192.168.12.1"
     unitree_conn: str = "LocalAP"
 
-    def __post_init__(self) -> None:
+    def model_post_init(self, __context: object) -> None:
         import os
 
         effective_mode = "bagfile" if self.bagfile_path else self.mode

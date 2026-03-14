@@ -193,6 +193,8 @@ class DockerModule(ModuleProxyProtocol):
                 f"{module_class.__name__}.default_config must be a DockerModuleConfig subclass, "
                 f"got {config_class.__name__}"
             )
+        # global_config is passed by docker_worker_manager but isn't a config field
+        kwargs.pop("global_config", None)
         config = config_class(**kwargs)
 
         self._module_class = module_class
