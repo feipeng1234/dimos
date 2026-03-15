@@ -113,11 +113,20 @@ class FastLio2Config(NativeModuleConfig):
     host_imu_data_port: int = SDK_HOST_IMU_DATA_PORT
     host_log_data_port: int = SDK_HOST_LOG_DATA_PORT
 
-    # Resolved in __post_init__, passed as --config_path to the binary
+    # Passed as --config_path to the binary (resolved from ``config`` in post-init)
     config_path: str | None = None
 
-    # config is not a CLI arg (config_path is)
+    # config is not a CLI arg (config_path is the resolved version)
     cli_exclude: frozenset[str] = frozenset({"config"})
+
+    def model_post_init(self, __context: object) -> None:
+        """Resolve config_path from the config YAML field."""
+        super().model_post_init(__context)
+        # The validate_as pipeline may not fire for defaults, so resolve here.
+        cfg = self.config
+        if not cfg.is_absolute():
+            cfg = _CONFIG_DIR / cfg
+        self.config_path = str(cfg.resolve())
 
 
 class FastLio2(
