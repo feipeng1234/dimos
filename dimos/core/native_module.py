@@ -55,6 +55,7 @@ from pydantic import Field
 
 from dimos.core.core import rpc
 from dimos.core.module import Module, ModuleConfig
+from dimos.utils.change_detect import did_change
 from dimos.utils.logging_config import setup_logger
 
 if sys.version_info < (3, 13):
@@ -80,9 +81,10 @@ class NativeModuleConfig(ModuleConfig):
     extra_env: dict[str, str] = Field(default_factory=dict)
     shutdown_timeout: float = 10.0
     log_format: LogFormat = LogFormat.TEXT
+    rebuild_on_change: list[str] | None = None
 
     # Override in subclasses to exclude fields from CLI arg generation
-    cli_exclude: frozenset[str] = frozenset()
+    cli_exclude: frozenset[str] = frozenset({"rebuild_on_change"})
 
     def to_cli_args(self) -> list[str]:
         """Auto-convert subclass config fields to CLI args.
@@ -244,8 +246,16 @@ class NativeModule(Module[_NativeConfig]):
             self.config.executable = str(Path(self.config.cwd) / self.config.executable)
 
     def _maybe_build(self) -> None:
-        """Run ``build_command`` if the executable does not exist."""
+        """Run ``build_command`` if the executable does not exist or sources changed."""
         exe = Path(self.config.executable)
+
+        # Check if rebuild needed due to source changes
+        if self.config.rebuild_on_change and exe.exists():
+            cache_name = f"native_{type(self).__name__}_build"
+            if did_change(cache_name, self.config.rebuild_on_change):
+                logger.info("Source files changed, triggering rebuild", executable=str(exe))
+                exe.unlink(missing_ok=True)
+
         if exe.exists():
             return
         if self.config.build_command is None:
@@ -281,6 +291,11 @@ class NativeModule(Module[_NativeConfig]):
             raise FileNotFoundError(
                 f"Build command succeeded but executable still not found: {exe}"
             )
+
+        # Update the change cache so next check is clean
+        if self.config.rebuild_on_change:
+            cache_name = f"native_{type(self).__name__}_build"
+            did_change(cache_name, self.config.rebuild_on_change)
 
     def _collect_topics(self) -> dict[str, str]:
         """Extract LCM topic strings from blueprint-assigned stream transports."""
