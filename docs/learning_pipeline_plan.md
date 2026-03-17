@@ -22,14 +22,12 @@ dimos/learning/
         __init__.py
         dataset.py                  # Dataset (collection of episodes, numpy arrays)
         schema.py                   # RecordingSchema + field extractors
-        export.py                   # HDF5 + LeRobot export
+        export.py                   # LeRobot + RLDS export
         loader.py                   # PyTorch DataLoader integration
     train/
         __init__.py
-        trainer.py                  # TrainerModule (DimOS Module + CLI)
-        bc.py                       # BehaviorCloningTrainer
-        policy.py                   # Policy protocol + MLP impl
-        checkpoint.py               # Save/load with normalization stats
+        trainer.py                  # TrainerModule (wraps LeRobot backend)
+        checkpoint.py               # Policy loading utilities
     deploy/
         __init__.py
         policy_module.py            # PolicyModule (standalone Module, publishes joint_command)
@@ -216,15 +214,7 @@ class Dataset:
 
 **File:** `dimos/learning/dataset/export.py`
 
-Both formats, driven by the schema:
-
-**HDF5 (robomimic-compatible):**
-```
-/data/demo_0/obs/joint_pos        (T, N_joints)
-/data/demo_0/obs/joint_vel        (T, N_joints)
-/data/demo_0/obs/cam0             (T, H, W, 3)
-/data/demo_0/actions/joint_pos_cmd (T, N_joints)
-```
+Two export targets — the two dominant robot learning dataset standards:
 
 **LeRobot (HuggingFace Dataset):**
 ```
@@ -234,6 +224,21 @@ meta/
   info.json, episodes.jsonl, tasks.jsonl
 videos/ (optional)
 ```
+- Community sharing via HuggingFace Hub
+- Python-native, Parquet + JSON, streaming-friendly
+- Growing ecosystem (LeRobot library, community models)
+
+**RLDS (Open X-Embodiment / Google DeepMind):**
+```
+dataset_name/
+  1.0.0/
+    dataset_info.json
+    features.json
+    dataset_name-train.tfrecord-00000-of-00001
+```
+- Standard for Open X-Embodiment (1M+ episodes, 22 robots)
+- Required for pretrained models: Octo, RT-X
+- TFRecord-based, works with `tensorflow_datasets`
 
 ### 2.4 PyTorch DataLoader
 
@@ -247,87 +252,92 @@ videos/ (optional)
 
 ---
 
-## 3. Training Pipeline (BC only for now)
+## 3. Training Pipeline (LeRobot Backend)
 
-### 3.1 Policy Protocol + Implementations
+**No custom training loops.** We wrap [LeRobot](https://github.com/huggingface/lerobot) as the training backend. It provides battle-tested implementations of ACT, Diffusion Policy, VQ-BeT, and more — with good defaults that work out of the box.
 
-**File:** `dimos/learning/train/policy.py`
+### 3.1 Available Algorithms (via LeRobot)
 
-```python
-class Policy(Protocol):
-    def forward(self, obs: dict[str, Tensor]) -> Tensor: ...
-    def compute_loss(self, batch: dict[str, Tensor]) -> Tensor: ...
-    def predict(self, obs: dict[str, Tensor]) -> np.ndarray: ...
-```
+| Algorithm | Best For | Data Efficiency |
+|-----------|----------|-----------------|
+| **ACT** (Action Chunking Transformer) | General manipulation, beginners | ~50 demos |
+| **Diffusion Policy** | Complex, multimodal trajectories | ~100+ demos |
+| **VQ-BeT** | Discrete action spaces | ~100+ demos |
+| **pi0 / SmolVLA** | Vision-language-action | Large datasets |
 
-**Implementations:**
-- `MLPPolicy` — Simple MLP for joint-state-only BC
-- `CNNMLPPolicy` — CNN encoder for images + MLP for joint states (visuomotor)
-
-### 3.2 TrainerModule (DimOS Module + CLI)
+### 3.2 TrainerModule (DimOS Module wrapping LeRobot)
 
 **File:** `dimos/learning/train/trainer.py`
 
-Training is a DimOS Module so it can be run via `dimos train <config>`. The config specifies everything: dataset path, schema, algorithm, hyperparams, output path.
+A thin wrapper around LeRobot's training pipeline. The TrainerModule handles:
+- Converting DimOS raw episodes -> LeRobot dataset format (via export)
+- Calling `lerobot-train` with the right config
+- Tracking training status and metrics
+- Loading trained policies for deployment
 
 ```python
 class TrainerModuleConfig(ModuleConfig):
     # Data
     dataset_path: str                           # Path to recorded episodes (SqliteStore)
     schema: RecordingSchema                     # How to convert raw -> arrays
-    # Algorithm
-    algorithm: str = "bc"                       # "bc" (extensible later)
-    policy_type: str = "mlp"                    # "mlp" | "cnn_mlp"
-    # Hyperparameters
-    learning_rate: float = 1e-4
-    batch_size: int = 256
-    num_epochs: int = 100
-    train_split: float = 0.8
-    obs_horizon: int = 1
-    action_horizon: int = 1
-    loss_type: str = "mse"                      # "mse" | "l1" | "huber"
+    dataset_repo_id: str | None = None          # HF Hub repo (optional, for sharing)
+    # Algorithm (LeRobot policy types)
+    policy_type: str = "act"                    # "act" | "diffusion" | "vq_bet" | "tdmpc"
     # Output
-    checkpoint_dir: str = "./checkpoints"
+    output_dir: str = "./outputs/train"
+    job_name: str = "dimos_train"
     device: str = "cuda"
+    # Monitoring
+    wandb_enable: bool = False
+    # Override any LeRobot config key
+    overrides: dict[str, Any] = field(default_factory=dict)
 
 class TrainerModule(Module[TrainerModuleConfig]):
     @rpc
-    def start_training(self) -> str: ...        # Returns run_id
+    def start_training(self) -> str: ...        # Export data + launch lerobot-train, returns run_id
     @rpc
     def get_metrics(self) -> dict: ...          # Current loss, epoch, etc.
     @rpc
-    def get_status(self) -> str: ...            # "idle" | "training" | "done" | "error"
+    def get_status(self) -> str: ...            # "idle" | "exporting" | "training" | "done" | "error"
     @rpc
     def stop_training(self) -> bool: ...
     @rpc
-    def get_best_checkpoint(self) -> str: ...   # Path to best model
+    def get_best_checkpoint(self) -> str: ...   # Path to best checkpoint dir
+    @rpc
+    def push_to_hub(self, repo_id: str) -> str: ...  # Push trained policy to HF Hub
 ```
 
-**CLI integration:** Add `dimos train` subcommand that loads a training config (YAML/Python) and runs the TrainerModule:
+**What `start_training()` does internally:**
+1. Load raw episodes from `dataset_path`
+2. Convert to LeRobot dataset format using `schema` (calls export pipeline)
+3. Call LeRobot's training API with `policy_type` + `overrides`
+4. Monitor training progress, update metrics
+5. On completion, checkpoint is saved to `output_dir`
+
+**CLI integration:**
 ```bash
-dimos train --config configs/bc_xarm7.yaml
+dimos train --config configs/act_xarm7.yaml
 # or as a blueprint:
-dimos run train-bc-xarm7
+dimos run train-act-xarm7
 ```
 
-### 3.3 BehaviorCloningTrainer (algorithm impl)
-
-**File:** `dimos/learning/train/bc.py`
-
-The actual training loop, used by TrainerModule:
-```python
-class BehaviorCloningTrainer:
-    def __init__(self, policy: Policy, train_loader, eval_loader, config): ...
-    def train_epoch(self) -> dict[str, float]: ...
-    def evaluate(self) -> dict[str, float]: ...
-    def train(self) -> dict[str, list[float]]: ...  # Full training, returns history
-```
-
-### 3.4 Checkpoint
+### 3.3 Policy Loading (for deployment)
 
 **File:** `dimos/learning/train/checkpoint.py`
 
-Bundles everything needed to deploy: policy weights, class name, config, joint ordering, normalization stats, training metrics, schema. Single `.pt` file.
+Wraps LeRobot's `PreTrainedPolicy` for loading:
+
+```python
+def load_policy(checkpoint_path: str) -> PreTrainedPolicy:
+    """Load a trained LeRobot policy from checkpoint or HF Hub."""
+    return PreTrainedPolicy.from_pretrained(checkpoint_path)
+
+def load_policy_from_hub(repo_id: str) -> PreTrainedPolicy:
+    """Load a trained policy from HuggingFace Hub."""
+    return PreTrainedPolicy.from_pretrained(repo_id)
+```
+
+The PolicyModule (deploy) calls `policy.select_action(observation)` — LeRobot handles normalization, action chunking, and architecture-specific inference internally.
 
 ---
 
@@ -341,7 +351,7 @@ The policy runner is a regular DimOS `Module` — just like the teleop modules. 
 
 ```python
 class PolicyModuleConfig(ModuleConfig):
-    checkpoint_path: str                    # Path to .pt checkpoint
+    checkpoint_path: str                    # Path to .pt checkpoint or HF repo_id
     predict_hz: float = 50.0               # Inference rate
     device: str = "cuda"
 
@@ -362,15 +372,14 @@ class PolicyModule(Module[PolicyModuleConfig]):
 ```
 
 **How it works:**
-1. Subscribes to `joint_state` (and optionally `images`) topics
-2. Runs an inference loop at `predict_hz`:
-   - Grab latest joint state + image
-   - Normalize using checkpoint stats
-   - `policy.predict(obs)` under `torch.no_grad()`
-   - Denormalize action
+1. Loads a LeRobot `PreTrainedPolicy` from checkpoint or HF Hub
+2. Subscribes to `joint_state` (and optionally `images`) topics
+3. Runs an inference loop at `predict_hz`:
+   - Build observation dict from latest joint state + image
+   - `policy.select_action(observation)` — LeRobot handles normalization, chunking, architecture
    - Safety clip (joint limits + rate limit)
    - Publish as `JointState` on `joint_command` topic
-3. Coordinator's existing `JointServoTask` receives it — same path as teleop
+4. Coordinator's existing `JointServoTask` receives it — same path as teleop
 
 **This is the same pattern as teleop:** Phone teleop publishes Twist -> coordinator reads it. Policy publishes JointState -> coordinator reads it. No special integration needed.
 
@@ -379,7 +388,7 @@ class PolicyModule(Module[PolicyModuleConfig]):
 # Deploy a trained policy — just wire it in like teleop
 policy_deploy = autoconnect(
     coordinator_xarm7,                          # has a servo task configured
-    PolicyModule.blueprint(checkpoint_path="./checkpoints/bc_best.pt"),
+    PolicyModule.blueprint(checkpoint_path="./checkpoints/act_best"),
 )
 ```
 
@@ -411,8 +420,8 @@ Add to `pyproject.toml`:
 [project.optional-dependencies]
 learning = [
     "torch>=2.0",
-    "h5py>=3.0",
-    "zarr>=2.0",
+    "lerobot>=0.1",
+    "tensorflow-datasets>=4.9",
 ]
 ```
 
@@ -450,33 +459,31 @@ learning = [
 3. `learning/collect/recorder.py` — DemonstrationRecorder Module
 4. Unit tests
 
-### Phase 2 — Dataset + Export (adds h5py, zarr)
+### Phase 2 — Dataset + Export (adds lerobot, tensorflow-datasets)
 5. `learning/dataset/schema.py` — RecordingSchema + FieldExtractor + built-in converters
 6. `learning/dataset/dataset.py` — Dataset (raw -> structured via schema)
-7. `learning/dataset/export.py` — HDF5 + LeRobot
+7. `learning/dataset/export.py` — LeRobot + RLDS
 8. `learning/dataset/loader.py` — PyTorch Dataset
 9. Tests
 
-### Phase 3 — Training (uses torch)
-10. `learning/train/policy.py` — Policy protocol + MLP + CNNMLP
-11. `learning/train/trainer.py` — TrainerModule (DimOS Module)
-12. `learning/train/bc.py` — BehaviorCloningTrainer
-13. `learning/train/checkpoint.py`
-14. Tests
+### Phase 3 — Training (uses lerobot)
+10. `learning/train/trainer.py` — TrainerModule (wraps LeRobot)
+11. `learning/train/checkpoint.py` — Policy loading utilities
+12. Tests
 
 ### Phase 4 — Deployment + Eval
-15. `learning/deploy/safety.py`
-16. `learning/deploy/policy_module.py` — PolicyModule (standalone Module, publishes joint_command)
-17. `learning/eval/evaluator.py`
-18. `learning/blueprints.py`
-19. Integration test: collect -> train -> deploy on MockAdapter
+13. `learning/deploy/safety.py`
+14. `learning/deploy/policy_module.py` — PolicyModule (standalone Module, publishes joint_command)
+15. `learning/eval/evaluator.py`
+16. `learning/blueprints.py`
+17. Integration test: collect -> train -> deploy on MockAdapter
 
 ---
 
 ## Verification
 
 1. **Unit tests**: Each module tested independently with MemoryStore / MockAdapter
-2. **Integration test**: Full loop — record 100 timesteps via mock teleop, train MLP BC for 5 epochs, deploy PolicyModule, verify it publishes valid JointState commands
-3. **Manual test**: Wire recorder into a teleop blueprint, record an episode, export to HDF5, inspect shapes with h5py
-4. **CLI test**: `dimos train --config configs/bc_xarm7.yaml` runs end-to-end
+2. **Integration test**: Full loop — record episodes via mock teleop, export to LeRobot format, train ACT policy, deploy PolicyModule, verify it publishes valid JointState commands
+3. **Manual test**: Wire recorder into a teleop blueprint, record episodes, export to LeRobot format, inspect with `lerobot` CLI or push to HF Hub
+4. **CLI test**: `dimos train --config configs/act_xarm7.yaml` runs end-to-end
 5. **Existing tests pass**: `pytest dimos/control/` — confirm no regressions
