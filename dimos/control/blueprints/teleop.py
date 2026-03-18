@@ -265,15 +265,15 @@ coordinator_teleop_dual = control_coordinator(
 
 
 __all__ = [
-    # Servo / Velocity
-    "coordinator_teleop_xarm6",
-    "coordinator_velocity_xarm6",
-    "coordinator_combined_xarm6",
     # Cartesian IK
     "coordinator_cartesian_ik_mock",
     "coordinator_cartesian_ik_piper",
+    "coordinator_combined_xarm6",
+    "coordinator_teleop_dual",
+    "coordinator_teleop_piper",
+    # Servo / Velocity
+    "coordinator_teleop_xarm6",
     # TeleopIK
     "coordinator_teleop_xarm7",
-    "coordinator_teleop_piper",
-    "coordinator_teleop_dual",
+    "coordinator_velocity_xarm6",
 ]

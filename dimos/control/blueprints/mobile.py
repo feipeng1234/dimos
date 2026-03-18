@@ -74,6 +74,6 @@ coordinator_mobile_manip_mock = control_coordinator(
 
 
 __all__ = [
-    "coordinator_mock_twist_base",
     "coordinator_mobile_manip_mock",
+    "coordinator_mock_twist_base",
 ]

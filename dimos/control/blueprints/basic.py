@@ -123,7 +123,7 @@ coordinator_piper = control_coordinator(
 __all__ = [
     "coordinator_basic",
     "coordinator_mock",
-    "coordinator_xarm7",
-    "coordinator_xarm6",
     "coordinator_piper",
+    "coordinator_xarm6",
+    "coordinator_xarm7",
 ]
