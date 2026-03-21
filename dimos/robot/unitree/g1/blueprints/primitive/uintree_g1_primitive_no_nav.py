@@ -40,7 +40,7 @@ from dimos.msgs.std_msgs.Bool import Bool
 from dimos.navigation.frontier_exploration.wavefront_frontier_goal_selector import (
     WavefrontFrontierExplorer,
 )
-from dimos.protocol.pubsub.impl.lcmpubsub import LCM
+from dimos.visualization.vis_module import vis_module
 from dimos.web.websocket_vis.websocket_vis_module import WebsocketVisModule
 
 
@@ -90,7 +90,6 @@ def _g1_rerun_blueprint() -> Any:
 
 rerun_config = {
     "blueprint": _g1_rerun_blueprint,
-    "pubsubs": [LCM()],
     "visual_override": {
         "world/camera_info": _convert_camera_info,
         "world/global_map": _convert_global_map,
@@ -101,18 +100,7 @@ rerun_config = {
     },
 }
 
-if global_config.viewer == "foxglove":
-    from dimos.robot.foxglove_bridge import FoxgloveBridge
-
-    _with_vis = autoconnect(FoxgloveBridge.blueprint())
-elif global_config.viewer.startswith("rerun"):
-    from dimos.visualization.rerun.bridge import RerunBridgeModule, _resolve_viewer_mode
-
-    _with_vis = autoconnect(
-        RerunBridgeModule.blueprint(viewer_mode=_resolve_viewer_mode(), **rerun_config)
-    )
-else:
-    _with_vis = autoconnect()
+_with_vis = vis_module(global_config.viewer, rerun_config=rerun_config)
 
 
 def _create_webcam() -> Webcam:
