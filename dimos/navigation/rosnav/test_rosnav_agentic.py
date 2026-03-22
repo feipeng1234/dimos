@@ -172,12 +172,6 @@ def _ensure_fixture(name: str, responses: list[dict]) -> Path:
     return fixture_path
 
 
-# ---------------------------------------------------------------------------
-# The actual blueprint — mirrors unitree_g1_agentic_sim exactly, but swaps
-# Agent for FilteredAgent(model_fixture=...) and adds test harness modules.
-# ---------------------------------------------------------------------------
-
-
 def _build_agentic_sim_test(
     fixture_path: Path,
     messages: list[BaseMessage],
@@ -205,9 +199,9 @@ def _build_agentic_sim_test(
     #   - AgentTestRunner for driving messages
     #   - OdomRecorder for position assertions
     blueprint = autoconnect(
-        # === From unitree_g1_rosnav_sim ===
+        # From unitree_g1_rosnav_sim
         unitree_g1_rosnav_sim,
-        # === From unitree_g1_agentic_sim (all production modules) ===
+        # From unitree_g1_agentic_sim (all production modules)
         NavigationSkillContainer.blueprint(),  # NavigationSkillContainer
         PersonFollowSkillContainer.blueprint(
             camera_info=_camera_info_static()
@@ -217,7 +211,7 @@ def _build_agentic_sim_test(
         PerceiveLoopSkill.blueprint(),  # PerceiveLoopSkill
         WebInput.blueprint(),  # WebHumanInput
         SpeakSkill.blueprint(),  # SpeakSkill
-        # === Test overrides ===
+        # Test overrides
         FilteredAgent.blueprint(**agent_kwargs),  # Replaces agent()
         AgentTestRunner.blueprint(messages=messages),  # Test driver
         OdomRecorder.blueprint(),  # Position tracking
@@ -232,11 +226,6 @@ def _build_agentic_sim_test(
         agent_transport,
         finished_transport,
     )
-
-
-# ---------------------------------------------------------------------------
-# Test 1: "Go to coordinates (2, 0)" — basic navigation via navigate_with_text
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow
@@ -333,11 +322,6 @@ def test_agentic_sim_navigate_to_coordinates():
         agent_tp.stop()
         finished_tp.stop()
         coordinator.stop()
-
-
-# ---------------------------------------------------------------------------
-# Test 2: "Stop moving" — agent uses stop_navigation skill
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow
