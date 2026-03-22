@@ -436,7 +436,7 @@ class PGO(Module[PGOConfig]):
         with self._lock:
             self._latest_r = r
             self._latest_t = t
-            self._latest_time = msg.ts if msg.ts else time.time()
+            self._latest_time = msg.ts if msg.ts is not None else time.time()
             self._has_odom = True
 
     def _on_scan(self, cloud: PointCloud2) -> None:
