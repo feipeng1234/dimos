@@ -36,6 +36,7 @@ from dimos.core.core import rpc
 from dimos.core.module import Module, ModuleConfig
 from dimos.core.stream import In, Out
 from dimos.msgs.geometry_msgs.Pose import Pose
+from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
 from dimos.msgs.nav_msgs.Odometry import Odometry
 from dimos.msgs.sensor_msgs.PointCloud2 import PointCloud2
 from dimos.utils.logging_config import setup_logger
@@ -353,19 +354,21 @@ class IncrementalMap(Module[IncrementalMapConfig]):
     On loop closure, rebuilds the map from corrected keyframe poses.
 
     Ports:
-        odom (In[Odometry]): Raw odometry from robot or sim.
+        raw_odom (In[Odometry]): Raw odometry from robot or sim.
         registered_scan (In[PointCloud2]): World-frame registered lidar.
         global_map (Out[PointCloud2]): Accumulated corrected map.
         corrected_odom (Out[Odometry]): Loop-closure-corrected odometry.
+        odom (Out[PoseStamped]): Corrected pose as PoseStamped for downstream consumers.
     """
 
     default_config = IncrementalMapConfig
 
-    odom: In[Odometry]
+    raw_odom: In[Odometry]
     registered_scan: In[PointCloud2]
 
     global_map: Out[PointCloud2]
     corrected_odom: Out[Odometry]
+    odom: Out[PoseStamped]
 
     def __init__(self, **kwargs) -> None:  # type: ignore[no-untyped-def]
         super().__init__(**kwargs)
@@ -395,7 +398,7 @@ class IncrementalMap(Module[IncrementalMapConfig]):
     def start(self) -> None:
         super().start()
         self._core = _IncrementalMapCore(self.config)
-        self.odom.subscribe(self._on_odom)
+        self.raw_odom.subscribe(self._on_odom)
         self.registered_scan.subscribe(self._on_scan)
         self._running = True
         self._thread = threading.Thread(target=self._publish_loop, daemon=True)
@@ -413,11 +416,18 @@ class IncrementalMap(Module[IncrementalMapConfig]):
         q = [msg.orientation.x, msg.orientation.y, msg.orientation.z, msg.orientation.w]
         r = Rotation.from_quat(q).as_matrix()
         t = np.array([msg.x, msg.y, msg.z])
+        ts = msg.ts if msg.ts else time.time()
         with self._lock:
             self._last_r = r
             self._last_t = t
-            self._last_ts = msg.ts if msg.ts else time.time()
+            self._last_ts = ts
             self._has_odom = True
+            core = self._core
+
+        # Always publish corrected odom (applies loop closure offset if any).
+        if core is not None:
+            r_corr, t_corr = core.get_corrected_pose(r, t)
+            self._publish_corrected_odom(r_corr, t_corr, ts)
 
     def _on_scan(self, cloud: PointCloud2) -> None:
         points, _ = cloud.as_numpy()
@@ -455,15 +465,24 @@ class IncrementalMap(Module[IncrementalMapConfig]):
 
     def _publish_corrected_odom(self, r: np.ndarray, t: np.ndarray, ts: float) -> None:
         q = Rotation.from_matrix(r).as_quat()
+        pose = Pose(
+            position=[float(t[0]), float(t[1]), float(t[2])],
+            orientation=[float(q[0]), float(q[1]), float(q[2]), float(q[3])],
+        )
         self.corrected_odom.publish(
             Odometry(
                 ts=ts,
                 frame_id="map",
                 child_frame_id="sensor",
-                pose=Pose(
-                    position=[float(t[0]), float(t[1]), float(t[2])],
-                    orientation=[float(q[0]), float(q[1]), float(q[2]), float(q[3])],
-                ),
+                pose=pose,
+            )
+        )
+        # Also publish as PoseStamped for downstream consumers (planner, explorer).
+        self.odom.publish(
+            PoseStamped(
+                ts=ts,
+                frame_id="map",
+                pose=pose,
             )
         )
 
