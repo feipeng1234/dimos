@@ -1,3 +1,17 @@
+# Copyright 2026 Dimensional Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Tests for TF tree rendering in RerunBridgeModule."""
 
 from __future__ import annotations
@@ -6,15 +20,15 @@ import builtins
 import sys
 from types import ModuleType
 from typing import Any
-from unittest.mock import MagicMock, call, patch
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 # Stub out heavy/unavailable dependencies before importing bridge.
 _real_import = builtins.__import__
 
 
-def _mock_import(name: str, globals: Any = None, locals: Any = None, fromlist: Any = (), level: int = 0) -> Any:  # noqa: A002
+def _mock_import(
+    name: str, globals: Any = None, locals: Any = None, fromlist: Any = (), level: int = 0
+) -> Any:
     try:
         return _real_import(name, globals, locals, fromlist, level)
     except (ModuleNotFoundError, ImportError):
