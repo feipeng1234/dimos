@@ -95,9 +95,9 @@ class ModuleBase(Configurable[ModuleConfigT], Resource):
     rpc_calls: list[str] = []
 
     def __init__(self, config_args: dict[str, Any]):
+        self.mod_state = ThreadSafeVal[ModState]("init")
         super().__init__(**config_args)
         self._disposables = CompositeDisposable()
-        self.mod_state = ThreadSafeVal[ModState]("init")
         self._async_thread = (
             AsyncModuleThread(  # NEEDS to be created after self._disposables exists
                 module=self
