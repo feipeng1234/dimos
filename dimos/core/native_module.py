@@ -154,6 +154,7 @@ class NativeModule(Module[_NativeConfig]):
             shutdown_timeout=self.config.shutdown_timeout,
             log_json=self.config.log_format == LogFormat.JSON,
         )
+        self._proc.start()
 
     def _resolve_paths(self) -> None:
         """Resolve relative ``cwd`` and ``executable`` against the subclass's source file."""

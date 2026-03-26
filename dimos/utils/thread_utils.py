@@ -23,7 +23,7 @@ import json
 import signal
 import subprocess
 import threading
-from typing import IO, TYPE_CHECKING, Any, Generic
+from typing import IO, TYPE_CHECKING, Any, Generic, Literal
 
 from reactivex.disposable import Disposable
 
@@ -41,22 +41,14 @@ T = TypeVar("T")
 R = TypeVar("R")
 
 
-# ThreadSafeVal: a lock-protected value with context-manager support
-
-
 class ThreadSafeVal(Generic[T]):
     """A thread-safe value wrapper.
 
-    Wraps any value with a lock and provides atomic read-modify-write
-    via a context manager::
-
-        counter = ThreadSafeVal(0)
-
-        # Simple get/set (each acquires the lock briefly):
-        counter.set(10)
-        print(counter.get())  # 10
-
-        # Atomic read-modify-write:
+    Forces lock usage in order to get access to a value (reduces unsafe value access)
+    Three ways to use:
+    1. `.set`
+    2. `.get`
+    3. via a context manager::
         with counter as value:
             # Lock is held for the entire block.
             # Other threads block on get/set/with until this exits.
@@ -71,7 +63,7 @@ class ThreadSafeVal(Generic[T]):
         # Bool check (for flag-like usage):
         stopping = ThreadSafeVal(False)
         stopping.set(True)
-        if stopping:
+        if stopping.get():
             print("stopping!")
     """
 
@@ -89,10 +81,6 @@ class ThreadSafeVal(Generic[T]):
         with self._lock:
             self._value = value
 
-    def __bool__(self) -> bool:
-        with self._lock:
-            return bool(self._value)
-
     def __enter__(self) -> T:
         self._lock.acquire()
         return self._value
@@ -109,9 +97,6 @@ class ThreadSafeVal(Generic[T]):
 
     def __repr__(self) -> str:
         return f"ThreadSafeVal({self._value!r})"
-
-
-# ModuleThread: a thread that auto-registers with a module's disposables
 
 
 class ModuleThread:
@@ -132,9 +117,10 @@ class ModuleThread:
                     target=self._run_loop,
                     name="my-worker",
                 )
+                self._worker.start()
 
             def _run_loop(self) -> None:
-                while not self._worker.stopping:
+                while self._worker.status.get() == "running":
                     do_work()
     """
 
@@ -142,28 +128,18 @@ class ModuleThread:
         self,
         module: ModuleBase[Any],
         *,
-        start: bool = True,
         close_timeout: float = 2.0,
         **thread_kwargs: Any,
     ) -> None:
         thread_kwargs.setdefault("daemon", True)
+        thread_kwargs.setdefault("name", f"{type(module).__name__}-thread")
         self._thread = threading.Thread(**thread_kwargs)
-        self._stop_event = threading.Event()
         self._close_timeout = close_timeout
-        self._stopped = False
-        self._stop_lock = threading.Lock()
+        self.status: ThreadSafeVal[Literal["not_started", "running", "stopping", "stopped"]] = ThreadSafeVal("not_started")
         module._disposables.add(Disposable(self.stop))
-        if start:
-            self.start()
-
-    @property
-    def stopping(self) -> bool:
-        """True after ``stop()`` has been called."""
-        return self._stop_event.is_set()
 
     def start(self) -> None:
-        """Start the underlying thread."""
-        self._stop_event.clear()
+        self.status.set("running")
         self._thread.start()
 
     def stop(self) -> None:
@@ -172,14 +148,13 @@ class ModuleThread:
         Safe to call multiple times, from any thread (including the
         managed thread itself — it will skip the join in that case).
         """
-        with self._stop_lock:
-            if self._stopped:
+        with self.status as s:
+            if s in ("stopping", "stopped"):
                 return
-            self._stopped = True
-
-        self._stop_event.set()
+            self.status.set("stopping")
         if self._thread.is_alive() and self._thread is not threading.current_thread():
             self._thread.join(timeout=self._close_timeout)
+        self.status.set("stopped")
 
     def join(self, timeout: float | None = None) -> None:
         """Join the underlying thread."""
@@ -188,9 +163,6 @@ class ModuleThread:
     @property
     def is_alive(self) -> bool:
         return self._thread.is_alive()
-
-
-# AsyncModuleThread: a thread running an asyncio event loop, auto-registered
 
 
 class AsyncModuleThread:
@@ -226,8 +198,7 @@ class AsyncModuleThread:
         close_timeout: float = 2.0,
     ) -> None:
         self._close_timeout = close_timeout
-        self._stopped = False
-        self._stop_lock = threading.Lock()
+        self._stopped = ThreadSafeVal(False)
         self._owns_loop = False
         self._thread: threading.Thread | None = None
 
@@ -261,19 +232,16 @@ class AsyncModuleThread:
         No-op if the loop was not created by this instance (reused an
         existing running loop).  Safe to call multiple times.
         """
-        with self._stop_lock:
-            if self._stopped:
+        with self._stopped as stopped:
+            if stopped:
                 return
-            self._stopped = True
+            self._stopped.set(True)
 
         if self._owns_loop and self._loop.is_running():
             self._loop.call_soon_threadsafe(self._loop.stop)
 
         if self._thread is not None and self._thread.is_alive():
             self._thread.join(timeout=self._close_timeout)
-
-
-# ModuleProcess: managed subprocess with log piping, auto-registered cleanup
 
 
 class ModuleProcess:
@@ -298,6 +266,7 @@ class ModuleProcess:
                     cwd="/opt/bin",
                     on_exit=self.stop,  # stops the whole module if process exits on its own
                 )
+                self._proc.start()
 
             @rpc
             def stop(self) -> None:
@@ -317,7 +286,6 @@ class ModuleProcess:
         kill_timeout: float = 5.0,
         log_json: bool = False,
         log_tail_lines: int = 50,
-        start: bool = True,
         **popen_kwargs: Any,
     ) -> None:
         self._args = args
@@ -333,14 +301,11 @@ class ModuleProcess:
         self._process: subprocess.Popen[bytes] | None = None
         self._watchdog: ModuleThread | None = None
         self._module = module
-        self._stopped = False
-        self._stop_lock = threading.Lock()
+        self._stopped = ThreadSafeVal(False)
         self.last_stdout: collections.deque[str] = collections.deque(maxlen=log_tail_lines)
         self.last_stderr: collections.deque[str] = collections.deque(maxlen=log_tail_lines)
 
         module._disposables.add(Disposable(self.stop))
-        if start:
-            self.start()
 
     @property
     def pid(self) -> int | None:
@@ -362,8 +327,7 @@ class ModuleProcess:
             logger.warning("Process already running", pid=self._process.pid)
             return
 
-        with self._stop_lock:
-            self._stopped = False
+        self._stopped.set(False)
 
         self.last_stdout = collections.deque(maxlen=self._log_tail_lines)
         self.last_stderr = collections.deque(maxlen=self._log_tail_lines)
@@ -389,13 +353,14 @@ class ModuleProcess:
             target=self._watch,
             name=f"proc-{self._process.pid}-watchdog",
         )
+        self._watchdog.start()
 
     def stop(self) -> None:
         """Send SIGTERM, wait, escalate to SIGKILL if needed. Idempotent."""
-        with self._stop_lock:
-            if self._stopped:
+        with self._stopped as stopped:
+            if stopped:
                 return
-            self._stopped = True
+            self._stopped.set(True)
 
         if self._process is not None and self._process.poll() is None:
             logger.info("Stopping process", pid=self._process.pid)
@@ -433,9 +398,8 @@ class ModuleProcess:
         stdout_t.join(timeout=2)
         stderr_t.join(timeout=2)
 
-        with self._stop_lock:
-            if self._stopped:
-                return
+        if self._stopped.get():
+            return
 
         last_stdout = "\n".join(self.last_stdout) or None
         last_stderr = "\n".join(self.last_stderr) or None
@@ -476,9 +440,6 @@ class ModuleProcess:
             proc = self._process
             log_fn(line, pid=proc.pid if proc else None)
         stream.close()
-
-
-# safe_thread_map: parallel map that collects all results before raising
 
 
 def safe_thread_map(

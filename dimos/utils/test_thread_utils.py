@@ -62,18 +62,6 @@ class TestThreadSafeVal:
         v.set(99)
         assert v.get() == 99
 
-    def test_bool_truthy(self) -> None:
-        v = ThreadSafeVal(True)
-        assert bool(v) is True
-        v.set(False)
-        assert bool(v) is False
-
-    def test_bool_zero(self) -> None:
-        v = ThreadSafeVal(0)
-        assert bool(v) is False
-        v.set(1)
-        assert bool(v) is True
-
     def test_context_manager_returns_value(self) -> None:
         v = ThreadSafeVal("hello")
         with v as val:
@@ -112,20 +100,6 @@ class TestThreadSafeVal:
         t.start()
         t.join(timeout=2)
         assert result.is_set(), "Deadlocked! get() inside with block hung"
-
-    def test_bool_inside_context_manager_no_deadlock(self) -> None:
-        v = ThreadSafeVal(True)
-        result = threading.Event()
-
-        def do_it() -> None:
-            with v:
-                _ = bool(v)
-            result.set()
-
-        t = threading.Thread(target=do_it)
-        t.start()
-        t.join(timeout=2)
-        assert result.is_set(), "Deadlocked! bool() inside with block hung"
 
     def test_context_manager_blocks_other_threads(self) -> None:
         """While one thread holds the lock via `with`, others should block on set()."""
@@ -245,6 +219,7 @@ class TestModuleThread:
             ran.set()
 
         mt = ModuleThread(module=mod, target=target, name="test-basic")
+        mt.start()
         ran.wait(timeout=2)
         assert ran.is_set()
         mt.stop()
@@ -254,6 +229,7 @@ class TestModuleThread:
         mod = FakeModule()
         started = threading.Event()
         mt = ModuleThread(module=mod, target=started.set, name="test-autostart")
+        mt.start()
         started.wait(timeout=2)
         assert started.is_set()
         mt.stop()
@@ -261,7 +237,7 @@ class TestModuleThread:
     def test_deferred_start(self) -> None:
         mod = FakeModule()
         started = threading.Event()
-        mt = ModuleThread(module=mod, target=started.set, name="test-deferred", start=False)
+        mt = ModuleThread(module=mod, target=started.set, name="test-deferred")
         time.sleep(0.1)
         assert not started.is_set()
         mt.start()
@@ -275,11 +251,11 @@ class TestModuleThread:
         holder: list[ModuleThread] = []
 
         def target() -> None:
-            while not holder[0].stopping:
+            while holder[0].status.get() == "running":
                 time.sleep(0.01)
             saw_stopping.set()
 
-        mt = ModuleThread(module=mod, target=target, name="test-stopping", start=False)
+        mt = ModuleThread(module=mod, target=target, name="test-stopping")
         holder.append(mt)
         mt.start()
         time.sleep(0.05)
@@ -290,6 +266,7 @@ class TestModuleThread:
     def test_stop_idempotent(self) -> None:
         mod = FakeModule()
         mt = ModuleThread(module=mod, target=lambda: time.sleep(0.01), name="test-idem")
+        mt.start()
         time.sleep(0.05)
         mt.stop()
         mt.stop()  # second call should not raise
@@ -305,7 +282,7 @@ class TestModuleThread:
             holder[0].stop()  # stop ourselves — should not deadlock
             result.set()
 
-        mt = ModuleThread(module=mod, target=target, name="test-self-stop", start=False)
+        mt = ModuleThread(module=mod, target=target, name="test-self-stop")
         holder.append(mt)
         mt.start()
         result.wait(timeout=3)
@@ -319,10 +296,10 @@ class TestModuleThread:
 
         def target() -> None:
             running.set()
-            while not holder[0].stopping:
+            while holder[0].status.get() == "running":
                 time.sleep(0.01)
 
-        mt = ModuleThread(module=mod, target=target, name="test-dispose", start=False)
+        mt = ModuleThread(module=mod, target=target, name="test-dispose")
         holder.append(mt)
         mt.start()
         running.wait(timeout=2)
@@ -336,10 +313,10 @@ class TestModuleThread:
         holder: list[ModuleThread] = []
 
         def target() -> None:
-            while not holder[0].stopping:
+            while holder[0].status.get() == "running":
                 time.sleep(0.01)
 
-        mt = ModuleThread(module=mod, target=target, name="test-concurrent-stop", start=False)
+        mt = ModuleThread(module=mod, target=target, name="test-concurrent-stop")
         holder.append(mt)
         mt.start()
         time.sleep(0.05)
@@ -370,6 +347,7 @@ class TestModuleThread:
         mt = ModuleThread(
             module=mod, target=stubborn_target, name="test-timeout", close_timeout=0.2
         )
+        mt.start()
         start = time.monotonic()
         mt.stop()
         elapsed = time.monotonic() - start
@@ -384,10 +362,10 @@ class TestModuleThread:
             holder: list[ModuleThread] = []
 
             def target(h: list[ModuleThread] = holder) -> None:
-                while not h[0].stopping:
+                while h[0].status.get() == "running":
                     time.sleep(0.001)
 
-            mt = ModuleThread(module=mod, target=target, name="test-stop-dispose", start=False)
+            mt = ModuleThread(module=mod, target=target, name="test-stop-dispose")
             holder.append(mt)
             mt.start()
             time.sleep(0.02)
@@ -493,6 +471,7 @@ class TestModuleProcess:
             args=[PYTHON, "-c", "import time; time.sleep(30)"],
             shutdown_timeout=2.0,
         )
+        mp.start()
         assert mp.is_alive
         assert mp.pid is not None
         mp.stop()
@@ -506,6 +485,7 @@ class TestModuleProcess:
             args=[PYTHON, "-c", "import time; time.sleep(30)"],
             shutdown_timeout=1.0,
         )
+        mp.start()
         mp.stop()
         mp.stop()  # should not raise
         mp.stop()
@@ -517,6 +497,7 @@ class TestModuleProcess:
             args=[PYTHON, "-c", "import time; time.sleep(30)"],
             shutdown_timeout=2.0,
         )
+        mp.start()
         mod.dispose()
         time.sleep(0.5)
         assert not mp.is_alive
@@ -526,11 +507,12 @@ class TestModuleProcess:
         mod = FakeModule()
         exit_called = threading.Event()
 
-        ModuleProcess(
+        mp = ModuleProcess(
             module=mod,
             args=[PYTHON, "-c", "print('done')"],
             on_exit=exit_called.set,
         )
+        mp.start()
         exit_called.wait(timeout=5)
         assert exit_called.is_set(), "on_exit was not called after natural process exit"
 
@@ -538,11 +520,12 @@ class TestModuleProcess:
         mod = FakeModule()
         exit_called = threading.Event()
 
-        ModuleProcess(
+        mp = ModuleProcess(
             module=mod,
             args=[PYTHON, "-c", "import sys; sys.exit(1)"],
             on_exit=exit_called.set,
         )
+        mp.start()
         exit_called.wait(timeout=5)
         assert exit_called.is_set(), "on_exit was not called after process crash"
 
@@ -557,6 +540,7 @@ class TestModuleProcess:
             on_exit=exit_called.set,
             shutdown_timeout=2.0,
         )
+        mp.start()
         time.sleep(0.2)  # let watchdog start
         mp.stop()
         time.sleep(1.0)  # give watchdog time to potentially fire
@@ -568,6 +552,7 @@ class TestModuleProcess:
             module=mod,
             args=[PYTHON, "-c", "print('hello from subprocess')"],
         )
+        mp.start()
         time.sleep(1.0)  # let output be read
         mp.stop()
 
@@ -577,6 +562,7 @@ class TestModuleProcess:
             module=mod,
             args=[PYTHON, "-c", "import sys; sys.stderr.write('error msg\\n')"],
         )
+        mp.start()
         time.sleep(1.0)
         mp.stop()
 
@@ -591,6 +577,7 @@ class TestModuleProcess:
             ],
             log_json=True,
         )
+        mp.start()
         time.sleep(1.0)
         mp.stop()
 
@@ -601,6 +588,7 @@ class TestModuleProcess:
             args=[PYTHON, "-c", "print('not json')"],
             log_json=True,
         )
+        mp.start()
         time.sleep(1.0)
         mp.stop()
 
@@ -617,6 +605,7 @@ class TestModuleProcess:
             shutdown_timeout=0.5,
             kill_timeout=2.0,
         )
+        mp.start()
         time.sleep(0.2)
         start = time.monotonic()
         mp.stop()
@@ -632,6 +621,7 @@ class TestModuleProcess:
             module=mod,
             args=[PYTHON, "-c", "pass"],  # exits immediately
         )
+        mp.start()
         time.sleep(1.0)  # let it die
         mp.stop()  # should not raise
 
@@ -642,6 +632,7 @@ class TestModuleProcess:
             args=[PYTHON, "-c", "import time; time.sleep(30)"],
             shutdown_timeout=2.0,
         )
+        mp.start()
         errors = []
 
         def stop_it() -> None:
@@ -670,11 +661,12 @@ class TestModuleProcess:
             mod.dispose()
             stop_called.set()
 
-        ModuleProcess(
+        mp = ModuleProcess(
             module=mod,
             args=[PYTHON, "-c", "pass"],  # exits immediately
             on_exit=fake_module_stop,
         )
+        mp.start()
         stop_called.wait(timeout=5)
         assert stop_called.is_set(), "Deadlocked! on_exit -> dispose -> stop chain hung"
 
@@ -688,7 +680,6 @@ class TestModuleProcess:
         mp = ModuleProcess(
             module=mod,
             args=[PYTHON, "-c", "import time; time.sleep(30)"],
-            start=False,
         )
         assert not mp.is_alive
         mp.start()
@@ -699,7 +690,7 @@ class TestModuleProcess:
         mod = FakeModule()
         exit_called = threading.Event()
 
-        ModuleProcess(
+        mp = ModuleProcess(
             module=mod,
             args=[
                 PYTHON,
@@ -709,6 +700,7 @@ class TestModuleProcess:
             env={**os.environ, "MY_VAR": "42"},
             on_exit=exit_called.set,
         )
+        mp.start()
         exit_called.wait(timeout=5)
         # Process should have exited with 0 (our on_exit fires for all unmanaged exits)
         assert exit_called.is_set()
@@ -720,6 +712,7 @@ class TestModuleProcess:
             args=[PYTHON, "-c", "import os; print(os.getcwd())"],
             cwd="/tmp",
         )
+        mp.start()
         time.sleep(1.0)
         mp.stop()
 
@@ -829,11 +822,12 @@ class TestModuleProcessDisposeChain:
         for _ in range(20):
             mod = FakeModule()
             done = threading.Event()
-            ModuleProcess(
+            mp = ModuleProcess(
                 module=mod,
                 args=[PYTHON, "-c", "pass"],
                 on_exit=self._make_fake_stop(mod, done),
             )
+            mp.start()
             assert done.wait(timeout=5), "Deadlock in dispose chain (fast exit)"
 
     def test_chain_no_deadlock_slow_exit(self) -> None:
@@ -841,11 +835,12 @@ class TestModuleProcessDisposeChain:
         for _ in range(10):
             mod = FakeModule()
             done = threading.Event()
-            ModuleProcess(
+            mp = ModuleProcess(
                 module=mod,
                 args=[PYTHON, "-c", "import time; time.sleep(0.1)"],
                 on_exit=self._make_fake_stop(mod, done),
             )
+            mp.start()
             assert done.wait(timeout=5), "Deadlock in dispose chain (slow exit)"
 
     def test_chain_concurrent_with_external_stop(self) -> None:
@@ -859,6 +854,7 @@ class TestModuleProcessDisposeChain:
                 on_exit=self._make_fake_stop(mod, done),
                 shutdown_timeout=1.0,
             )
+            mp.start()
             # Race: the process might exit naturally or we might stop it
             time.sleep(0.03)
             mp.stop()
@@ -877,11 +873,12 @@ class TestModuleProcessDisposeChain:
             mod = FakeModule()
             done = threading.Event()
             with mock.patch.object(ModuleThread, "stop", slow_stop):
-                ModuleProcess(
+                mp = ModuleProcess(
                     module=mod,
                     args=[PYTHON, "-c", "pass"],
                     on_exit=self._make_fake_stop(mod, done),
                 )
+                mp.start()
                 assert done.wait(timeout=10), "Deadlock with slow ModuleThread.stop()"
 
 
