@@ -21,11 +21,10 @@ from typing import TYPE_CHECKING, Any
 from dimos.core.global_config import GlobalConfig, global_config
 from dimos.core.module import ModuleBase, ModuleSpec
 from dimos.core.resource import Resource
+from dimos.core.worker_manager import WorkerManager
 from dimos.core.worker_manager_docker import WorkerManagerDocker
-from dimos.core.worker_manager_python import WorkerManagerPython
 from dimos.utils.logging_config import setup_logger
-from dimos.utils.thread_utils import safe_thread_map
-from dimos.utils.typing_utils import ExceptionGroup
+from dimos.utils.safe_thread_map import ExceptionGroup, safe_thread_map
 
 if TYPE_CHECKING:
     from dimos.core.rpc_client import ModuleProxy, ModuleProxyProtocol
@@ -34,17 +33,7 @@ logger = setup_logger()
 
 
 class ModuleCoordinator(Resource):  # type: ignore[misc]
-    """
-    There should only ever be one module coordinator instance (this is a singleton)
-    - Module (classes) should be able to be deployed, stopped, and re-deployed in on one instance of ModuleCoordinator
-    - Arguably ModuleCoordinator could be called the "DimosRuntime"
-    - ModuleCoordinator is responsible for all global "addresses".
-      Ex: it should make sure all modules are using the same LCM url, the same rerun port, etc
-      (it may not do all of that at time of writing but that is the intention/job of this class)
-    - Modules shouldn't be deployed on their own (except for testing)
-    """
-
-    _managers: list[WorkerManagerDocker | WorkerManagerPython]
+    _managers: list[WorkerManagerDocker | WorkerManager]
     _global_config: GlobalConfig
     _deployed_modules: dict[type[ModuleBase], ModuleProxyProtocol]
 
@@ -59,14 +48,14 @@ class ModuleCoordinator(Resource):  # type: ignore[misc]
     def start(self) -> None:
         self._managers = [
             WorkerManagerDocker(g=self._global_config),
-            WorkerManagerPython(g=self._global_config),
+            WorkerManager(g=self._global_config),
         ]
         for m in self._managers:
             m.start()
 
     def _find_manager(
         self, module_class: type[ModuleBase[Any]]
-    ) -> WorkerManagerDocker | WorkerManagerPython:
+    ) -> WorkerManagerDocker | WorkerManager:
         for m in self._managers:
             if m.should_manage(module_class):
                 return m
@@ -90,7 +79,7 @@ class ModuleCoordinator(Resource):  # type: ignore[misc]
                 module.stop()
             logger.info("Module stopped.", module=module_class.__name__)
 
-        def _stop_manager(m: WorkerManagerDocker | WorkerManagerPython) -> None:
+        def _stop_manager(m: WorkerManagerDocker | WorkerManager) -> None:
             try:
                 m.stop()
             except Exception:
@@ -117,7 +106,7 @@ class ModuleCoordinator(Resource):  # type: ignore[misc]
             raise ValueError("Not started")
 
         # Group specs by manager, tracking original indices for reassembly
-        groups: dict[int, WorkerManagerDocker | WorkerManagerPython] = {}
+        groups: dict[int, WorkerManagerDocker | WorkerManager] = {}
         indices_by_manager: dict[int, list[int]] = {}
         specs_by_manager: dict[int, list[ModuleSpec]] = {}
         for index, spec in enumerate(module_specs):

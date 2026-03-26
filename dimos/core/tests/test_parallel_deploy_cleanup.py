@@ -24,7 +24,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from dimos.utils.typing_utils import ExceptionGroup
+from dimos.utils.safe_thread_map import ExceptionGroup
 
 
 class TestWorkerManagerDockerPartialFailure:
@@ -173,13 +173,13 @@ class TestWorkerManagerDockerPartialFailure:
 
 
 class TestWorkerManagerPartialFailure:
-    """WorkerManagerPython.deploy_parallel must clean up successful RPCClients when one fails."""
+    """WorkerManager.deploy_parallel must clean up successful RPCClients when one fails."""
 
     def test_middle_module_fails_cleans_up_siblings(self):
         from dimos.core.global_config import GlobalConfig
-        from dimos.core.worker_manager_python import WorkerManagerPython
+        from dimos.core.worker_manager import WorkerManager
 
-        manager = WorkerManagerPython(g=GlobalConfig(n_workers=2))
+        manager = WorkerManager(g=GlobalConfig(n_workers=2))
 
         mock_workers = [MagicMock(name=f"Worker{i}") for i in range(2)]
         for w in mock_workers:
@@ -205,7 +205,7 @@ class TestWorkerManagerPartialFailure:
 
         rpc_clients_created: list[MagicMock] = []
 
-        with patch("dimos.core.worker_manager_python.RPCClient") as mock_rpc_cls:
+        with patch("dimos.core.worker_manager.RPCClient") as mock_rpc_cls:
 
             def make_rpc(actor, cls):
                 client = MagicMock(name=f"rpc_{cls.__name__}")

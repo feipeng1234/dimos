@@ -19,8 +19,7 @@ from typing import TYPE_CHECKING, Any
 from dimos.core.global_config import GlobalConfig
 from dimos.core.module import ModuleBase, ModuleSpec
 from dimos.utils.logging_config import setup_logger
-from dimos.utils.thread_utils import safe_thread_map
-from dimos.utils.typing_utils import ExceptionGroup
+from dimos.utils.safe_thread_map import ExceptionGroup, safe_thread_map
 
 if TYPE_CHECKING:
     from dimos.core.docker_module import DockerModuleOuter

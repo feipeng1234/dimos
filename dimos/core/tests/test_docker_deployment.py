@@ -77,7 +77,7 @@ class TestIsDockerModule:
 
 class TestModuleCoordinatorDockerRouting:
     @patch("dimos.core.module_coordinator.WorkerManagerDocker")
-    @patch("dimos.core.module_coordinator.WorkerManagerPython")
+    @patch("dimos.core.module_coordinator.WorkerManager")
     def test_deploy_routes_docker_module(self, mock_py_cls, mock_docker_cls):
         mock_py = MagicMock()
         mock_py_cls.return_value = mock_py
@@ -102,7 +102,7 @@ class TestModuleCoordinatorDockerRouting:
             coordinator.stop()
 
     @patch("dimos.core.module_coordinator.WorkerManagerDocker")
-    @patch("dimos.core.module_coordinator.WorkerManagerPython")
+    @patch("dimos.core.module_coordinator.WorkerManager")
     def test_deploy_docker_propagates_failure(self, mock_py_cls, mock_docker_cls):
         mock_py_cls.return_value = MagicMock()
         mock_docker = MagicMock()
@@ -118,7 +118,7 @@ class TestModuleCoordinatorDockerRouting:
             coordinator.stop()
 
     @patch("dimos.core.module_coordinator.WorkerManagerDocker")
-    @patch("dimos.core.module_coordinator.WorkerManagerPython")
+    @patch("dimos.core.module_coordinator.WorkerManager")
     def test_deploy_routes_regular_module_to_python_manager(self, mock_py_cls, mock_docker_cls):
         mock_py = MagicMock()
         mock_py_cls.return_value = mock_py
@@ -141,7 +141,7 @@ class TestModuleCoordinatorDockerRouting:
             coordinator.stop()
 
     @patch("dimos.core.module_coordinator.WorkerManagerDocker")
-    @patch("dimos.core.module_coordinator.WorkerManagerPython")
+    @patch("dimos.core.module_coordinator.WorkerManager")
     def test_deploy_parallel_separates_docker_and_regular(self, mock_py_cls, mock_docker_cls):
         mock_py = MagicMock()
         mock_py_cls.return_value = mock_py
@@ -174,7 +174,7 @@ class TestModuleCoordinatorDockerRouting:
             coordinator.stop()
 
     @patch("dimos.core.module_coordinator.WorkerManagerDocker")
-    @patch("dimos.core.module_coordinator.WorkerManagerPython")
+    @patch("dimos.core.module_coordinator.WorkerManager")
     def test_stop_cleans_up_all_managers(self, mock_py_cls, mock_docker_cls):
         mock_py = MagicMock()
         mock_py_cls.return_value = mock_py

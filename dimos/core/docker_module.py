@@ -35,7 +35,6 @@ from dimos.core.module import ModuleConfig
 from dimos.core.rpc_client import ModuleProxyProtocol, RpcCall
 from dimos.protocol.rpc.pubsubrpc import LCMRPC
 from dimos.utils.logging_config import setup_logger
-from dimos.utils.thread_utils import ThreadSafeVal
 from dimos.visualization.rerun.bridge import RERUN_GRPC_PORT, RERUN_WEB_PORT
 
 if TYPE_CHECKING:
@@ -155,7 +154,7 @@ class DockerModuleOuter(ModuleProxyProtocol):
         self._args = args
         self._kwargs = kwargs
         self._running = threading.Event()
-        self._is_built = ThreadSafeVal(False)
+        self._is_built = False
         self.remote_name = module_class.__name__
         # Derive container name from image + class name: "my-registry/foo:v2" → "dimos_myclass_foo_v2"
         image_ref = config.docker_image.rsplit("/", 1)[-1]
@@ -179,7 +178,7 @@ class DockerModuleOuter(ModuleProxyProtocol):
         Idempotent — safe to call multiple times. Has no RPC timeout since
         this runs host-side (not via RPC to a worker process).
         """
-        if self._is_built.get():
+        if self._is_built:
             return
 
         config = self.config
@@ -230,7 +229,7 @@ class DockerModuleOuter(ModuleProxyProtocol):
             # docker run -d returns before Module.__init__ finishes in the container,
             # so we poll until the RPC server is reachable before returning.
             self._wait_for_rpc()
-            self._is_built.set(True)
+            self._is_built = True
         except Exception:
             with suppress(Exception):
                 self._cleanup()

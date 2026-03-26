@@ -23,8 +23,7 @@ from dimos.core.module import ModuleBase, ModuleSpec
 from dimos.core.rpc_client import RPCClient
 from dimos.core.worker_python import Worker
 from dimos.utils.logging_config import setup_logger
-from dimos.utils.thread_utils import safe_thread_map
-from dimos.utils.typing_utils import ExceptionGroup
+from dimos.utils.safe_thread_map import ExceptionGroup, safe_thread_map
 
 if TYPE_CHECKING:
     from dimos.core.resource_monitor.monitor import StatsMonitor
@@ -35,7 +34,7 @@ logger = setup_logger()
 _MIN_WORKERS = 2
 
 
-class WorkerManagerPython:
+class WorkerManager:
     def __init__(self, g: GlobalConfig) -> None:
         self._cfg = g
         self._max_workers = g.n_workers
@@ -79,7 +78,7 @@ class WorkerManagerPython:
         self, module_class: type[ModuleBase], global_config: GlobalConfig, kwargs: dict[str, Any]
     ) -> RPCClient:
         if self._closed:
-            raise RuntimeError("WorkerManagerPython is closed")
+            raise RuntimeError("WorkerManager is closed")
 
         if not self._started:
             self.start()
@@ -96,7 +95,7 @@ class WorkerManagerPython:
 
     def deploy_parallel(self, module_specs: Iterable[ModuleSpec]) -> list[RPCClient]:
         if self._closed:
-            raise RuntimeError("WorkerManagerPython is closed")
+            raise RuntimeError("WorkerManager is closed")
 
         module_specs = list(module_specs)
         if len(module_specs) == 0:
