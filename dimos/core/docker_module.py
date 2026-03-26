@@ -187,12 +187,12 @@ class DockerModuleProxy(ModuleProxyProtocol):
                     build_image(config)
             elif not image_exists(config):
                 logger.info(f"Pulling {config.docker_image}")
-                r = subprocess.run(
+                pull = subprocess.run(
                     [config.docker_bin, "pull", config.docker_image],
                     timeout=config.docker_pull_timeout,
                     check=False,
                 )
-                if r.returncode != 0:
+                if pull.returncode != 0:
                     raise RuntimeError(f"Failed to pull image '{config.docker_image}'.")
 
             reconnect = False

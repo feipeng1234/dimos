@@ -123,10 +123,13 @@ class ModuleCoordinator(Resource):  # type: ignore[misc]
             for index, module in zip(indices_by_manager[mid], deployed, strict=True):
                 results[index] = module
 
-
         safe_thread_map(list(groups.keys()), _deploy_group)
         self._deployed_modules.update(
-            {cls: mod for (cls, _, _), mod in zip(module_specs, results, strict=True) if mod is not None}
+            {
+                cls: mod
+                for (cls, _, _), mod in zip(module_specs, results, strict=True)
+                if mod is not None
+            }
         )
         return results
 

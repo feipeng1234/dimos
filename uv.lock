@@ -1859,9 +1859,7 @@ dev = [
 ]
 docker = [
     { name = "dimos-lcm" },
-    { name = "langchain-core" },
     { name = "lcm" },
-    { name = "matplotlib" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "open3d", marker = "platform_machine != 'aarch64' or sys_platform != 'linux'" },
@@ -2023,7 +2021,6 @@ requires-dist = [
     { name = "langchain", marker = "extra == 'agents'", specifier = "==1.2.3" },
     { name = "langchain-chroma", marker = "extra == 'agents'", specifier = ">=1,<2" },
     { name = "langchain-core", marker = "extra == 'agents'", specifier = "==1.2.3" },
-    { name = "langchain-core", marker = "extra == 'docker'" },
     { name = "langchain-huggingface", marker = "extra == 'agents'", specifier = ">=1,<2" },
     { name = "langchain-ollama", marker = "extra == 'agents'", specifier = ">=1,<2" },
     { name = "langchain-openai", marker = "extra == 'agents'", specifier = ">=1,<2" },
@@ -2035,7 +2032,6 @@ requires-dist = [
     { name = "llvmlite", specifier = ">=0.42.0" },
     { name = "lxml-stubs", marker = "extra == 'dev'", specifier = ">=0.5.1,<1" },
     { name = "lz4", specifier = ">=4.4.5" },
-    { name = "matplotlib", marker = "extra == 'docker'" },
     { name = "matplotlib", marker = "extra == 'manipulation'", specifier = ">=3.7.1" },
     { name = "md-babel-py", marker = "extra == 'dev'", specifier = "==1.1.1" },
     { name = "moondream", marker = "extra == 'perception'" },
