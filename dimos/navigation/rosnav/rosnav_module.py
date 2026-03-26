@@ -70,7 +70,7 @@ from dimos_lcm.std_msgs import Bool
 
 from dimos.agents.annotation import skill
 from dimos.core.core import rpc
-from dimos.core.docker_runner import DockerModuleConfig
+from dimos.core.docker_module import DockerModuleConfig
 from dimos.core.module import Module
 from dimos.core.stream import In, Out
 from dimos.msgs.geometry_msgs.PointStamped import PointStamped
@@ -990,7 +990,9 @@ def _pc2_to_ros(pc2: PointCloud2) -> "ROSPointCloud2":
     Includes a zero-filled ``intensity`` field because the CMU nav stack's
     terrain analysis nodes require it (they filter on ``intensity``).
     """
-    from builtin_interfaces.msg import Time as ROSTime  # type: ignore[attr-defined]
+    from builtin_interfaces.msg import (
+        Time as ROSTime,  # type: ignore[attr-defined,import-not-found]
+    )
     from sensor_msgs.msg import PointField  # type: ignore[attr-defined]
 
     points, _ = pc2.as_numpy()  # (N, 3) float32
@@ -1020,7 +1022,9 @@ def _pc2_to_ros(pc2: PointCloud2) -> "ROSPointCloud2":
 
 def _odometry_to_ros(odom: Odometry) -> "ROSOdometry":
     """Convert a DimOS Odometry to a ROS2 nav_msgs/Odometry."""
-    from builtin_interfaces.msg import Time as ROSTime  # type: ignore[attr-defined]
+    from builtin_interfaces.msg import (
+        Time as ROSTime,  # type: ignore[attr-defined,import-not-found]
+    )
     from geometry_msgs.msg import (  # type: ignore[attr-defined]
         Point as ROSPoint,
         Pose as ROSPose,
