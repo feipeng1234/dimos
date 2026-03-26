@@ -13,29 +13,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""G1 nav onboard — FAR planner + PGO loop closure + local obstacle avoidance.
+"""G1 basic nav onboard — local planner + path follower only (no FAR/PGO).
 
-Full navigation stack on real hardware with:
-- FAR visibility-graph global route planner
-- PGO pose graph optimization with loop closure detection (GTSAM iSAM2)
-- Local planner for reactive obstacle avoidance
-- Path follower for velocity control
-- FastLio2 SLAM from Livox Mid-360 lidar
-- G1HighLevelDdsSdk for robot velocity commands
-
-Odometry routing (per CMU ICRA 2022 Fig. 11):
-- Local path modules (LocalPlanner, PathFollower, SensorScanGen):
-  use raw odometry — they follow paths in the local odometry frame.
-- Global/terrain modules (FarPlanner, ClickToGoal, TerrainAnalysis):
-  use PGO corrected_odometry — they need globally consistent positions
-  for terrain classification, visibility graphs, and goal coordinates.
-
-Data flow:
-    Click → ClickToGoal (corrected_odom) → goal → FarPlanner (corrected_odom)
-    → way_point → LocalPlanner (raw odom) → path → PathFollower (raw odom)
-    → nav_cmd_vel → CmdVelMux → cmd_vel → G1HighLevelDdsSdk
-
-    registered_scan + odometry → PGO → corrected_odometry + global_map
+Lightweight navigation stack for real hardware: uses SmartNav C++ native
+modules for terrain analysis, local planning, and path following.
+FastLio2 provides SLAM from a Livox Mid-360 lidar. No global route
+planner (FAR) or loop closure (PGO). For the full stack, use
+unitree_g1_nav_onboard.
 """
 
 from __future__ import annotations
@@ -57,10 +41,8 @@ from dimos.navigation.smartnav.blueprints._rerun_helpers import (
 )
 from dimos.navigation.smartnav.modules.click_to_goal.click_to_goal import ClickToGoal
 from dimos.navigation.smartnav.modules.cmd_vel_mux import CmdVelMux
-from dimos.navigation.smartnav.modules.far_planner.far_planner import FarPlanner
 from dimos.navigation.smartnav.modules.local_planner.local_planner import LocalPlanner
 from dimos.navigation.smartnav.modules.path_follower.path_follower import PathFollower
-from dimos.navigation.smartnav.modules.pgo.pgo import PGO
 from dimos.navigation.smartnav.modules.sensor_scan_generation.sensor_scan_generation import (
     SensorScanGeneration,
 )
@@ -98,7 +80,7 @@ _rerun_config = {
     },
 }
 
-unitree_g1_nav_onboard = (
+unitree_g1_nav_basic_onboard = (
     autoconnect(
         FastLio2.blueprint(
             host_ip=os.getenv("LIDAR_HOST_IP", "192.168.123.164"),
@@ -106,7 +88,7 @@ unitree_g1_nav_onboard = (
             # G1 lidar mount: 1.2m height, 180° around X (upside-down mount)
             # [x, y, z, qx, qy, qz, qw] — quaternion (1,0,0,0) = 180° X rotation
             init_pose=[0.0, 0.0, 1.2, 1.0, 0.0, 0.0, 0.0],
-            map_freq=1.0,
+            map_freq=1.0,  # Publish global map at 1 Hz
         ),
         SensorScanGeneration.blueprint(),
         TerrainAnalysis.blueprint(
@@ -120,10 +102,6 @@ unitree_g1_nav_onboard = (
             ]
         ),
         TerrainMapExt.blueprint(),
-        FarPlanner.blueprint(
-            sensor_range=30.0,
-            visibility_range=25.0,
-        ),
         LocalPlanner.blueprint(
             extra_args=[
                 "--autonomyMode",
@@ -154,7 +132,6 @@ unitree_g1_nav_onboard = (
                 "0.2",
             ]
         ),
-        PGO.blueprint(),
         ClickToGoal.blueprint(),
         CmdVelMux.blueprint(),
         G1HighLevelDdsSdk.blueprint(),
@@ -167,14 +144,6 @@ unitree_g1_nav_onboard = (
             (FastLio2, "lidar", "registered_scan"),
             # PathFollower cmd_vel → CmdVelMux nav input (avoid name collision with mux output)
             (PathFollower, "cmd_vel", "nav_cmd_vel"),
-            # Global-scale planners use PGO-corrected odometry (per CMU ICRA 2022):
-            # "Loop closure adjustments are used by the high-level planners since
-            # they are in charge of planning at the global scale. Modules such as
-            # local planner and terrain analysis only care about the local
-            # environment surrounding the vehicle and work in the odometry frame."
-            (FarPlanner, "odometry", "corrected_odometry"),
-            (ClickToGoal, "odometry", "corrected_odometry"),
-            (TerrainAnalysis, "odometry", "corrected_odometry"),
         ]
     )
     .global_config(n_workers=8, robot_model="unitree_g1")
@@ -182,10 +151,10 @@ unitree_g1_nav_onboard = (
 
 
 def main() -> None:
-    unitree_g1_nav_onboard.build().loop()
+    unitree_g1_nav_basic_onboard.build().loop()
 
 
-__all__ = ["unitree_g1_nav_onboard"]
+__all__ = ["unitree_g1_nav_basic_onboard"]
 
 if __name__ == "__main__":
     main()

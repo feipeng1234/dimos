@@ -78,6 +78,7 @@ all_blueprints = {
     "unitree-g1-mujoco": "dimos.robot.unitree.g1.blueprints.basic.unitree_g1_mujoco:unitree_g1_mujoco",
     "unitree-g1-onboard": "dimos.robot.unitree.g1.blueprints.basic.unitree_g1_onboard:unitree_g1_onboard",
     "unitree-g1-rosnav-onboard": "dimos.robot.unitree.g1.blueprints.perceptive.unitree_g1_rosnav_onboard:unitree_g1_rosnav_onboard",
+    "unitree-g1-nav-basic-onboard": "dimos.robot.unitree.g1.blueprints.navigation.unitree_g1_nav_basic_onboard:unitree_g1_nav_basic_onboard",
     "unitree-g1-nav-onboard": "dimos.robot.unitree.g1.blueprints.navigation.unitree_g1_nav_onboard:unitree_g1_nav_onboard",
     "unitree-g1-nav-far-onboard": "dimos.robot.unitree.g1.blueprints.navigation.unitree_g1_nav_far_onboard:unitree_g1_nav_far_onboard",
     "unitree-g1-nav-explore-onboard": "dimos.robot.unitree.g1.blueprints.navigation.unitree_g1_nav_explore_onboard:unitree_g1_nav_explore_onboard",

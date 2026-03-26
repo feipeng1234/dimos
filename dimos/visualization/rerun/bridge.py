@@ -358,8 +358,8 @@ class RerunBridgeModule(Module[Config]):
             server_uri = rr.serve_grpc()
             rr.serve_web_viewer(connect_to=server_uri, open_browser=False)
         elif self.config.viewer_mode == "connect":
-            server_uri = rr.connect_grpc(self.config.connect_url)
-            _log_viewer_connect_hints(server_uri)
+            rr.connect_grpc(self.config.connect_url)
+            _log_viewer_connect_hints(self.config.connect_url)
         # "none" - just init, no viewer (connect externally)
 
         if self.config.blueprint:
