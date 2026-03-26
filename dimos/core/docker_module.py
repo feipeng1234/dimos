@@ -436,34 +436,11 @@ class DockerModuleProxy(ModuleProxyProtocol):
 
         module_name = self._module_class.__module__
         if module_name == "__main__":
-            # When run as `python script.py`, __module__ is "__main__".
-            # Resolve to the actual dotted module path so the container can import it.
-            import __main__
-
-            spec = getattr(__main__, "__spec__", None)
-            if spec and spec.name:
-                module_name = spec.name
-            else:
-                # Fallback: derive from file path relative to cwd
-                main_file = getattr(__main__, "__file__", None)
-                if main_file:
-                    import pathlib
-
-                    try:
-                        rel = pathlib.Path(main_file).resolve().relative_to(pathlib.Path.cwd())
-                    except ValueError:
-                        raise RuntimeError(
-                            f"Cannot derive module path: '{main_file}' is not under cwd "
-                            f"'{pathlib.Path.cwd()}'. "
-                            "Run with `python -m` or set docker_command explicitly."
-                        ) from None
-                    module_name = str(rel.with_suffix("")).replace("/", ".")
-                else:
-                    raise RuntimeError(
-                        "Cannot determine module path for __main__. "
-                        "Run with `python -m` or set docker_command explicitly."
-                    )
-        module_path = f"{module_name}.{self._module_class.__name__}"
+            raise RuntimeError(
+                f"Cannot deploy {self._module_class.__name__} from __main__. "
+                "Run with `python -m` or set docker_command explicitly."
+            )
+        module_path = f"{module_name}.{self._module_class.__qualname__}"
         # Filter out docker-specific kwargs (paths, etc.) - only pass module config
         kwargs = {"config": _extract_module_config(cfg)}
         payload = {"module_path": module_path, "args": list(self._args), "kwargs": kwargs}
