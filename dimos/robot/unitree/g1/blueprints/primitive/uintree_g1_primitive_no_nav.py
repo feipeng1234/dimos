@@ -41,7 +41,6 @@ from dimos.navigation.frontier_exploration.wavefront_frontier_goal_selector impo
     WavefrontFrontierExplorer,
 )
 from dimos.protocol.pubsub.impl.lcmpubsub import LCM
-from dimos.web.websocket_vis.websocket_vis_module import WebsocketVisModule
 
 
 def _convert_camera_info(camera_info: Any) -> Any:
@@ -109,18 +108,14 @@ rerun_config = {
     },
 }
 
-if global_config.viewer == "foxglove":
-    from dimos.robot.foxglove_bridge import FoxgloveBridge
+from dimos.visualization.vis_module import vis_module
 
-    _with_vis = autoconnect(FoxgloveBridge.blueprint())
-elif global_config.viewer.startswith("rerun"):
-    from dimos.visualization.rerun.bridge import RerunBridgeModule, _resolve_viewer_mode
+_vis = vis_module(
+    viewer_backend=global_config.viewer,
+    rerun_config=rerun_config,
+)
 
-    _with_vis = autoconnect(
-        RerunBridgeModule.blueprint(viewer_mode=_resolve_viewer_mode(), **rerun_config)
-    )
-else:
-    _with_vis = autoconnect()
+_with_vis = autoconnect(_vis)
 
 
 def _create_webcam() -> Webcam:
@@ -155,8 +150,6 @@ uintree_g1_primitive_no_nav = (
         VoxelGridMapper.blueprint(voxel_size=0.1),
         CostMapper.blueprint(),
         WavefrontFrontierExplorer.blueprint(),
-        # Visualization
-        WebsocketVisModule.blueprint(),
     )
     .global_config(n_workers=4, robot_model="unitree_g1")
     .transports(

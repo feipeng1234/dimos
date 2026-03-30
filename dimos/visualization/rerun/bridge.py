@@ -92,6 +92,7 @@ def _log_viewer_connect_hints(connect_url: str) -> None:
 
     logger.info("\n".join(lines))
 
+
 # TODO OUT visual annotations
 #
 # In the future it would be nice if modules can annotate their individual OUTs with (general or rerun specific)
