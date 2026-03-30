@@ -47,7 +47,6 @@ from dimos.msgs.sensor_msgs.JointState import JointState
 from dimos.perception.object_scene_registration import ObjectSceneRegistrationModule
 from dimos.robot.catalog.ufactory import xarm7 as _catalog_xarm7
 from dimos.utils.data import get_data
-from dimos.visualization.vis_module import vis_module
 
 
 def _make_base_pose(

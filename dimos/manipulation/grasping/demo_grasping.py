@@ -14,8 +14,7 @@
 # limitations under the License.
 from pathlib import Path
 
-from dimos.agents.mcp.mcp_client import McpClient
-from dimos.agents.mcp.mcp_server import McpServer
+from dimos.agents.agent import Agent
 from dimos.core.blueprints import autoconnect
 from dimos.hardware.sensors.camera.realsense.camera import RealSenseCamera
 from dimos.manipulation.grasping.graspgen_module import graspgen

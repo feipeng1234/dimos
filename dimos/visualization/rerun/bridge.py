@@ -54,43 +54,7 @@ _HEAVY_MSG_TYPES: tuple[type, ...] = (Image, PointCloud2)
 
 RERUN_GRPC_PORT = 9876
 RERUN_WEB_PORT = 9090
-RERUN_WS_PORT = 3030
 
-
-def _log_viewer_connect_hints(connect_url: str) -> None:
-    """Log the dimos-viewer / rerun command users should run to connect."""
-    import socket
-
-    # Extract port from connect URL (e.g. "rerun+http://127.0.0.1:9877/proxy")
-    from dimos.utils.generic import get_local_ips
-
-    local_ips = get_local_ips()
-    hostname = socket.gethostname()
-
-    ws_url = f"ws://127.0.0.1:{RERUN_WS_PORT}/ws"
-
-    lines = [
-        "",
-        "=" * 60,
-        "Connect a Rerun viewer to this machine:",
-        "",
-        f"  dimos-viewer --connect {connect_url} --ws-url {ws_url}",
-        "",
-    ]
-    if local_ips:
-        lines.append("From another machine on the network:")
-        for ip, iface in local_ips:
-            remote_connect = connect_url.replace("127.0.0.1", ip)
-            remote_ws = ws_url.replace("127.0.0.1", ip)
-            lines.append(
-                f"  dimos-viewer --connect {remote_connect} --ws-url {remote_ws}  # {iface}"
-            )
-        lines.append("")
-    lines.append(f"  hostname: {hostname}")
-    lines.append("=" * 60)
-    lines.append("")
-
-    logger.info("\n".join(lines))
 
 # TODO OUT visual annotations
 #
@@ -237,6 +201,7 @@ class RerunBridgeModule(Module[Config]):
     """
 
     default_config = Config
+    _last_log: dict[str, float] = {}
 
     @lru_cache(maxsize=256)
     def _visual_override_for_entity_path(
@@ -320,7 +285,7 @@ class RerunBridgeModule(Module[Config]):
 
         super().start()
 
-        self._last_log: dict[str, float] = {}
+        self._last_log: dict[str, float] = {}  # reset on each start
         logger.info("Rerun bridge starting", viewer_mode=self.config.viewer_mode)
 
         # Initialize and spawn Rerun viewer
@@ -368,7 +333,7 @@ class RerunBridgeModule(Module[Config]):
                 grpc_port=grpc_port,
                 server_memory_limit=self.config.memory_limit,
             )
-            _log_viewer_connect_hints(self.config.connect_url)
+            logger.info(f"Rerun gRPC server ready at {self.config.connect_url}")
         # "none" - just init, no viewer (connect externally)
 
         if self.config.blueprint:
@@ -402,6 +367,7 @@ class RerunBridgeModule(Module[Config]):
 
     @rpc
     def stop(self) -> None:
+        self._visual_override_for_entity_path.cache_clear()
         super().stop()
 
 
