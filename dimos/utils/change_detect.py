@@ -170,6 +170,8 @@ def did_change(
     cache_name: str,
     paths: Sequence[PathEntry],
     cwd: str | Path | None = None,
+    *,
+    update: bool = True,
 ) -> bool:
     """Check if any files/dirs matching the given paths have changed since last check.
 
@@ -190,6 +192,9 @@ def did_change(
         # Track a whole directory (walked recursively)
         did_change("assets", ["/data/models/"])
 
+        # Check without updating (dry run)
+        did_change("my_build", ["/src/main.cpp"], update=False)
+
         # Second call with no file changes → False
         did_change("my_build", ["/src/main.cpp"])  # True  (first call, no cache)
         did_change("my_build", ["/src/main.cpp"])  # False (nothing changed)
@@ -201,10 +206,19 @@ def did_change(
         # Relative path without cwd → ValueError
         did_change("bad", ["src/main.cpp"])  # raises ValueError
 
+    Args:
+        cache_name: Unique identifier for this change-detection cache.
+        paths: Files, directories, or :class:`Glob` patterns to monitor.
+        cwd: Working directory for resolving relative paths.
+        update: If ``True`` (default), update the cache with the current hash
+            after checking.  Set to ``False`` to check without updating — this
+            lets the caller decide whether to update (e.g. only after a
+            successful build via :func:`update_cache`).
+
     Returns ``True`` on the first call (no previous cache), and on subsequent
     calls returns ``True`` only if file contents differ from the last check.
-    The cache is always updated, so two consecutive calls with no changes
-    return ``True`` then ``False``.
+    When *update* is ``True`` the cache is updated, so two consecutive calls
+    with no changes return ``True`` then ``False``.
     """
     if not paths:
         return False
@@ -237,12 +251,54 @@ def did_change(
             if cache_file.exists():
                 previous_hash = cache_file.read_text().strip()
                 changed = current_hash != previous_hash
-            # Always update the cache with the current hash
-            cache_file.write_text(current_hash)
+            # Only update the cache when requested — allows callers to defer
+            # the update until after a successful build so that a failed build
+            # doesn't prevent future rebuild attempts.
+            if update:
+                cache_file.write_text(current_hash)
         finally:
             fcntl.flock(lf, fcntl.LOCK_UN)
 
     return changed
+
+
+def update_cache(
+    cache_name: str,
+    paths: Sequence[PathEntry],
+    cwd: str | Path | None = None,
+) -> None:
+    """Write the current file hash to the cache without checking for changes.
+
+    Call this after a successful build to record the current state so that the
+    next :func:`did_change` call returns ``False`` (unless files change again).
+
+    Example::
+
+        if did_change("my_build", sources, update=False):
+            run_build()          # might fail
+            update_cache("my_build", sources)  # only update on success
+    """
+    if not paths:
+        return
+
+    files = _resolve_paths(paths, cwd=cwd)
+    if not files:
+        return
+
+    current_hash = _hash_files(files)
+
+    cache_dir = _get_cache_dir()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_file = cache_dir / f"{_safe_filename(cache_name)}.hash"
+    lock_file = cache_dir / f"{_safe_filename(cache_name)}.lock"
+
+    thread_lock = _get_thread_lock(cache_name)
+    with thread_lock, open(lock_file, "w") as lf:
+        fcntl.flock(lf, fcntl.LOCK_EX)
+        try:
+            cache_file.write_text(current_hash)
+        finally:
+            fcntl.flock(lf, fcntl.LOCK_UN)
 
 
 def clear_cache(cache_name: str) -> bool:

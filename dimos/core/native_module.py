@@ -257,11 +257,16 @@ class NativeModule(Module[_NativeConfig]):
         """Run ``build_command`` if the executable does not exist or sources changed."""
         exe = Path(self.config.executable)
 
-        # Check if rebuild needed due to source changes
+        # Check if rebuild needed due to source changes.
+        # Use update=False so the cache is NOT written yet — if the build
+        # fails the next check will still detect changes and retry.
         needs_rebuild = False
         if self.config.rebuild_on_change and exe.exists():
             if did_change(
-                self._build_cache_name(), self.config.rebuild_on_change, cwd=self.config.cwd
+                self._build_cache_name(),
+                self.config.rebuild_on_change,
+                cwd=self.config.cwd,
+                update=False,
             ):
                 logger.info("Source files changed, triggering rebuild", executable=str(exe))
                 needs_rebuild = True
@@ -308,10 +313,13 @@ class NativeModule(Module[_NativeConfig]):
                 f"Build command succeeded but executable still not found: {exe}"
             )
 
-        # Seed the cache after a successful build so the next check has a baseline
-        # (needed for the initial build when the pre-build change check was skipped)
+        # Seed the cache after a successful build so the next check has a baseline.
+        # Uses update_cache (not did_change) so we only write the hash after a
+        # confirmed-good build — a failed build won't poison the cache.
         if self.config.rebuild_on_change:
-            did_change(self._build_cache_name(), self.config.rebuild_on_change, cwd=self.config.cwd)
+            from dimos.utils.change_detect import update_cache
+
+            update_cache(self._build_cache_name(), self.config.rebuild_on_change, cwd=self.config.cwd)
 
     def _collect_topics(self) -> dict[str, str]:
         """Extract LCM topic strings from blueprint-assigned stream transports."""
