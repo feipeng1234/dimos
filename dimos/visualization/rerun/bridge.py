@@ -19,7 +19,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import field
 from functools import lru_cache
-import subprocess
 import time
 from typing import (
     Any,
@@ -55,6 +54,43 @@ _HEAVY_MSG_TYPES: tuple[type, ...] = (Image, PointCloud2)
 
 RERUN_GRPC_PORT = 9876
 RERUN_WEB_PORT = 9090
+RERUN_WS_PORT = 3030
+
+
+def _log_viewer_connect_hints(connect_url: str) -> None:
+    """Log the dimos-viewer / rerun command users should run to connect."""
+    import socket
+
+    # Extract port from connect URL (e.g. "rerun+http://127.0.0.1:9877/proxy")
+    from dimos.utils.generic import get_local_ips
+
+    local_ips = get_local_ips()
+    hostname = socket.gethostname()
+
+    ws_url = f"ws://127.0.0.1:{RERUN_WS_PORT}/ws"
+
+    lines = [
+        "",
+        "=" * 60,
+        "Connect a Rerun viewer to this machine:",
+        "",
+        f"  dimos-viewer --connect {connect_url} --ws-url {ws_url}",
+        "",
+    ]
+    if local_ips:
+        lines.append("From another machine on the network:")
+        for ip, iface in local_ips:
+            remote_connect = connect_url.replace("127.0.0.1", ip)
+            remote_ws = ws_url.replace("127.0.0.1", ip)
+            lines.append(
+                f"  dimos-viewer --connect {remote_connect} --ws-url {remote_ws}  # {iface}"
+            )
+        lines.append("")
+    lines.append(f"  hostname: {hostname}")
+    lines.append("=" * 60)
+    lines.append("")
+
+    logger.info("\n".join(lines))
 
 # TODO OUT visual annotations
 #
@@ -130,34 +166,12 @@ class RerunConvertible(Protocol):
 ViewerMode = Literal["native", "web", "connect", "none"]
 
 
-def _hex_to_rgba(hex_color: str) -> int:
-    """Convert '#RRGGBB' to a 0xRRGGBBAA int (fully opaque)."""
-    h = hex_color.lstrip("#")
-    return (int(h, 16) << 8) | 0xFF
-
-
-def _with_graph_tab(bp: Blueprint) -> Blueprint:
-    """Add a Graph tab alongside the existing viewer layout without changing it."""
-    import rerun.blueprint as rrb
-
-    root = bp.root_container
-    return rrb.Blueprint(
-        rrb.Tabs(
-            root,
-            rrb.GraphView(origin="blueprint", name="Graph"),
-        ),
-        auto_layout=bp.auto_layout,
-        auto_views=bp.auto_views,
-        collapse_panels=bp.collapse_panels,
-    )
-
-
 def _default_blueprint() -> Blueprint:
     """Default blueprint with black background and raised grid."""
     import rerun as rr
     import rerun.blueprint as rrb
 
-    return rrb.Blueprint(
+    return rrb.Blueprint(  # type: ignore[no-any-return]
         rrb.Spatial3DView(
             origin="world",
             background=rrb.Background(kind="SolidColor", color=[0, 0, 0]),
@@ -223,10 +237,6 @@ class RerunBridgeModule(Module[Config]):
     """
 
     default_config = Config
-
-    GV_SCALE = 100.0  # graphviz inches to rerun screen units
-    MODULE_RADIUS = 30.0
-    CHANNEL_RADIUS = 20.0
 
     @lru_cache(maxsize=256)
     def _visual_override_for_entity_path(
@@ -317,6 +327,7 @@ class RerunBridgeModule(Module[Config]):
         rr.init("dimos")
 
         if self.config.viewer_mode == "native":
+            spawned = False
             try:
                 import rerun_bindings
 
@@ -325,6 +336,7 @@ class RerunBridgeModule(Module[Config]):
                     executable_name="dimos-viewer",
                     memory_limit=self.config.memory_limit,
                 )
+                spawned = True
             except ImportError:
                 pass  # dimos-viewer not installed
             except Exception:
@@ -332,16 +344,35 @@ class RerunBridgeModule(Module[Config]):
                     "dimos-viewer found but failed to spawn, falling back to stock rerun",
                     exc_info=True,
                 )
-            rr.spawn(connect=True, memory_limit=self.config.memory_limit)
+            if not spawned:
+                try:
+                    rr.spawn(connect=True, memory_limit=self.config.memory_limit)
+                except (RuntimeError, FileNotFoundError):
+                    logger.warning(
+                        "Rerun native viewer not available (headless?). "
+                        "Bridge will continue without a viewer — data is still "
+                        "accessible via rerun-connect or rerun-web.",
+                        exc_info=True,
+                    )
         elif self.config.viewer_mode == "web":
             server_uri = rr.serve_grpc()
             rr.serve_web_viewer(connect_to=server_uri, open_browser=False)
         elif self.config.viewer_mode == "connect":
-            rr.connect_grpc(self.config.connect_url)
+            # Serve gRPC so external viewers (dimos-viewer) can connect to us.
+            # Extract the port from the connect_url to match what viewers expect.
+            from urllib.parse import urlparse
+
+            parsed = urlparse(self.config.connect_url.replace("rerun+", "", 1))
+            grpc_port = parsed.port or RERUN_GRPC_PORT
+            rr.serve_grpc(
+                grpc_port=grpc_port,
+                server_memory_limit=self.config.memory_limit,
+            )
+            _log_viewer_connect_hints(self.config.connect_url)
         # "none" - just init, no viewer (connect externally)
 
         if self.config.blueprint:
-            rr.send_blueprint(_with_graph_tab(self.config.blueprint()))
+            rr.send_blueprint(self.config.blueprint())
 
         # Start pubsubs and subscribe to all messages
         for pubsub in self.config.pubsubs:
@@ -368,72 +399,6 @@ class RerunBridgeModule(Module[Config]):
                     rr.log(entity_path, archetype, static=True)
             else:
                 rr.log(entity_path, data, static=True)
-
-    @rpc
-    def log_blueprint_graph(self, dot_code: str, module_names: list[str]) -> None:
-        """Log a blueprint module graph from a Graphviz DOT string.
-
-        Runs ``dot -Tplain`` to compute positions, then logs
-        ``rr.GraphNodes`` + ``rr.GraphEdges`` to the active recording.
-
-        Args:
-            dot_code: The DOT-format graph (from ``introspection.blueprint.dot.render``).
-            module_names: List of module class names (to distinguish modules from channels).
-        """
-        import rerun as rr
-
-        try:
-            result = subprocess.run(
-                ["dot", "-Tplain"], input=dot_code, text=True, capture_output=True, timeout=30
-            )
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            return
-        if result.returncode != 0:
-            return
-
-        node_ids: list[str] = []
-        node_labels: list[str] = []
-        node_colors: list[int] = []
-        positions: list[tuple[float, float]] = []
-        radii: list[float] = []
-        edges: list[tuple[str, str]] = []
-        module_set = set(module_names)
-
-        for line in result.stdout.splitlines():
-            if line.startswith("node "):
-                parts = line.split()
-                node_id = parts[1].strip('"')
-                x = float(parts[2]) * self.GV_SCALE
-                y = -float(parts[3]) * self.GV_SCALE
-                label = parts[6].strip('"')
-                color = parts[9].strip('"')
-
-                node_ids.append(node_id)
-                node_labels.append(label)
-                positions.append((x, y))
-                node_colors.append(_hex_to_rgba(color))
-                radii.append(self.MODULE_RADIUS if node_id in module_set else self.CHANNEL_RADIUS)
-
-            elif line.startswith("edge "):
-                parts = line.split()
-                edges.append((parts[1].strip('"'), parts[2].strip('"')))
-
-        if not node_ids:
-            return
-
-        rr.log(
-            "blueprint",
-            rr.GraphNodes(
-                node_ids=node_ids,
-                labels=node_labels,
-                colors=node_colors,
-                positions=positions,
-                radii=radii,
-                show_labels=True,
-            ),
-            rr.GraphEdges(edges=edges, graph_type="directed"),
-            static=True,
-        )
 
     @rpc
     def stop(self) -> None:
