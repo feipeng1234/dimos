@@ -18,17 +18,13 @@ from __future__ import annotations
 
 import time
 
-import pytest
-
 from dimos.stream.twitch.module import TwitchMessage
 from dimos.stream.twitch.votes import (
-    TwitchChoice,
     _tally_majority,
     _tally_plurality,
     _tally_runoff,
     _tally_weighted_recent,
 )
-
 
 # ── TwitchMessage ──
 
@@ -104,7 +100,12 @@ class TestTallyMajority:
         assert _tally_majority(votes) is None
 
     def test_exact_half_not_majority(self) -> None:
-        votes = [("forward", NOW, "a"), ("forward", NOW, "b"), ("back", NOW, "c"), ("back", NOW, "d")]
+        votes = [
+            ("forward", NOW, "a"),
+            ("forward", NOW, "b"),
+            ("back", NOW, "c"),
+            ("back", NOW, "d"),
+        ]
         assert _tally_majority(votes) is None
 
 
