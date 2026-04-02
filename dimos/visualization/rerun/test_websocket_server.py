@@ -371,8 +371,8 @@ class TestNonClickMessages:
         tw = received[0]
         assert tw.is_zero()
 
-    def test_twist_publishes_stop_explore_cmd_on_first_twist(self) -> None:
-        """First twist publishes Bool(data=True) on stop_explore_cmd; stop resets."""
+    def test_twist_publishes_stop_movement_on_first_twist(self) -> None:
+        """First twist publishes Bool(data=True) on stop_movement; stop resets."""
         mod = _make_module()
         mod.start()
         _wait_for_server(_TEST_PORT)
@@ -380,7 +380,7 @@ class TestNonClickMessages:
         explore_cmds: list[Any] = []
         twists: list[Any] = []
         first_done = threading.Event()
-        mod.stop_explore_cmd.subscribe(_collect(explore_cmds, first_done))
+        mod.stop_movement.subscribe(_collect(explore_cmds, first_done))
 
         with MockViewerPublisher(f"ws://127.0.0.1:{_TEST_PORT}/ws") as pub:
             pub.send_twist(0.5, 0.0, 0.0, 0.0, 0.0, 0.0)
@@ -390,7 +390,7 @@ class TestNonClickMessages:
             assert len(explore_cmds) == 1
             assert explore_cmds[0].data is True
 
-            # Second twist within same connection should NOT publish another stop_explore_cmd
+            # Second twist within same connection should NOT publish another stop_movement
             twist_done = threading.Event()
             mod.tele_cmd_vel.subscribe(_collect(twists, twist_done))
 
@@ -400,7 +400,7 @@ class TestNonClickMessages:
             twist_done.wait(timeout=2.0)
             assert len(explore_cmds) == 1  # still just the first one
 
-            # After stop + new twist within same connection, stop_explore_cmd should fire again
+            # After stop + new twist within same connection, stop_movement should fire again
             second_done = threading.Event()
 
             def _on_second(msg: Any) -> None:
@@ -408,7 +408,7 @@ class TestNonClickMessages:
                 if len(explore_cmds) >= 2:
                     second_done.set()
 
-            mod.stop_explore_cmd.subscribe(_on_second)
+            mod.stop_movement.subscribe(_on_second)
 
             pub.send_stop()
             pub.send_twist(0.1, 0.0, 0.0, 0.0, 0.0, 0.0)

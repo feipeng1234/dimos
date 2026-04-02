@@ -157,6 +157,7 @@ all_modules = {
     "reid-module": "dimos.perception.detection.reid.module.ReidModule",
     "replanning-a-star-planner": "dimos.navigation.replanning_a_star.module.ReplanningAStarPlanner",
     "rerun-bridge-module": "dimos.visualization.rerun.bridge.RerunBridgeModule",
+    "rerun-web-socket-server": "dimos.visualization.rerun.websocket_server.RerunWebSocketServer",
     "ros-nav": "dimos.navigation.rosnav.ROSNav",
     "simple-phone-teleop": "dimos.teleop.phone.phone_extensions.SimplePhoneTeleop",
     "spatial-memory": "dimos.perception.spatial_perception.SpatialMemory",
