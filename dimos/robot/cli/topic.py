@@ -101,6 +101,75 @@ def topic_echo(topic: str, type_name: str | None) -> None:
         typer.echo("\nStopped.")
 
 
+def topic_collect(
+    topic: str,
+    duration: float = 5.0,
+    type_name: str | None = None,
+) -> list[object]:
+    """Listen to a topic for ``duration`` seconds and return all messages.
+
+    When *type_name* is given the transport is created explicitly (same as
+    ``dimos topic echo <topic> <type>``).  Otherwise the typed-LCM channel
+    pattern ``/topic#pkg.Msg`` is used to auto-resolve the message type.
+
+    Args:
+        topic: LCM topic name (e.g. ``/color_image``).
+        duration: How long to listen, in seconds.
+        type_name: Optional message type name (e.g. ``Image``).
+
+    Returns:
+        List of decoded messages received during the window.
+    """
+    msgs: list[object] = []
+
+    if type_name is not None:
+        msg_type = _resolve_type(type_name)
+        use_pickled = getattr(msg_type, "lcm_encode", None) is None
+        transport: pLCMTransport[object] | LCMTransport[object] = (
+            pLCMTransport(topic) if use_pickled else LCMTransport(topic, msg_type)
+        )
+        transport.subscribe(lambda m: msgs.append(m))
+        time.sleep(duration)
+        return msgs
+
+    # Auto-infer type from typed LCM channels.
+    bus = LCMPubSubBase()
+    bus.start()
+
+    typed_pattern = rf"^{re.escape(topic)}#.*"
+
+    def _on_msg(channel: str, data: bytes) -> None:
+        _, msg_name = channel.split("#", 1)
+        pkg, cls_name = msg_name.split(".", 1)
+        module = importlib.import_module(f"dimos.msgs.{pkg}")
+        cls = getattr(module, cls_name)
+        msgs.append(cls.lcm_decode(data))
+
+    assert bus.l is not None
+    bus.l.subscribe(typed_pattern, _on_msg)
+    time.sleep(duration)
+    bus.stop()
+    return msgs
+
+
+def topic_publish(topic: str, message: object) -> None:
+    """Publish a message object to a topic.
+
+    Unlike :func:`topic_send` (which takes an eval-able string for the CLI),
+    this accepts an already-constructed message object.
+
+    Args:
+        topic: LCM topic name (e.g. ``/cmd_vel``).
+        message: Message instance to publish.
+    """
+    msg_type = type(message)
+    use_pickled = getattr(msg_type, "lcm_encode", None) is None
+    transport: pLCMTransport[object] | LCMTransport[object] = (
+        pLCMTransport(topic) if use_pickled else LCMTransport(topic, msg_type)
+    )
+    transport.broadcast(None, message)
+
+
 def topic_send(topic: str, message_expr: str) -> None:
     eval_context: dict[str, object] = {}
     modules_to_import = [
