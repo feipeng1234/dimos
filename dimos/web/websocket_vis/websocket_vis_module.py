@@ -159,7 +159,7 @@ class WebsocketVisModule(Module[WebsocketConfig]):
 
         # Auto-open browser only for rerun-web (dashboard with Rerun iframe + command center)
         # For rerun and foxglove, users access the command center manually if needed
-        if self.config.g.viewer == "rerun-web":
+        if self.config.g.viewer == "rerun-web":  # type: ignore[comparison-overlap]
             url = f"http://localhost:{self.config.port}/"
             logger.info(f"Dimensional Command Center: {url}")
 
@@ -236,7 +236,7 @@ class WebsocketVisModule(Module[WebsocketConfig]):
         async def serve_index(request):  # type: ignore[no-untyped-def]
             """Serve appropriate HTML based on viewer mode."""
             # If running native Rerun, redirect to standalone command center
-            if self.config.g.viewer != "rerun-web":
+            if self.config.g.viewer != "rerun-web":  # type: ignore[comparison-overlap]
                 return RedirectResponse(url="/command-center")
 
             # Otherwise serve full dashboard with Rerun iframe
