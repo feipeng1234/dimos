@@ -73,7 +73,7 @@ class RerunWebSocketServer(Module[Config]):
     default_config = Config
 
     clicked_point: Out[PointStamped]
-    cmd_vel: Out[Twist]
+    tele_cmd_vel: Out[Twist]
     stop_movement: Out[Bool]
 
     def __init__(self, **kwargs: Any) -> None:
