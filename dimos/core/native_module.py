@@ -192,15 +192,28 @@ class NativeModule(Module[_NativeConfig]):
             cmd=" ".join(cmd),
             cwd=cwd,
         )
+        def _child_preexec() -> None:
+            """Ensure child is killed when parent dies (Linux only)."""
+            import os as _os
+
+            try:
+                import ctypes
+
+                PR_SET_PDEATHSIG = 1
+                libc = ctypes.CDLL("libc.so.6", use_errno=True)
+                libc.prctl(PR_SET_PDEATHSIG, signal.SIGTERM)
+            except Exception:
+                pass
+            # Also start a new session so terminal SIGINT doesn't reach child.
+            _os.setsid()
+
         self._process = subprocess.Popen(
             cmd,
             env=env,
             cwd=cwd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            # Start in a new process group so terminal SIGINT doesn't reach the
-            # child directly.  The coordinator will send SIGTERM via stop().
-            start_new_session=True,
+            preexec_fn=_child_preexec,
         )
         logger.info(
             "Native process started",
