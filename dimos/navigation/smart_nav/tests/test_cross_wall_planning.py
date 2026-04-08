@@ -68,10 +68,16 @@ class TestCrossWallPlanning:
 
     def test_cross_wall_sequence(self) -> None:
         from dimos.core.blueprints import autoconnect
+        from dimos.core.coordination.module_coordinator import ModuleCoordinator
+        from dimos.core.global_config import global_config
         from dimos.msgs.geometry_msgs.PointStamped import PointStamped
         from dimos.msgs.nav_msgs.Odometry import Odometry
-        from dimos.navigation.smart_nav.main import smart_nav
+        from dimos.navigation.smart_nav.main import smart_nav, smart_nav_rerun_config
+        from dimos.robot.unitree.g1.blueprints.navigation.g1_rerun import (
+            g1_static_robot,
+        )
         from dimos.simulation.unity.module import UnityBridgeModule
+        from dimos.visualization.vis_module import vis_module
 
         # -- Clear stale nav paths from previous runs -------------------------
         paths_dir = Path(__file__).resolve().parents[3] / "data" / "smart_nav_paths"
@@ -117,6 +123,21 @@ class TestCrossWallPlanning:
                         "converge_dist": 1.5,
                     },
                 ),
+                vis_module(
+                    viewer_backend=global_config.viewer,
+                    rerun_config=smart_nav_rerun_config(
+                        {
+                            "blueprint": UnityBridgeModule.rerun_blueprint,
+                            "visual_override": {
+                                "world/camera_info": UnityBridgeModule.rerun_suppress_camera_info,
+                            },
+                            "static": {
+                                "world/color_image": UnityBridgeModule.rerun_static_pinhole,
+                                "world/tf/robot": g1_static_robot,
+                            },
+                        }
+                    ),
+                ),
             )
             .remappings(
                 [
@@ -126,7 +147,7 @@ class TestCrossWallPlanning:
             .global_config(n_workers=8, robot_model="unitree_g1", simulation=True)
         )
 
-        coordinator = blueprint.build()
+        coordinator = ModuleCoordinator.build(blueprint)
 
         # -- Odom tracking via LCM -------------------------------------------
         lock = threading.Lock()
@@ -161,7 +182,6 @@ class TestCrossWallPlanning:
         lcm_thread.start()
 
         try:
-            coordinator.start()
             print("[test] Blueprint started, waiting for odom…")
 
             # Wait for first odom (sim is up)

@@ -26,6 +26,9 @@ from pathlib import Path
 from dimos.core.native_module import NativeModule, NativeModuleConfig
 from dimos.core.stream import In, Out
 from dimos.msgs.geometry_msgs.PointStamped import PointStamped
+from dimos.msgs.nav_msgs.ContourPolygons3D import ContourPolygons3D
+from dimos.msgs.nav_msgs.GraphNodes3D import GraphNodes3D
+from dimos.msgs.nav_msgs.LineSegments3D import LineSegments3D
 from dimos.msgs.nav_msgs.Odometry import Odometry
 from dimos.msgs.nav_msgs.Path import Path as NavPath
 from dimos.msgs.sensor_msgs.PointCloud2 import PointCloud2
@@ -47,7 +50,7 @@ class FarPlannerConfig(NativeModuleConfig):
         "test -d .git || (git init -q && git add -A && git commit -q --allow-empty -m build) && "
         "nix build --no-write-lock-file"
     )
-    rebuild_on_change: list[str] = ["main.cpp"]  # type: ignore[assignment]
+    rebuild_on_change: list[str] = ["main.cpp", "src/*.cpp", "include/**/*.h"]  # type: ignore[assignment]
 
     # C++ binary uses snake_case CLI args.
     cli_name_override: dict[str, str] = {
@@ -130,3 +133,6 @@ class FarPlanner(NativeModule[FarPlannerConfig]):
     goal: In[PointStamped]
     way_point: Out[PointStamped]
     goal_path: Out[NavPath]
+    graph_nodes: Out[GraphNodes3D]
+    graph_edges: Out[LineSegments3D]
+    contour_polygons: Out[ContourPolygons3D]

@@ -411,12 +411,13 @@ def _goal_path_override(path_msg: Any) -> Any:
     if not path_msg.poses or len(path_msg.poses) < 2:
         return None
 
-    points = [[p.x, p.y, p.z] for p in path_msg.poses]
+    z_off = 3.4  # above graph edges (1.7) and contour polygons (1.5)
+    points = [[p.x, p.y, p.z + z_off] for p in path_msg.poses]
     return [
         # Edges: orange line connecting all waypoints
-        ("world/goal_path/edges", rr.LineStrips3D([points], colors=[(255, 140, 0)], radii=0.04)),
+        ("world/goal_path/edges", rr.LineStrips3D([points], colors=[(255, 140, 0)], radii=0.06)),
         # Nodes: yellow spheres at each graph node in the path
-        ("world/goal_path/nodes", rr.Points3D(points, colors=[(255, 255, 0)], radii=0.12)),
+        ("world/goal_path/nodes", rr.Points3D(points, colors=[(255, 255, 0)], radii=0.15)),
     ]
 
 
@@ -430,9 +431,9 @@ def _waypoint_override(msg: Any) -> Any:
         return None
 
     return rr.Points3D(
-        positions=[[msg.x, msg.y, msg.z + 0.5]],
+        positions=[[msg.x, msg.y, msg.z + 3.0]],
         colors=[(255, 50, 50)],
-        radii=0.3,
+        radii=0.4,
     )
 
 
@@ -446,7 +447,7 @@ def _goal_override(msg: Any) -> Any:
         return None
 
     return rr.Points3D(
-        positions=[[msg.x, msg.y, msg.z + 0.5]],
+        positions=[[msg.x, msg.y, msg.z + 3.0]],
         colors=[(180, 60, 220)],
         radii=0.6,
     )

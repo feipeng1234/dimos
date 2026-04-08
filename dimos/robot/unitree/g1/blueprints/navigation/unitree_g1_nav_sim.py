@@ -53,6 +53,7 @@ unitree_g1_nav_sim = (
             vehicle_height=1.24,
         ),
         smart_nav(
+            # use_simple_planner=True,
             cmd_vel_mux={"teleop_linear_scale": 3.0},
             terrain_analysis={
                 "obstacle_height_threshold": 0.1,

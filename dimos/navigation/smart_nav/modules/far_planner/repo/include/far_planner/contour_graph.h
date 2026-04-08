@@ -85,6 +85,8 @@ public:
 
     static bool IsEdgeCollideBoundary(const Point3D& p1, const Point3D& p2);
 
+    static const PolygonStack& GetContourPolygons() { return contour_polygons_; }
+
     static bool IsPointsConnectFreePolygon(const ConnectPair& cedge,
                                            const ConnectPair& bd_cedge,
                                            const HeightPair h_pair,

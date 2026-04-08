@@ -172,8 +172,8 @@ bool ContourGraph::IsPointsConnectFreePolygon(const ConnectPair& cedge,
                                          0.0f);
         for (const auto& poly_ptr : ContourGraph::contour_polygons_) {
             if (poly_ptr->is_pillar) continue;
-            if ((poly_ptr->is_robot_inside != FARUtil::PointInsideAPoly(poly_ptr->vertices, center_p)) || 
-                ContourGraph::IsEdgeCollidePoly(poly_ptr->vertices, cedge)) 
+            if ((poly_ptr->is_robot_inside != FARUtil::PointInsideAPoly(poly_ptr->vertices, center_p)) ||
+                ContourGraph::IsEdgeCollidePoly(poly_ptr->vertices, cedge))
             {
                 return false;
             }
@@ -190,6 +190,14 @@ bool ContourGraph::IsPointsConnectFreePolygon(const ConnectPair& cedge,
                 return false;
             }
         }
+        // Also check global contour edges — walls observed in previous frames
+        // that are no longer in the current local detection must still block edges.
+        for (const auto& contour : ContourGraph::global_contour_) {
+            if (!ContourGraph::IsEdgeOverlapInHeight(h_pair, HeightPair(contour.first, contour.second))) continue;
+            if (ContourGraph::IsEdgeCollideSegment(contour, cedge)) {
+                return false;
+            }
+        }
     } else {
         for (const auto& contour : ContourGraph::global_contour_) {
             if (!ContourGraph::IsEdgeOverlapInHeight(h_pair, HeightPair(contour.first, contour.second))) continue;
@@ -201,6 +209,38 @@ bool ContourGraph::IsPointsConnectFreePolygon(const ConnectPair& cedge,
             if (poly_ptr->is_pillar) continue;
             if (ContourGraph::IsEdgeCollidePoly(poly_ptr->vertices, cedge)) {
                 return false;
+            }
+        }
+    }
+    // Obstacle cloud line-of-sight check: sample points along the edge
+    // and reject if any sample is near obstacle points.
+    // This catches walls that the sparse contour segments miss.
+    if (FARUtil::surround_obs_cloud_ != nullptr && FARUtil::surround_obs_cloud_->size() > 10) {
+        const float edge_len = std::hypotf(cedge.end_p.x - cedge.start_p.x,
+                                           cedge.end_p.y - cedge.start_p.y);
+        const float min_edge_for_check = FARUtil::kNavClearDist * 2.0f;
+        if (edge_len > min_edge_for_check) {
+            // Sample every ~0.3m along the edge, up to 20 samples
+            const float sample_step = FARUtil::kLeafSize * 3.0f;
+            const int num_samples = std::min(static_cast<int>(edge_len / sample_step), 20);
+            if (num_samples > 0) {
+                pcl::KdTreeFLANN<PCLPoint> obs_kdtree;
+                obs_kdtree.setInputCloud(FARUtil::surround_obs_cloud_);
+                // Check radius: slightly larger than robot clearance
+                const float obs_check_radius = FARUtil::robot_dim;
+                for (int s = 1; s <= num_samples; s++) {
+                    float t = static_cast<float>(s) / static_cast<float>(num_samples + 1);
+                    PCLPoint sample_pt;
+                    sample_pt.x = cedge.start_p.x + t * (cedge.end_p.x - cedge.start_p.x);
+                    sample_pt.y = cedge.start_p.y + t * (cedge.end_p.y - cedge.start_p.y);
+                    sample_pt.z = (h_pair.minH + h_pair.maxH) / 2.0f;
+                    std::vector<int> indices;
+                    std::vector<float> dists;
+                    obs_kdtree.radiusSearch(sample_pt, obs_check_radius, indices, dists);
+                    if (!indices.empty()) {
+                        return false;
+                    }
+                }
             }
         }
     }

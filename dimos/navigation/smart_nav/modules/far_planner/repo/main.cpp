@@ -317,6 +317,11 @@ int main(int argc, char** argv) {
     g_way_point_topic       = mod.has("way_point") ? mod.topic("way_point") : "";
     g_goal_path_topic       = mod.has("goal_path") ? mod.topic("goal_path") : "";
 
+    // Debug visualization topics
+    std::string g_graph_nodes_topic = mod.has("graph_nodes") ? mod.topic("graph_nodes") : "";
+    std::string g_graph_edges_topic = mod.has("graph_edges") ? mod.topic("graph_edges") : "";
+    std::string g_contour_polygons_topic = mod.has("contour_polygons") ? mod.topic("contour_polygons") : "";
+
     // ── Get config params (mirrors LoadROSParams in original FARMaster) ────
     float update_rate         = mod.arg_float("update_rate", 5.0f);
     float robot_dim           = mod.arg_float("robot_dim", 0.5f);
@@ -508,10 +513,16 @@ int main(int argc, char** argv) {
     Point3D robot_pos(0, 0, 0);
     Point3D last_robot_pos(0, 0, 0);
     int frame_count = 0;
+    // Persist the last goal so we can re-set it after planning failures.
+    // In the original ROS code, the goal subscriber continuously re-delivers
+    // the goal. In our single-shot LCM design, we must handle retries ourselves.
+    bool has_pending_goal = false;
+    Point3D pending_goal_pos(0, 0, 0);
 
     // ── Main loop ──────────────────────────────────────────────────────────
     float loop_period_ms = 1000.0f / update_rate;
     printf("[far_planner] Starting main loop at %.1f Hz\n", update_rate);
+    fflush(stdout);
 
     while (g_running.load()) {
         auto loop_start = std::chrono::high_resolution_clock::now();
@@ -598,6 +609,7 @@ int main(int argc, char** argv) {
             last_robot_pos = robot_pos;
             printf("[far_planner] First odometry received: (%.2f, %.2f, %.2f)\n",
                    robot_pos.x, robot_pos.y, robot_pos.z);
+            fflush(stdout);
         }
 
         // Init map origin on first odometry
@@ -606,6 +618,7 @@ int main(int argc, char** argv) {
             scan_handler.ReInitGrids();
             is_map_init = true;
             printf("[far_planner] Map origin set\n");
+            fflush(stdout);
         }
 
         // Update positions in algorithm modules
@@ -622,15 +635,10 @@ int main(int argc, char** argv) {
         if (have_terrain_ext) {
             PointCloudPtr terrain_ext_pcl = lcm_pc2_to_pcl(cur_terrain_ext);
             if (!terrain_ext_pcl->empty()) {
-                // Crop to sensor range around robot
                 FARUtil::CropPCLCloud(terrain_ext_pcl, robot_pos, sensor_range);
                 FARUtil::RemoveNanInfPoints(terrain_ext_pcl);
-
-                // Separate free and obstacle points (based on intensity/z threshold)
                 FARUtil::ExtractFreeAndObsCloud(terrain_ext_pcl, free_cloud, obs_cloud);
                 have_new_clouds = true;
-
-                // Update cloud grids
                 map_handler.UpdateObsCloudGrid(obs_cloud);
                 map_handler.UpdateFreeCloudGrid(free_cloud);
                 map_handler.UpdateTerrainHeightGrid(free_cloud, terrain_height_cloud);
@@ -645,7 +653,6 @@ int main(int argc, char** argv) {
                 FARUtil::RemoveNanInfPoints(terrain_pcl);
                 FARUtil::ExtractFreeAndObsCloud(terrain_pcl, free_cloud, obs_cloud);
                 have_new_clouds = true;
-
                 map_handler.UpdateObsCloudGrid(obs_cloud);
                 map_handler.UpdateFreeCloudGrid(free_cloud);
                 map_handler.UpdateTerrainHeightGrid(free_cloud, terrain_height_cloud);
@@ -658,7 +665,6 @@ int main(int argc, char** argv) {
             if (!scan_pcl->empty()) {
                 FARUtil::CropPCLCloud(scan_pcl, robot_pos, sensor_range);
                 FARUtil::RemoveNanInfPoints(scan_pcl);
-
                 PointCloudPtr scan_free_cloud(new pcl::PointCloud<PCLPoint>());
                 scan_handler.SetCurrentScanCloud(scan_pcl, scan_free_cloud);
             }
@@ -671,64 +677,60 @@ int main(int argc, char** argv) {
                 static_cast<float>(cur_goal_msg.point.y),
                 static_cast<float>(cur_goal_msg.point.z));
             graph_planner.UpdateGoal(goal_pos);
+            pending_goal_pos = goal_pos;
+            has_pending_goal = true;
             printf("[far_planner] New goal received: (%.2f, %.2f, %.2f)\n",
                    goal_pos.x, goal_pos.y, goal_pos.z);
+            fflush(stdout);
+        }
+        // Re-set the goal if it was cleared by a planning failure
+        if (has_pending_goal && graph_planner.GetGoalNodePtr() == nullptr) {
+            graph_planner.UpdateGoal(pending_goal_pos);
+            printf("[far_planner] frame=%d goal re-set after failure\n", frame_count); fflush(stdout);
         }
 
         // ── Main graph update loop (mirrors FARMaster::MainLoopCallBack) ───
         if (have_new_clouds && is_map_init) {
-            // Get surrounding obstacle and free clouds from grid map
             PointCloudPtr surround_obs(new pcl::PointCloud<PCLPoint>());
             PointCloudPtr surround_free(new pcl::PointCloud<PCLPoint>());
             map_handler.GetSurroundObsCloud(surround_obs);
             map_handler.GetSurroundFreeCloud(surround_free);
+            // Populate the static surround_obs_cloud_ used by obstacle LOS checks
+            FARUtil::surround_obs_cloud_ = surround_obs;
 
-            // Set surround obstacle cloud for scan handler
             scan_handler.SetSurroundObsCloud(surround_obs, !FARUtil::IsStaticEnv);
 
-            // Extract new observation points for graph update
             PointCloudPtr new_obs_cloud(new pcl::PointCloud<PCLPoint>());
             if (!surround_obs->empty()) {
                 FARUtil::ExtractNewObsPointCloud(surround_obs, obs_cloud, new_obs_cloud);
                 FARUtil::UpdateKdTrees(new_obs_cloud);
             }
 
-            // Update node heights based on terrain
             const NodePtrStack& nav_graph = dynamic_graph.GetNavGraph();
             map_handler.AdjustNodesHeight(nav_graph);
 
-            // Build contour image and extract contours
-            const NavNodePtr odom_node = dynamic_graph.GetOdomNode();
-            if (odom_node != nullptr) {
-                // Contour detection from obstacle cloud
+            const NavNodePtr graph_odom_node = dynamic_graph.GetOdomNode();
+            if (graph_odom_node != nullptr) {
                 std::vector<PointStack> realworld_contour;
                 contour_detector.BuildTerrainImgAndExtractContour(
-                    odom_node, surround_obs, realworld_contour);
+                    graph_odom_node, surround_obs, realworld_contour);
 
-                // Update contour graph with detected contours
-                contour_graph.UpdateContourGraph(odom_node, realworld_contour);
+                contour_graph.UpdateContourGraph(graph_odom_node, realworld_contour);
 
-                // Match contour vertices with navigation graph nodes
                 CTNodeStack new_convex_vertices;
                 const NodePtrStack& near_nodes = dynamic_graph.GetExtendLocalNode();
                 contour_graph.MatchContourWithNavGraph(nav_graph, near_nodes, new_convex_vertices);
 
-                // Adjust heights of contour nodes
                 map_handler.AdjustCTNodeHeight(ContourGraph::contour_graph_);
 
-                // Extract navigation graph nodes from contour vertices
                 dynamic_graph.ExtractGraphNodes(new_convex_vertices);
-
-                // Update near nodes (local range classification)
                 dynamic_graph.UpdateGlobalNearNodes();
 
-                // Update navigation graph (edges, visibility, etc.)
                 const bool is_freeze_vgraph = false;
                 NodePtrStack clear_nodes;
                 dynamic_graph.UpdateNavGraph(
                     dynamic_graph.GetNewNodes(), is_freeze_vgraph, clear_nodes);
 
-                // Remove cleared nodes from map
                 if (!clear_nodes.empty()) {
                     PointCloudPtr clear_cloud(new pcl::PointCloud<PCLPoint>());
                     for (const auto& node : clear_nodes) {
@@ -737,69 +739,173 @@ int main(int argc, char** argv) {
                     map_handler.RemoveObsCloudFromGrid(clear_cloud);
                 }
 
-                // Extract global contour lines for polygon checks
                 contour_graph.ExtractGlobalContours();
+
+                // Periodic status
+                if (frame_count % 50 == 0) {
+                    const auto& polys = ContourGraph::GetContourPolygons();
+                    int total_edges = 0;
+                    for (const auto& n : dynamic_graph.GetNavGraph()) total_edges += n->connect_nodes.size();
+                    printf("[far_planner] frame=%d nodes=%zu edges=%d polys=%zu global_contours=%zu boundary=%zu robot=(%.1f,%.1f)\n",
+                           frame_count, dynamic_graph.GetNavGraph().size(), total_edges / 2,
+                           polys.size(), ContourGraph::global_contour_.size(),
+                           ContourGraph::boundary_contour_.size(),
+                           robot_pos.x, robot_pos.y);
+                    fflush(stdout);
+                }
+
+                // Update graph planner with latest nav graph (done in MainLoopCallBack in original)
+                graph_planner.UpdaetVGraph(dynamic_graph.GetNavGraph());
+
+                // Publish debug visualization: graph nodes (as nav_msgs/Path, decoded as GraphNodes3D)
+                // orientation.w encodes node type: 0=normal, 1=odom, 2=goal, 3=frontier, 4=navpoint
+                if (!g_graph_nodes_topic.empty() && frame_count % 5 == 0) {
+                    const NodePtrStack& viz_graph = dynamic_graph.GetNavGraph();
+                    nav_msgs::Path nodes_msg;
+                    nodes_msg.header = dimos::make_header(g_world_frame, now_sec);
+                    nodes_msg.poses_length = static_cast<int32_t>(viz_graph.size());
+                    nodes_msg.poses.resize(viz_graph.size());
+                    for (size_t i = 0; i < viz_graph.size(); ++i) {
+                        const auto& n = viz_graph[i];
+                        auto& pose = nodes_msg.poses[i];
+                        pose.header = nodes_msg.header;
+                        pose.pose.position.x = n->position.x;
+                        pose.pose.position.y = n->position.y;
+                        pose.pose.position.z = n->position.z;
+                        float node_type = 0.0f;
+                        if (n->is_odom) node_type = 1.0f;
+                        else if (n->is_goal) node_type = 2.0f;
+                        else if (n->is_frontier) node_type = 3.0f;
+                        else if (n->is_navpoint) node_type = 4.0f;
+                        pose.pose.orientation.w = node_type;
+                    }
+                    g_lcm->publish(g_graph_nodes_topic, &nodes_msg);
+                }
+
+                // Publish debug visualization: graph edges (as nav_msgs/Path, decoded as LineSegments3D)
+                // Consecutive pose pairs form edge segments
+                if (!g_graph_edges_topic.empty() && frame_count % 5 == 0) {
+                    const NodePtrStack& viz_graph = dynamic_graph.GetNavGraph();
+                    // Collect unique edges (avoid duplicates since edges are bidirectional)
+                    std::vector<std::pair<Point3D, Point3D>> edges;
+                    for (const auto& n : viz_graph) {
+                        for (const auto& neighbor : n->connect_nodes) {
+                            if (n->id < neighbor->id) {  // only one direction
+                                edges.push_back({n->position, neighbor->position});
+                            }
+                        }
+                    }
+                    nav_msgs::Path edges_msg;
+                    edges_msg.header = dimos::make_header(g_world_frame, now_sec);
+                    edges_msg.poses_length = static_cast<int32_t>(edges.size() * 2);
+                    edges_msg.poses.resize(edges.size() * 2);
+                    for (size_t i = 0; i < edges.size(); ++i) {
+                        auto& p1 = edges_msg.poses[i * 2];
+                        auto& p2 = edges_msg.poses[i * 2 + 1];
+                        p1.header = edges_msg.header;
+                        p2.header = edges_msg.header;
+                        p1.pose.position.x = edges[i].first.x;
+                        p1.pose.position.y = edges[i].first.y;
+                        p1.pose.position.z = edges[i].first.z;
+                        p1.pose.orientation.w = 1.0;
+                        p2.pose.position.x = edges[i].second.x;
+                        p2.pose.position.y = edges[i].second.y;
+                        p2.pose.position.z = edges[i].second.z;
+                        p2.pose.orientation.w = 1.0;
+                    }
+                    g_lcm->publish(g_graph_edges_topic, &edges_msg);
+                }
+
+                // Publish debug visualization: contour polygons (as PointCloud2, decoded as ContourPolygons3D)
+                // Each polygon's vertices are points with intensity = polygon_id
+                if (!g_contour_polygons_topic.empty() && frame_count % 5 == 0) {
+                    const auto& polys = ContourGraph::GetContourPolygons();
+                    std::vector<smart_nav::PointXYZI> poly_pts;
+                    int non_pillar_id = 0;
+                    for (size_t pid = 0; pid < polys.size(); ++pid) {
+                        const auto& poly = polys[pid];
+                        if (poly->is_pillar) continue;
+                        float poly_id = static_cast<float>(non_pillar_id++);
+                        for (const auto& v : poly->vertices) {
+                            poly_pts.push_back({v.x, v.y, v.z, poly_id});
+                        }
+                    }
+                    if (frame_count % 50 == 0) {
+                        printf("[far_planner] contour_polygons: total=%zu non_pillar=%d pts=%zu\n",
+                               polys.size(), non_pillar_id, poly_pts.size());
+                        fflush(stdout);
+                    }
+                    auto poly_msg = smart_nav::build_pointcloud2(poly_pts, g_world_frame, now_sec);
+                    g_lcm->publish(g_contour_polygons_topic, &poly_msg);
+                }
             }
         }
 
         // ── Planning loop (mirrors FARMaster::PlanningCallBack) ────────────
+        // Matches the original FARMaster::PlanningCallBack order exactly.
+        // In the original, odom_node_ptr_ is set from previous timer iterations.
+        // In our single-loop design, we run a no-goal UpdateGraphTraverability
+        // every frame to keep odom_node_ptr_ warm for ReEvaluateGoalPosition.
         const NavNodePtr goal_ptr = graph_planner.GetGoalNodePtr();
-        if (goal_ptr != nullptr && is_map_init) {
-            const NavNodePtr odom_node = dynamic_graph.GetOdomNode();
-            if (odom_node != nullptr) {
-                // Update graph in planner
-                graph_planner.UpdaetVGraph(dynamic_graph.GetNavGraph());
+        const NavNodePtr odom_node = dynamic_graph.GetOdomNode();
+        if (goal_ptr == nullptr && is_map_init && odom_node != nullptr) {
+            // No goal — update traversability to keep odom_node_ptr_ set
+            graph_planner.UpdateGraphTraverability(odom_node, nullptr);
+        } else if (goal_ptr != nullptr && is_map_init && odom_node != nullptr) {
+            // 1. Update free terrain grid for goal adjustment
+            const Point3D ori_p = graph_planner.GetOriginNodePos(true);
+            PointCloudPtr goal_obs(new pcl::PointCloud<PCLPoint>());
+            PointCloudPtr goal_free(new pcl::PointCloud<PCLPoint>());
+            map_handler.GetCloudOfPoint(ori_p, goal_obs, CloudType::OBS_CLOUD, true);
+            map_handler.GetCloudOfPoint(ori_p, goal_free, CloudType::FREE_CLOUD, true);
+            graph_planner.UpdateFreeTerrainGrid(ori_p, goal_obs, goal_free);
 
-                // Update goal node connectivity
-                graph_planner.UpdateGoalNavNodeConnects(goal_ptr);
+            // 2. Re-evaluate goal position (uses odom_node_ptr_ from prev frame)
+            graph_planner.ReEvaluateGoalPosition(goal_ptr, !FARUtil::IsMultiLayer);
 
-                // Re-evaluate goal position with terrain
-                graph_planner.ReEvaluateGoalPosition(goal_ptr, true);
+            // 3. Update goal node connectivity (creates edges to goal)
+            graph_planner.UpdateGoalNavNodeConnects(goal_ptr);
 
-                // Update free terrain grid for goal adjustment
-                PointCloudPtr goal_obs(new pcl::PointCloud<PCLPoint>());
-                PointCloudPtr goal_free(new pcl::PointCloud<PCLPoint>());
-                map_handler.GetCloudOfPoint(goal_ptr->position, goal_obs,
-                                            CloudType::OBS_CLOUD, true);
-                map_handler.GetCloudOfPoint(goal_ptr->position, goal_free,
-                                            CloudType::FREE_CLOUD, true);
-                graph_planner.UpdateFreeTerrainGrid(goal_ptr->position, goal_obs, goal_free);
+            // 4. Update traversability (Dijkstra — needs edges from step 3)
+            graph_planner.UpdateGraphTraverability(odom_node, goal_ptr);
 
-                // Compute graph traversability
-                graph_planner.UpdateGraphTraverability(odom_node, goal_ptr);
+            // Plan path to goal
+            NodePtrStack global_path;
+            NavNodePtr nav_waypoint = nullptr;
+            Point3D goal_p;
+            bool is_fails = false;
+            bool is_succeed = false;
+            bool is_free_nav = false;
 
-                // Plan path to goal
-                NodePtrStack global_path;
-                NavNodePtr nav_waypoint = nullptr;
-                Point3D goal_p;
-                bool is_fails = false;
-                bool is_succeed = false;
-                bool is_free_nav = false;
+            bool plan_success = graph_planner.PathToGoal(
+                goal_ptr, global_path, nav_waypoint, goal_p,
+                is_fails, is_succeed, is_free_nav);
 
-                bool plan_success = graph_planner.PathToGoal(
-                    goal_ptr, global_path, nav_waypoint, goal_p,
-                    is_fails, is_succeed, is_free_nav);
-
-                if (plan_success && nav_waypoint != nullptr) {
-                    // Publish waypoint
-                    if (!g_way_point_topic.empty()) {
-                        auto wp_msg = point3d_to_lcm_point_stamped(
-                            nav_waypoint->position, now_sec);
-                        g_lcm->publish(g_way_point_topic, &wp_msg);
-                    }
-
-                    // Publish path
-                    if (!g_goal_path_topic.empty() && !global_path.empty()) {
-                        auto path_msg = path_to_lcm_path(global_path, now_sec);
-                        g_lcm->publish(g_goal_path_topic, &path_msg);
-                    }
+            if (plan_success && nav_waypoint != nullptr) {
+                // Publish waypoint
+                if (!g_way_point_topic.empty()) {
+                    Point3D waypoint = nav_waypoint->position;
+                    auto wp_msg = point3d_to_lcm_point_stamped(waypoint, now_sec);
+                    g_lcm->publish(g_way_point_topic, &wp_msg);
                 }
 
-                if (is_succeed) {
-                    printf("[far_planner] Goal reached!\n");
-                } else if (is_fails) {
-                    printf("[far_planner] Planning failed — no path to goal\n");
+                // Publish path
+                if (!g_goal_path_topic.empty() && !global_path.empty()) {
+                    auto path_msg = path_to_lcm_path(global_path, now_sec);
+                    g_lcm->publish(g_goal_path_topic, &path_msg);
                 }
+            } else if (is_fails) {
+                // Planning failed — publish robot position as waypoint to stop movement
+                // (matches original FARMaster behavior)
+                if (!g_way_point_topic.empty()) {
+                    auto wp_msg = point3d_to_lcm_point_stamped(robot_pos, now_sec);
+                    g_lcm->publish(g_way_point_topic, &wp_msg);
+                }
+            }
+
+            if (is_succeed) {
+                has_pending_goal = false;
+                printf("[far_planner] Goal reached!\n"); fflush(stdout);
             }
         }
 

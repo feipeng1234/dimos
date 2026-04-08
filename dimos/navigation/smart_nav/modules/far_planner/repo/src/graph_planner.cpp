@@ -355,6 +355,7 @@ void GraphPlanner::UpdateGoal(const Point3D& goal) {
 void GraphPlanner::ReEvaluateGoalPosition(const NavNodePtr& goal_ptr, const bool& is_adjust_height)
 {
     if (is_use_internav_goal_) return; // return if using an exsiting internav node as goal
+    if (odom_node_ptr_ == NULL) return; // not ready yet — odom_node_ptr_ set by UpdateGraphTraverability
     if (is_adjust_height && is_global_path_init_ && recorded_path_.size() > 1) { // use path to adjust goal height
         const auto it = recorded_path_.end() - 2;
         if (!is_terrain_associated_) {
