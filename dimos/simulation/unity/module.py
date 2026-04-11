@@ -84,7 +84,6 @@ _DEFAULT_SCENE = "office_1"
 # connection and drops it.
 _BRIDGE_READ_TIMEOUT = 30.0
 
-
 # TCP protocol helpers
 
 
@@ -312,11 +311,10 @@ _CAM_FY = _CAM_FX
 _CAM_CX = _CAM_WIDTH / 2.0
 _CAM_CY = _CAM_HEIGHT / 2.0
 
-
 # Module
 
 
-class UnityBridgeModule(Module[UnityBridgeConfig]):
+class UnityBridgeModule(Module):
     """TCP bridge to the Unity simulator with kinematic odometry integration.
 
     Ports:
@@ -329,7 +327,7 @@ class UnityBridgeModule(Module[UnityBridgeConfig]):
         camera_info (Out[CameraInfo]): Camera intrinsics.
     """
 
-    default_config = UnityBridgeConfig
+    config: UnityBridgeConfig
 
     cmd_vel: In[Twist]
     terrain_map: In[PointCloud2]
@@ -418,8 +416,8 @@ class UnityBridgeModule(Module[UnityBridgeConfig]):
     @rpc
     def start(self) -> None:
         super().start()
-        self._disposables.add(Disposable(self.cmd_vel.subscribe(self._on_cmd_vel)))
-        self._disposables.add(Disposable(self.terrain_map.subscribe(self._on_terrain)))
+        self.register_disposable(Disposable(self.cmd_vel.subscribe(self._on_cmd_vel)))
+        self.register_disposable(Disposable(self.terrain_map.subscribe(self._on_terrain)))
         self._running.set()
         self._sim_thread = threading.Thread(target=self._sim_loop, daemon=True)
         self._sim_thread.start()

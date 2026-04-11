@@ -57,8 +57,8 @@ class _RebuildConfig(NativeModuleConfig):
     rebuild_on_change: list[PathEntry] | None = None
 
 
-class _RebuildModule(NativeModule[_RebuildConfig]):
-    default_config = _RebuildConfig
+class _RebuildModule(NativeModule):
+    config: _RebuildConfig
 
 
 def _make_module(build_env: dict[str, Path]) -> _RebuildModule:

@@ -65,7 +65,7 @@ class TestSmoothLocalPlannerNav:
     """E2E: cross-wall routing with SmoothLocalPlanner driving nav_cmd_vel."""
 
     def test_cross_wall_sequence_smooth(self) -> None:
-        from dimos.core.blueprints import autoconnect
+        from dimos.core.coordination.blueprints import autoconnect
         from dimos.msgs.geometry_msgs.PointStamped import PointStamped
         from dimos.msgs.geometry_msgs.Twist import Twist
         from dimos.msgs.nav_msgs.Odometry import Odometry

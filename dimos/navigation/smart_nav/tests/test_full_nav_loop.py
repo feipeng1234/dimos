@@ -37,6 +37,7 @@ from typing import Any
 import numpy as np
 import pytest
 
+from dimos.core.core import rpc
 from dimos.core.module import Module, ModuleConfig
 from dimos.core.stream import Out
 from dimos.msgs.geometry_msgs.Pose import Pose
@@ -79,10 +80,10 @@ class MockSensorConfig(ModuleConfig):
     rate: float = 5.0
 
 
-class MockSensor(Module[MockSensorConfig]):
+class MockSensor(Module):
     """Publishes synthetic lidar + odometry at fixed rate."""
 
-    default_config = MockSensorConfig
+    config: MockSensorConfig
     registered_scan: Out[PointCloud2]
     odometry: Out[Odometry]
 
@@ -100,11 +101,14 @@ class MockSensor(Module[MockSensorConfig]):
         super().__setstate__(state)
         self._thread = None
 
+    @rpc
     def start(self) -> None:
+        super().start()
         self._running = True
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
 
+    @rpc
     def stop(self) -> None:
         self._running = False
         if self._thread:
@@ -145,7 +149,7 @@ class MockSensor(Module[MockSensorConfig]):
 
 def test_full_nav_closed_loop():
     """End-to-end: synthetic data -> terrain_map + path + cmd_vel produced."""
-    from dimos.core.blueprints import autoconnect
+    from dimos.core.coordination.blueprints import autoconnect
     from dimos.msgs.geometry_msgs.PointStamped import PointStamped
     from dimos.navigation.smart_nav.modules.local_planner.local_planner import LocalPlanner
     from dimos.navigation.smart_nav.modules.path_follower.path_follower import PathFollower

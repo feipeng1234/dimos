@@ -70,7 +70,7 @@ class Occupancy:
 
 class TestCollisionSmooth:
     def test_no_collision_on_waypoint_drive(self) -> None:
-        from dimos.core.blueprints import autoconnect
+        from dimos.core.coordination.blueprints import autoconnect
         from dimos.msgs.geometry_msgs.PointStamped import PointStamped
         from dimos.msgs.nav_msgs.Odometry import Odometry
         from dimos.navigation.smart_nav.main import smart_nav

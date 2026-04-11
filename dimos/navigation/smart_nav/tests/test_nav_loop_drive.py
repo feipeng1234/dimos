@@ -32,6 +32,7 @@ from typing import Any
 import numpy as np
 import pytest
 
+from dimos.core.core import rpc
 from dimos.core.module import Module, ModuleConfig
 from dimos.core.stream import In, Out
 from dimos.msgs.geometry_msgs.PointStamped import PointStamped
@@ -75,10 +76,10 @@ class VehicleConfig(ModuleConfig):
     sim_rate: float = 50.0
 
 
-class Vehicle(Module[VehicleConfig]):
+class Vehicle(Module):
     """Kinematic sim vehicle with public position for test inspection."""
 
-    default_config = VehicleConfig
+    config: VehicleConfig
     cmd_vel: In[Twist]
     registered_scan: Out[PointCloud2]
     odometry: Out[Odometry]
@@ -107,7 +108,9 @@ class Vehicle(Module[VehicleConfig]):
         self._lock = threading.Lock()
         self._threads = []
 
+    @rpc
     def start(self) -> None:
+        super().start()
         self.cmd_vel._transport.subscribe(self._on_cmd)
         self._running = True
         for fn in (self._sim_loop, self._sensor_loop):
@@ -115,6 +118,7 @@ class Vehicle(Module[VehicleConfig]):
             t.start()
             self._threads.append(t)
 
+    @rpc
     def stop(self) -> None:
         self._running = False
         for t in self._threads:
@@ -174,7 +178,7 @@ class Vehicle(Module[VehicleConfig]):
 
 def test_multi_waypoint_loop():
     """Send 4 waypoints in a square, verify robot moves toward each."""
-    from dimos.core.blueprints import autoconnect
+    from dimos.core.coordination.blueprints import autoconnect
     from dimos.navigation.smart_nav.modules.local_planner.local_planner import LocalPlanner
     from dimos.navigation.smart_nav.modules.path_follower.path_follower import PathFollower
     from dimos.navigation.smart_nav.modules.terrain_analysis.terrain_analysis import TerrainAnalysis

@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import os
 
-from dimos.core.blueprints import autoconnect
+from dimos.core.coordination.blueprints import autoconnect
 from dimos.hardware.sensors.lidar.fastlio2.module import FastLio2
 from dimos.navigation.smart_nav.main import smart_nav, smart_nav_rerun_config
 from dimos.robot.unitree.g1.blueprints.navigation.g1_rerun import g1_static_robot

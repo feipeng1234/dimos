@@ -30,7 +30,7 @@ from dimos.msgs.geometry_msgs.PointStamped import PointStamped
 from dimos.msgs.nav_msgs.Odometry import Odometry
 
 
-class ClickToGoal(Module[ModuleConfig]):
+class ClickToGoal(Module):
     """Relay clicked_point → way_point + goal for click-to-navigate.
 
     Publishes only in response to user actions — never on odometry updates.
@@ -43,7 +43,7 @@ class ClickToGoal(Module[ModuleConfig]):
         goal (Out[PointStamped]): Navigation goal for FarPlanner.
     """
 
-    default_config = ModuleConfig
+    config: ModuleConfig
 
     clicked_point: In[PointStamped]
     odometry: In[Odometry]

@@ -261,7 +261,7 @@ class SimplePlannerConfig(ModuleConfig):
     stuck_min_inflation: float = 0.2
 
 
-class SimplePlanner(Module[SimplePlannerConfig]):
+class SimplePlanner(Module):
     """Grid-A* global route planner (alternative to FarPlanner).
 
     Ports:
@@ -281,7 +281,7 @@ class SimplePlanner(Module[SimplePlannerConfig]):
             the same cadence as the planning loop for debugging.
     """
 
-    default_config: type[SimplePlannerConfig] = SimplePlannerConfig
+    config: SimplePlannerConfig
 
     terrain_map_ext: In[PointCloud2]
     terrain_map: In[PointCloud2]

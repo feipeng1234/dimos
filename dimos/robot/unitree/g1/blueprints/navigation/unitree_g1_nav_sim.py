@@ -38,7 +38,7 @@ Data flow:
 
 from __future__ import annotations
 
-from dimos.core.blueprints import autoconnect
+from dimos.core.coordination.blueprints import autoconnect
 from dimos.core.global_config import global_config
 from dimos.navigation.smart_nav.main import smart_nav, smart_nav_rerun_config
 from dimos.robot.unitree.g1.blueprints.navigation.g1_rerun import g1_static_robot

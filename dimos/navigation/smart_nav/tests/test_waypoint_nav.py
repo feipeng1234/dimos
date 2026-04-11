@@ -35,6 +35,7 @@ from typing import Any
 import numpy as np
 import pytest
 
+from dimos.core.core import rpc
 from dimos.core.module import Module, ModuleConfig
 from dimos.core.stream import In, Out
 from dimos.msgs.geometry_msgs.Pose import Pose
@@ -83,10 +84,10 @@ class SimVehicleConfig(ModuleConfig):
     sim_rate: float = 50.0
 
 
-class SimVehicle(Module[SimVehicleConfig]):
+class SimVehicle(Module):
     """Kinematic vehicle sim: publishes lidar + odom, integrates cmd_vel."""
 
-    default_config = SimVehicleConfig
+    config: SimVehicleConfig
     cmd_vel: In[Twist]
     registered_scan: Out[PointCloud2]
     odometry: Out[Odometry]
@@ -115,7 +116,9 @@ class SimVehicle(Module[SimVehicleConfig]):
         self._lock = threading.Lock()
         self._threads = []
 
+    @rpc
     def start(self) -> None:
+        super().start()
         self.cmd_vel._transport.subscribe(self._on_cmd)
         self._running = True
         for fn in (self._sim_loop, self._sensor_loop):
@@ -123,6 +126,7 @@ class SimVehicle(Module[SimVehicleConfig]):
             t.start()
             self._threads.append(t)
 
+    @rpc
     def stop(self) -> None:
         self._running = False
         for t in self._threads:
@@ -182,7 +186,7 @@ class SimVehicle(Module[SimVehicleConfig]):
 
 def test_waypoint_nav_produces_path_and_movement():
     """Send waypoint at (10,0), verify terrain_map + path + non-zero cmd_vel."""
-    from dimos.core.blueprints import autoconnect
+    from dimos.core.coordination.blueprints import autoconnect
     from dimos.msgs.geometry_msgs.PointStamped import PointStamped
     from dimos.navigation.smart_nav.modules.local_planner.local_planner import LocalPlanner
     from dimos.navigation.smart_nav.modules.path_follower.path_follower import PathFollower

@@ -41,7 +41,7 @@ class CmdVelMuxConfig(ModuleConfig):
     teleop_linear_scale: float = 1.0
 
 
-class CmdVelMux(Module[CmdVelMuxConfig]):
+class CmdVelMux(Module):
     """Multiplexes nav_cmd_vel and tele_cmd_vel into a single cmd_vel output.
 
     When teleop input arrives, stop_movement is published so downstream
@@ -54,7 +54,7 @@ class CmdVelMux(Module[CmdVelMuxConfig]):
         stop_movement (Out[Bool]): Published when teleop begins.
     """
 
-    default_config = CmdVelMuxConfig
+    config: CmdVelMuxConfig
 
     nav_cmd_vel: In[Twist]
     tele_cmd_vel: In[Twist]

@@ -33,7 +33,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from dimos.core.blueprints import Blueprint, autoconnect
+from dimos.core.coordination.blueprints import Blueprint, autoconnect
 
 logger = logging.getLogger(__name__)
 from dimos.navigation.cmd_vel_mux import CmdVelMux

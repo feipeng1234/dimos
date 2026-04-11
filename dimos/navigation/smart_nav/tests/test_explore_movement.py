@@ -39,6 +39,7 @@ from typing import Any
 import numpy as np
 import pytest
 
+from dimos.core.core import rpc
 from dimos.core.module import Module, ModuleConfig
 from dimos.core.stream import In, Out
 from dimos.msgs.geometry_msgs.Pose import Pose
@@ -135,10 +136,10 @@ class MockVehicleConfig(ModuleConfig):
     sim_rate: float = 50.0
 
 
-class MockVehicle(Module[MockVehicleConfig]):
+class MockVehicle(Module):
     """Publishes sensor data and integrates cmd_vel for position tracking."""
 
-    default_config = MockVehicleConfig
+    config: MockVehicleConfig
 
     cmd_vel: In[Twist]
     registered_scan: Out[PointCloud2]
@@ -171,7 +172,9 @@ class MockVehicle(Module[MockVehicleConfig]):
         self._sensor_thread = None
         self._sim_thread = None
 
+    @rpc
     def start(self) -> None:
+        super().start()
         self.cmd_vel._transport.subscribe(self._on_cmd_vel)
         self._running = True
         self._sim_thread = threading.Thread(target=self._sim_loop, daemon=True)
@@ -179,6 +182,7 @@ class MockVehicle(Module[MockVehicleConfig]):
         self._sensor_thread = threading.Thread(target=self._sensor_loop, daemon=True)
         self._sensor_thread.start()
 
+    @rpc
     def stop(self) -> None:
         self._running = False
         if self._sim_thread:
@@ -263,7 +267,7 @@ class Collector:
 
 def test_explore_produces_movement():
     """End-to-end: TARE planner drives robot movement via full pipeline."""
-    from dimos.core.blueprints import autoconnect
+    from dimos.core.coordination.blueprints import autoconnect
     from dimos.msgs.geometry_msgs.PointStamped import PointStamped
     from dimos.msgs.nav_msgs.Path import Path as NavPath
     from dimos.navigation.smart_nav.modules.local_planner.local_planner import LocalPlanner

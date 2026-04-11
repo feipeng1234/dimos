@@ -98,7 +98,7 @@ class FarPlannerConfig(NativeModuleConfig):
     visualize_ratio: float = 0.4
 
 
-class FarPlanner(NativeModule[FarPlannerConfig]):
+class FarPlanner(NativeModule):
     """FAR planner: visibility-graph global route planner.
 
     Builds and maintains a visibility graph from classified terrain maps,
@@ -115,7 +115,7 @@ class FarPlanner(NativeModule[FarPlannerConfig]):
         goal_path (Out[NavPath]): Full planned path to goal.
     """
 
-    default_config = FarPlannerConfig
+    config: FarPlannerConfig
 
     terrain_map_ext: In[PointCloud2]
     terrain_map: In[PointCloud2]

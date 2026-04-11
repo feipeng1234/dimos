@@ -70,7 +70,6 @@ from dimos.visualization.constants import (
 #
 # as well as pubsubs={} to specify which protocols to listen to.
 
-
 # TODO better TF processing
 #
 # this is rerun bridge specific, rerun has a specific (better) way of handling TFs
@@ -93,7 +92,6 @@ from dimos.visualization.constants import (
 #
 # In order to solve this, bridge needs to own it's own tf service
 # and render it's tf tree into correct rerun entity paths
-
 
 logger = setup_logger()
 
@@ -185,7 +183,7 @@ class Config(ModuleConfig):
     blueprint: BlueprintFactory | None = _default_blueprint
 
 
-class RerunBridgeModule(Module[Config]):
+class RerunBridgeModule(Module):
     """Bridge that logs messages from pubsubs to Rerun.
 
     Spawns its own Rerun viewer and subscribes to all topics on each provided
@@ -201,7 +199,7 @@ class RerunBridgeModule(Module[Config]):
         bridge.stop()
     """
 
-    default_config = Config
+    config: Config
     _last_log: dict[str, float] = {}
 
     # Graphviz layout scale and node radii for blueprint graph
@@ -378,14 +376,14 @@ class RerunBridgeModule(Module[Config]):
         for pubsub in self.config.pubsubs:
             logger.info(f"bridge listening on {pubsub.__class__.__name__}")
             if hasattr(pubsub, "start"):
-                pubsub.start()  # type: ignore[union-attr]
+                pubsub.start()
             unsub = pubsub.subscribe_all(self._on_message)
-            self._disposables.add(Disposable(unsub))
+            self.register_disposable(Disposable(unsub))
 
         # Add pubsub stop as disposable
         for pubsub in self.config.pubsubs:
             if hasattr(pubsub, "stop"):
-                self._disposables.add(Disposable(pubsub.stop))  # type: ignore[union-attr]
+                self.register_disposable(Disposable(pubsub.stop))  # type: ignore[union-attr]
 
         self._log_static()
 

@@ -116,7 +116,6 @@ class G1HighLevelDdsSdk(Module, HighLevelG1Spec):
     """
 
     cmd_vel: In[Twist]
-    default_config = G1HighLevelDdsSdkConfig
     config: G1HighLevelDdsSdkConfig
 
     # Primary timing knob — individual delays in methods are fractions of this.
@@ -162,7 +161,7 @@ class G1HighLevelDdsSdk(Module, HighLevelG1Spec):
         self._running = True
 
         if self.cmd_vel._transport is not None:
-            self._disposables.add(Disposable(self.cmd_vel.subscribe(self.move)))
+            self.register_disposable(Disposable(self.cmd_vel.subscribe(self.move)))
         logger.info("G1 DDS SDK connection started")
 
     @rpc

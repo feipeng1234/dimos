@@ -22,8 +22,8 @@ from typing import TYPE_CHECKING, Any
 from dimos_lcm.sensor_msgs.PointCloud2 import (
     PointCloud2 as LCMPointCloud2,
 )
-from dimos_lcm.sensor_msgs.PointField import PointField  # type: ignore[import-untyped]
-from dimos_lcm.std_msgs.Header import Header  # type: ignore[import-untyped]
+from dimos_lcm.sensor_msgs.PointField import PointField
+from dimos_lcm.std_msgs.Header import Header
 import numpy as np
 import open3d as o3d  # type: ignore[import-untyped]
 import open3d.core as o3c  # type: ignore[import-untyped]
@@ -127,9 +127,10 @@ class PointCloud2(Timestamped):
         # Remove non-picklable objects
         del state["_pcd_tensor"]
         state["_pcd_legacy_cache"] = None
-        # Remove cached_property entries that hold unpicklable Open3D types
-        state.pop("oriented_bounding_box", None)
-        state.pop("axis_aligned_bounding_box", None)
+        # Remove all cached_property entries
+        for key in list(state):
+            if isinstance(getattr(type(self), key, None), functools.cached_property):
+                del state[key]
         return state
 
     def __setstate__(self, state: dict[str, object]) -> None:
@@ -169,7 +170,7 @@ class PointCloud2(Timestamped):
     @classmethod
     def from_numpy(
         cls,
-        points: np.ndarray,  # type: ignore[type-arg]
+        points: np.ndarray,
         frame_id: str = "world",
         timestamp: float | None = None,
     ) -> PointCloud2:

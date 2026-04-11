@@ -67,7 +67,7 @@ class TestCrossWallPlanning:
     """E2E integration test: cross-wall routing through Unity sim."""
 
     def test_cross_wall_sequence(self) -> None:
-        from dimos.core.blueprints import autoconnect
+        from dimos.core.coordination.blueprints import autoconnect
         from dimos.core.coordination.module_coordinator import ModuleCoordinator
         from dimos.core.global_config import global_config
         from dimos.msgs.geometry_msgs.PointStamped import PointStamped

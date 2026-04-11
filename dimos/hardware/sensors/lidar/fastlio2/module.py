@@ -194,9 +194,7 @@ class FastLio2Config(NativeModuleConfig):
         ]
 
 
-class FastLio2(
-    NativeModule[FastLio2Config], perception.Lidar, perception.Odometry, mapping.GlobalPointcloud
-):
+class FastLio2(NativeModule, perception.Lidar, perception.Odometry, mapping.GlobalPointcloud):
     """FAST-LIO2 SLAM module with integrated Livox Mid-360 driver.
 
     Ports:
@@ -205,7 +203,8 @@ class FastLio2(
         global_map (Out[PointCloud2]): Global voxel map (optional, enable via map_freq > 0).
     """
 
-    default_config = FastLio2Config
+    config: FastLio2Config
+
     lidar: Out[PointCloud2]
     odometry: Out[Odometry]
     global_map: Out[PointCloud2]

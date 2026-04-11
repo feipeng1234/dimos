@@ -83,7 +83,6 @@ class G1HighLevelWebRtc(Module, HighLevelG1Spec):
     """
 
     cmd_vel: In[Twist]
-    default_config = G1HighLevelWebRtcConfig
     config: G1HighLevelWebRtcConfig
 
     connection: UnitreeWebRTCConnection | None
@@ -100,7 +99,7 @@ class G1HighLevelWebRtc(Module, HighLevelG1Spec):
         assert self.config.ip is not None, "ip must be set in G1HighLevelWebRtcConfig"
         self.connection = UnitreeWebRTCConnection(self.config.ip, self.config.connection_mode)
         self.connection.start()
-        self._disposables.add(Disposable(self.cmd_vel.subscribe(self.move)))
+        self.register_disposable(Disposable(self.cmd_vel.subscribe(self.move)))
 
     @rpc
     def stop(self) -> None:

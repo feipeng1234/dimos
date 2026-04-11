@@ -60,7 +60,7 @@ class TestCrossWallPlanningSimple:
     """E2E: cross-wall routing with SimplePlanner (A* on 2D costmap)."""
 
     def test_cross_wall_sequence_simple(self) -> None:
-        from dimos.core.blueprints import autoconnect
+        from dimos.core.coordination.blueprints import autoconnect
         from dimos.msgs.geometry_msgs.PointStamped import PointStamped
         from dimos.msgs.nav_msgs.Odometry import Odometry
         from dimos.navigation.smart_nav.main import smart_nav

@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, Any
 
 from dimos.core.coordination.python_worker import PythonWorker
@@ -88,7 +89,55 @@ class WorkerManagerPython:
         actor = worker.deploy_module(module_class, global_config, kwargs=kwargs)
         return RPCClient(actor, module_class)
 
-    def deploy_parallel(self, specs: list[ModuleSpec]) -> list[ModuleProxyProtocol]:
+    def deploy_fresh(
+        self,
+        module_class: type[ModuleBase],
+        global_config: GlobalConfig,
+        kwargs: dict[str, Any],
+    ) -> ModuleProxyProtocol:
+        """Spawn a brand-new worker process and deploy *module_class* on it.
+
+        Used by restart so the new module is imported by a Python process with
+        a clean ``sys.modules`` — existing workers would reuse the old class
+        object even after ``importlib.reload`` in the parent.
+        """
+        if self._closed:
+            raise RuntimeError("WorkerManager is closed")
+        if not self._started:
+            self.start()
+
+        worker = PythonWorker()
+        worker.start_process()
+        self._workers.append(worker)
+        self._n_workers += 1
+        actor = worker.deploy_module(module_class, global_config, kwargs=kwargs)
+        return RPCClient(actor, module_class)
+
+    def undeploy(self, proxy: ModuleProxyProtocol) -> None:
+        """Undeploy a module and shut down its worker if it is now empty."""
+        actor = getattr(proxy, "actor_instance", None)
+        if actor is None:
+            raise ValueError("Proxy has no actor_instance. Cannot undeploy.")
+
+        module_id = actor._module_id
+        target: PythonWorker | None = None
+        for worker in self._workers:
+            if module_id in worker._modules:
+                target = worker
+                break
+        if target is None:
+            raise ValueError(f"No worker holds module_id={module_id}")
+
+        target.undeploy_module(module_id)
+
+        if not target._modules:
+            target.shutdown()
+            self._workers.remove(target)
+            self._n_workers = max(0, self._n_workers - 1)
+
+    def deploy_parallel(
+        self, specs: Iterable[ModuleSpec], blueprint_args: Mapping[str, Mapping[str, Any]]
+    ) -> list[ModuleProxyProtocol]:
         if self._closed:
             raise RuntimeError("WorkerManager is closed")
 
@@ -106,6 +155,7 @@ class WorkerManagerPython:
         for module_class, global_config, kwargs in specs:
             worker = self._select_worker()
             worker.reserve_slot()
+            kwargs.update(blueprint_args.get(module_class.name, {}))
             assignments.append((worker, module_class, global_config, kwargs))
 
         try:

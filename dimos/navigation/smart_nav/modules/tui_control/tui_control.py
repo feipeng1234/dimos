@@ -39,7 +39,7 @@ class TUIControlConfig(ModuleConfig):
     publish_rate: float = 20.0  # Hz
 
 
-class TUIControlModule(Module[TUIControlConfig]):
+class TUIControlModule(Module):
     """Terminal-based teleop controller with arrow key input.
 
     Ports:
@@ -47,7 +47,7 @@ class TUIControlModule(Module[TUIControlConfig]):
         way_point (Out[PointStamped]): Waypoint commands (typed coordinates).
     """
 
-    default_config = TUIControlConfig
+    config: TUIControlConfig
 
     cmd_vel: Out[Twist]
     way_point: Out[PointStamped]
