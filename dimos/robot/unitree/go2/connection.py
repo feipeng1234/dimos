@@ -359,7 +359,7 @@ class GO2Connection(Module, Camera, Pointcloud):
         if _os.environ.get("DIMOS_SKIP_TF") != "1":
             transforms = self._odom_to_tf(msg)
             self.tf.publish(*transforms)
-        if self.odom.transport:
+        if self.odom.transport and _os.environ.get("DIMOS_SKIP_SENSOR_PUBLISH") != "1":
             self.odom.publish(msg)
 
     def publish_camera_info(self) -> None:
