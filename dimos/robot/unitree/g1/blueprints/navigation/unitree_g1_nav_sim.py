@@ -38,12 +38,34 @@ Data flow:
 
 from __future__ import annotations
 
+from typing import Any
+
 from dimos.core.coordination.blueprints import autoconnect
 from dimos.core.global_config import global_config
 from dimos.navigation.smart_nav.main import smart_nav, smart_nav_rerun_config
 from dimos.robot.unitree.g1.blueprints.navigation.g1_rerun import g1_static_robot
 from dimos.simulation.unity.module import UnityBridgeModule
 from dimos.visualization.vis_module import vis_module
+
+
+def _rerun_blueprint() -> Any:
+    import rerun.blueprint as rrb
+
+    return rrb.Blueprint(
+        rrb.Vertical(
+            rrb.Spatial3DView(
+                origin="world",
+                name="3D",
+                eye_controls=rrb.EyeControls3D(
+                    position=(0.0, 0.0, 20.0),
+                    look_target=(0.0, 0.0, 0.0),
+                    eye_up=(0.0, 0.0, 1.0),
+                ),
+            ),
+        ),
+        collapse_panels=True,
+    )
+
 
 unitree_g1_nav_sim = (
     autoconnect(
@@ -82,7 +104,7 @@ unitree_g1_nav_sim = (
             viewer_backend=global_config.viewer,
             rerun_config=smart_nav_rerun_config(
                 {
-                    "blueprint": UnityBridgeModule.rerun_blueprint,
+                    "blueprint": _rerun_blueprint,
                     "visual_override": {
                         "world/camera_info": UnityBridgeModule.rerun_suppress_camera_info,
                     },
