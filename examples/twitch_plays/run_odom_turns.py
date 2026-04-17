@@ -65,7 +65,7 @@ logger = setup_logger()
 
 VOTE_WINDOW_SECONDS = 5.0
 LINEAR_SPEED = 0.3  # m/s
-LINEAR_DURATION = 1.0  # seconds
+LINEAR_DURATION = 2.0  # seconds
 ANGULAR_SPEED = 0.5  # rad/s
 MIN_TURN_DEG = 5.0
 MAX_TURN_DEG = 180.0
@@ -288,8 +288,7 @@ twitch_plays_go2 = autoconnect(
     unitree_go2_basic,
     TwitchChat.blueprint(),
     TwitchPlaysGo2.blueprint(),
-).global_config(robot_ip="mujoco")
-
+)
 
 if __name__ == "__main__":
     ModuleCoordinator.build(twitch_plays_go2).loop()

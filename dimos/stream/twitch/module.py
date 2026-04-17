@@ -64,9 +64,9 @@ class TwitchMessage:
 
 
 class TwitchChatConfig(ModuleConfig):
-    # OAuth token (oauth:xxx). Falls back to DIMOS_TWITCH_TOKEN env var.
+    # OAuth token (oauth:xxx). Falls back to DIMOS_TWITCH_TOKEN / TWITCH_TOKEN env var.
     twitch_token: str = ""
-    # Falls back to DIMOS_CHANNEL_NAME env var.
+    # Falls back to DIMOS_CHANNEL_NAME / CHANNEL_NAME env var.
     channel_name: str = ""
     bot_prefix: str = "!"
     # Regex patterns for filtered_messages. If empty, all messages pass through.
@@ -77,6 +77,8 @@ class TwitchChatConfig(ModuleConfig):
     filter_is_subscriber: bool | None = None
     filter_content: Callable[[str], bool] | None = None
     filter_author: Callable[[str], bool] | None = None
+    # When True, messages sent by the bot itself are ignored.
+    ignore_self_messages: bool = False
 
 
 class TwitchChat(Module):
@@ -102,10 +104,26 @@ class TwitchChat(Module):
     def start(self) -> None:
         super().start()
 
-        token = self.config.twitch_token or os.getenv("DIMOS_TWITCH_TOKEN", "")
-        channel = self.config.channel_name or os.getenv("DIMOS_CHANNEL_NAME", "")
+        token = (
+            self.config.twitch_token
+            or os.getenv("DIMOS_TWITCH_TOKEN", "")
+            or os.getenv("TWITCH_TOKEN", "")
+        )
+        channel = (
+            self.config.channel_name
+            or os.getenv("DIMOS_CHANNEL_NAME", "")
+            or os.getenv("CHANNEL_NAME", "")
+        )
 
         self._compiled_patterns = [re.compile(p, re.IGNORECASE) for p in self.config.patterns]
+
+        logger.info(
+            "[TwitchChat] config.channel_name=%r DIMOS_CHANNEL_NAME=%r CHANNEL_NAME=%r => channel=%s",
+            self.config.channel_name,
+            os.getenv("DIMOS_CHANNEL_NAME"),
+            os.getenv("CHANNEL_NAME"),
+            channel,
+        )
 
         if not token or not channel:
             logger.warning("[TwitchChat] No token/channel — running in local-only mode")
@@ -129,14 +147,16 @@ class TwitchChat(Module):
                 token=token,
                 channel=channel,
                 prefix=self.config.bot_prefix,
+                ignore_self_messages=self.config.ignore_self_messages,
                 on_message_cb=self._handle_message,
                 on_ready_cb=self._handle_ready,
             )
             self._bot.run()
         except ImportError:
-            logger.error("[TwitchChat] twitchio is not installed — run: uv pip install twitchio")
+            raise ImportError("twitchio is not installed — run: uv pip install twitchio")
         except Exception:
             logger.exception("[TwitchChat] Bot crashed")
+            raise
 
     @rpc
     def stop(self) -> None:
@@ -232,6 +252,7 @@ class _TwitchBot:
         token: str,
         channel: str,
         prefix: str,
+        ignore_self_messages: bool,
         on_message_cb: Any,
         on_ready_cb: Any,
     ) -> None:
@@ -242,6 +263,7 @@ class _TwitchBot:
         cb_message = on_message_cb
         cb_ready = on_ready_cb
         chan = channel
+        skip_echo = ignore_self_messages
 
         class _Bot(twitch_commands.Bot):  # type: ignore[misc]
             def __init__(inner_self) -> None:  # noqa: N805
@@ -252,7 +274,7 @@ class _TwitchBot:
                 cb_ready()
 
             async def event_message(inner_self, message: Any) -> None:  # noqa: N805
-                if message.echo:
+                if skip_echo and message.echo:
                     return
                 cb_message(message)
 
