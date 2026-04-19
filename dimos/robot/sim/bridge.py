@@ -569,7 +569,8 @@ class DimSimBridge(Module):
 
     def _on_lcm_color_image(self, channel: str, data: bytes) -> None:
         try:
-            self.color_image.publish(Image.lcm_decode(data))
+            # DimSim sends JPEG-encoded images
+            self.color_image.publish(Image.lcm_jpeg_decode(data))
         except Exception as e:
             logger.debug(f"Image decode error: {e}")
 
