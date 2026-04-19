@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""G1 physical description and sensor odometry offsets."""
+"""G1 physical description and sensor mount poses."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ G1 = RobotConfig(
     model_path=Path(__file__).parent / "g1.urdf",
     height_clearance=1.2,
     width_clearance=0.6,
-    internal_odom_offsets={
+    sensor_mounts={
         # Mid-360 lidar: 1.2 m above ground, mounted upside-down (180° around X).
         "mid360_link": Pose(0.0, 0.0, 1.2, *Quaternion.from_euler(Vector3(math.pi, -0.1, 0.0))),
     },

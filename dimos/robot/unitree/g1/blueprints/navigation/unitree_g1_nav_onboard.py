@@ -59,7 +59,7 @@ unitree_g1_nav_onboard = (
         FastLio2.blueprint(
             host_ip=os.getenv("LIDAR_HOST_IP", "192.168.123.164"),
             lidar_ip=os.getenv("LIDAR_IP", "192.168.123.120"),
-            mount=G1.internal_odom_offsets["mid360_link"],
+            mount_pose=G1.sensor_mounts["mid360_link"],
             map_freq=1.0,
             config="lio_autonomy.yaml",
         ),

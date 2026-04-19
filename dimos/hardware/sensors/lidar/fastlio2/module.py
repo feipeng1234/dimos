@@ -53,6 +53,7 @@ from dimos.hardware.sensors.lidar.livox.ports import (
     SDK_PUSH_MSG_PORT,
 )
 from dimos.msgs.geometry_msgs.Pose import Pose
+from dimos.msgs.geometry_msgs.Transform import Transform
 from dimos.msgs.nav_msgs.Odometry import Odometry
 from dimos.msgs.sensor_msgs.PointCloud2 import PointCloud2
 from dimos.spec import mapping, perception
@@ -118,13 +119,14 @@ class FastLio2Config(NativeModuleConfig):
     lidar_ip: str = "192.168.1.155"
     frequency: float = 10.0
 
-    # Sensor mount pose — position + orientation of the sensor relative to ground.
-    # Converted to init_pose CLI arg [x, y, z, qx, qy, qz, qw] in model_post_init.
-    mount: Pose = Pose()
-
-    # Frame IDs for output messages
-    frame_id: str = "map"
+    # Frame IDs stamped on output messages.
+    # "slam_origin" reflects that data is in FAST-LIO's native SLAM frame.
+    # The mount correction TF is published as corrected_frame_id → frame_id.
+    frame_id: str = "slam_origin"
     child_frame_id: str = "body"
+
+    # Parent frame for the mount correction TF (the "world" frame).
+    corrected_frame_id: str = "map"
 
     # FAST-LIO internal processing rates
     msr_freq: float = 50.0
@@ -162,39 +164,39 @@ class FastLio2Config(NativeModuleConfig):
     host_imu_data_port: int = SDK_HOST_IMU_DATA_PORT
     host_log_data_port: int = SDK_HOST_LOG_DATA_PORT
 
-    # Resolved in __post_init__, passed as --config_path to the binary
+    # Resolved in model_post_init, passed as --config_path to the binary
     config_path: str | None = None
 
-    # init_pose is computed from mount; config is resolved to config_path
-    init_pose: list[float] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
-    cli_exclude: frozenset[str] = frozenset({"config", "mount"})
+    # Physical sensor mount pose (position + orientation relative to ground).
+    # Published to the TF tree as frame_id → "slam_origin" so consumers can
+    # query the mount relationship. Not applied to data — downstream modules
+    # work on relative measurements and don't need absolute frame correction.
+    mount_pose: Pose | None = None
+
+    cli_exclude: frozenset[str] = frozenset({"config", "mount_pose", "corrected_frame_id"})
 
     def model_post_init(self, __context: object) -> None:
-        """Resolve config_path and compute init_pose from mount."""
+        """Resolve config_path from config."""
         super().model_post_init(__context)
         cfg = self.config
         if not cfg.is_absolute():
             cfg = _CONFIG_DIR / cfg
         self.config_path = str(cfg.resolve())
-        m = self.mount
-        self.init_pose = [
-            m.x,
-            m.y,
-            m.z,
-            m.orientation.x,
-            m.orientation.y,
-            m.orientation.z,
-            m.orientation.w,
-        ]
 
 
 class FastLio2(NativeModule, perception.Lidar, perception.Odometry, mapping.GlobalPointcloud):
     """FAST-LIO2 SLAM module with integrated Livox Mid-360 driver.
 
     Ports:
-        lidar (Out[PointCloud2]): World-frame registered point cloud.
-        odometry (Out[Odometry]): Pose with covariance at LiDAR scan rate.
+        lidar (Out[PointCloud2]): Registered point cloud in FAST-LIO's SLAM frame.
+        odometry (Out[Odometry]): Pose with covariance in FAST-LIO's SLAM frame.
         global_map (Out[PointCloud2]): Global voxel map (optional, enable via map_freq > 0).
+
+    TF:
+        If ``mount_pose`` is set, publishes it as
+        ``corrected_frame_id → frame_id`` (default: ``"map" → "slam_origin"``).
+        Consumers query ``self.tf.get("map", "slam_origin")`` to look up the
+        mount correction, or ``self.tf.get("map", "body")`` for the full chain.
     """
 
     config: FastLio2Config
@@ -206,6 +208,21 @@ class FastLio2(NativeModule, perception.Lidar, perception.Odometry, mapping.Glob
     def __init__(self, **kwargs: object) -> None:
         super().__init__(**kwargs)
         self._validate_network()
+        self._publish_mount_tf()
+
+    def _publish_mount_tf(self) -> None:
+        """Publish the sensor mount correction to the TF tree."""
+        if self.config.mount_pose is None:
+            return
+        p = self.config.mount_pose
+        self.tf.publish(
+            Transform(
+                translation=p.position,
+                rotation=p.orientation,
+                frame_id=self.config.corrected_frame_id,
+                child_frame_id=self.config.frame_id,
+            )
+        )
 
     def _validate_network(self) -> None:
         """Pre-flight check: verify host_ip is reachable and suggest alternatives."""

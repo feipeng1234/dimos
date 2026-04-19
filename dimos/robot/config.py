@@ -59,12 +59,10 @@ class RobotConfig(BaseModel):
     height_clearance: float | None = None  # max height
     width_clearance: float | None = None  # max width
 
-    # These offsets are applied so that odometry  at 0,0,0 corresponds roughly with the floor
-    # Note: these cannot (easily) be calculated from the URDF because
-    #       the URDF doesn't always have an initial robot pose/stance so the
-    # This is a quality of life offset, not exact
-    # The key names should match keys in the urdf
-    internal_odom_offsets: dict[str, Any] = Field(default_factory=dict)
+    # Sensor mount poses, keyed by URDF link name.
+    # Each Pose describes the physical mount position and orientation relative
+    # to the ground. Modules that consume these decide their own TF frame names.
+    sensor_mounts: dict[str, Any] = Field(default_factory=dict)
 
     # Hardware connection
     adapter_type: str = "mock"

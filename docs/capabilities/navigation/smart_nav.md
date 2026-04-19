@@ -332,6 +332,7 @@ If you have a robot with a Livox Mid-360 lidar and a module that accepts `cmd_ve
 ```python
 from dimos.core.coordination.blueprints import autoconnect
 from dimos.hardware.sensors.lidar.fastlio2.module import FastLio2
+from dimos.msgs.geometry_msgs.Pose import Pose
 from dimos.navigation.smart_nav.main import smart_nav
 
 from my_robot.control import MyRobotControl  # your module
@@ -342,7 +343,7 @@ my_robot_nav = (
         FastLio2.blueprint(
             host_ip="192.168.1.5",       # your machine's IP on the lidar network
             lidar_ip="192.168.1.155",    # the Mid-360's IP
-            mount=Pose(z=0.5),           # sensor height above ground
+            mount_pose=Pose(0, 0, 0.5),  # sensor is 0.5m above ground
         ),
 
         # 2. Navigation stack — consumes registered_scan + odometry,
@@ -396,7 +397,7 @@ class MyRobotControl(Module):
 ### Key Wiring Details
 
 - **Stream name remap**: FastLio2 outputs `lidar`, but smart_nav expects `registered_scan`. The `.remappings()` call handles this. The `odometry` stream name matches on both sides, so it connects automatically.
-- **`mount` pose**: Set this to your sensor's position relative to the ground. The z component shifts the SLAM origin so ground sits at z=0, which is critical for terrain analysis to classify obstacles correctly.
+- **`mount_pose`**: A `Pose` describing the sensor's physical mount position and orientation. FastLio2 publishes this to the TF tree as `frame_id → "slam_origin"` so consumers can query the mount relationship. Downstream nav modules work on relative measurements and don't require the absolute correction.
 - **`vehicle_height`**: Tells TerrainAnalysis to ignore lidar points above the robot (e.g. ceilings). Set it to your robot's actual height.
 - **`cmd_vel` convention**: `linear.x` = forward, `linear.y` = strafe, `angular.z` = yaw rate. If your robot is differential-drive (no strafe), set `local_planner={"two_way_drive": False}` and `path_follower={"vehicle_config": "standard"}`.
 

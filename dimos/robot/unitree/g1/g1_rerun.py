@@ -39,14 +39,14 @@ def g1_static_robot(rr: Any) -> list[Any]:
 def g1_odometry_tf_override(odom: Any) -> Any:
     """Publish odometry as a TF frame so sensor_scan/path/robot can reference it.
 
-    The z is zeroed because point clouds already have the full init_pose
-    transform applied (ground at z≈0). Using the raw odom.z (= mount height)
-    would double-count the vertical offset.
+    Uses odom.z directly — both point clouds and odometry are in FAST-LIO's
+    native SLAM frame. The mount correction is available via TF
+    (``self.tf.get("map", "slam_origin")``).
     """
     import rerun as rr
 
     tf = rr.Transform3D(
-        translation=[odom.x, odom.y, 0.0],
+        translation=[odom.x, odom.y, odom.z],
         rotation=rr.Quaternion(
             xyzw=[
                 odom.orientation.x,
