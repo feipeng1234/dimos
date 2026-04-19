@@ -512,14 +512,14 @@ class _Esp32Module(ArduinoModule):
 
 
 def test_validate_inbound_payload_sizes_passes_for_small_inbound() -> None:
-    """Twist is 48 bytes encoded — well under the 256 AVR limit."""
+    """Twist is 56 bytes on the wire (8B fingerprint + 48B data) — well under the 256 AVR limit."""
     mod = _make_module()
     # twist_in is declared as In[Twist] — 48 bytes, passes.
     mod._validate_inbound_payload_sizes(mod._get_stream_types())
 
 
 def test_validate_inbound_payload_sizes_rejects_oversized_inbound() -> None:
-    """PoseWithCovariance is 344 bytes — exceeds the 256 AVR default."""
+    """PoseWithCovariance is 352 bytes on the wire (8B fingerprint + 344B data) — exceeds the 256 AVR default."""
     mod = _BigInboundModule.__new__(_BigInboundModule)
     mod.config = _ExampleConfig()
     mod.__dict__["pose_in"] = In.__new__(In)

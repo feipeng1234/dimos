@@ -547,10 +547,9 @@ class ArduinoModule(NativeModule):
                     result[name] = args[0]
         return result
 
-    # Topic IDs are transmitted as a single byte on the wire (DSP
-    # protocol) with id 0 reserved for the debug channel, leaving 1..255
-    # usable — 255 streams per ArduinoModule.
-    MAX_TOPICS: ClassVar[int] = 255
+    # Topic IDs are transmitted as 2 bytes on the wire (DSP protocol)
+    # with id 0 reserved for the debug channel, leaving 1..65534 usable.
+    MAX_TOPICS: ClassVar[int] = 65534
 
     def _validate_inbound_payload_sizes(self, stream_types: dict[str, type]) -> None:
         """Fail the build if a host→Arduino stream exceeds AVR's DSP_MAX_PAYLOAD.
@@ -1136,12 +1135,12 @@ class ArduinoModule(NativeModule):
 
 
 def _encoded_payload_size(msg_type: type) -> int | None:
-    """Return the LCM-encoded payload size of ``msg_type`` in bytes, or None.
+    """Return the DSP wire payload size of ``msg_type`` in bytes, or None.
 
     Instantiates the type with a zero-arg constructor, calls
-    ``lcm_encode()``, and strips the 8-byte fingerprint header LCM
-    prepends (the Arduino DSP wire format doesn't carry the hash — it
-    lives in the bridge's registry).
+    ``lcm_encode()``, and returns the full encoded length.  The bridge
+    sends the complete LCM encoding (8-byte fingerprint + data fields)
+    as the DSP payload, so the wire size is ``len(lcm_encode())``.
 
     Returns ``None`` if the type can't be introspected — no zero-arg
     ctor, no ``lcm_encode``, or it raises.  Callers treat ``None`` as
@@ -1158,7 +1157,7 @@ def _encoded_payload_size(msg_type: type) -> int | None:
         encoded = encode()
     except Exception:
         return None
-    return max(0, len(encoded) - 8)
+    return len(encoded)
 
 
 def _tail_text(path: str, max_bytes: int) -> str:
