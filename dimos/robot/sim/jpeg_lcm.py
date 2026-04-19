@@ -32,12 +32,12 @@ class SimJpegLCM(LCM):  # type: ignore[misc]
     (e.g. when the bridge has already decoded it to bgr8).
     """
 
-    _JPEG_TOPICS = frozenset({"/color_image"})
+    _JPEG_SUFFIXES = ("/color_image",)
 
     def decode(self, msg: bytes, topic: Any) -> Any:  # type: ignore[override]
         topic_str = getattr(topic, "topic", "") or ""
         bare_topic = topic_str.split("#")[0]
-        if bare_topic in self._JPEG_TOPICS:
+        if any(bare_topic.endswith(s) for s in self._JPEG_SUFFIXES):
             try:
                 return Image.lcm_jpeg_decode(msg)
             except ValueError:

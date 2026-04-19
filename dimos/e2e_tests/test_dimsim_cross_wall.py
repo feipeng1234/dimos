@@ -58,8 +58,6 @@ from dataclasses import dataclass, field
 import lcm as lcmlib
 import pytest
 
-os.environ.setdefault("DISPLAY", ":1")
-
 ODOM_TOPIC = "/odom#geometry_msgs.PoseStamped"
 GOAL_TOPIC = "/clicked_point#geometry_msgs.PointStamped"
 CMD_VEL_TOPIC = "/cmd_vel#geometry_msgs.Twist"
@@ -304,6 +302,8 @@ class TestDimSimCrossWall:
     """E2E integration test: cross-wall routing with smoothness metrics."""
 
     def test_cross_wall_sequence(self) -> None:
+        os.environ.setdefault("DISPLAY", ":1")
+
         from dimos.core.coordination.module_coordinator import ModuleCoordinator
         from dimos.msgs.geometry_msgs.PointStamped import PointStamped
         from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
