@@ -53,6 +53,7 @@ os.environ.setdefault("DISPLAY", ":1")
 
 ODOM_TOPIC = "/odom#geometry_msgs.PoseStamped"
 GOAL_TOPIC = "/clicked_point#geometry_msgs.PointStamped"
+STOP_EXPLORE_TOPIC = "/stop_explore_cmd#std_msgs.Bool"
 BRIDGE_PORT = 8090
 
 # DimSim "apt" scene waypoints (ROS Z-up frame).
@@ -167,6 +168,8 @@ class TestDimSimCrossWall:
             unitree_go2_dimsim,
         )
 
+        from dimos_lcm.std_msgs.Bool import Bool
+
         # -- Cleanup from previous runs --------------------------------------
         _force_kill_port(BRIDGE_PORT)
         _kill_headless_chrome()
@@ -249,6 +252,11 @@ class TestDimSimCrossWall:
                     f"dist={_distance(sx, sy, gx, gy):.2f}m | "
                     f"budget={timeout_sec}s ==="
                 )
+
+                # Stop frontier exploration so it doesn't override our goal
+                stop_msg = Bool()
+                stop_msg.data = True
+                lc.publish(STOP_EXPLORE_TOPIC, stop_msg.lcm_encode())
 
                 # Publish goal
                 goal = PointStamped(
