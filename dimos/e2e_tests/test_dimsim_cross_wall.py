@@ -53,6 +53,7 @@ os.environ.setdefault("DISPLAY", ":1")
 
 ODOM_TOPIC = "/odom#geometry_msgs.PoseStamped"
 GOAL_TOPIC = "/clicked_point#geometry_msgs.PointStamped"
+EXPLORE_TOPIC = "/explore_cmd#std_msgs.Bool"
 STOP_EXPLORE_TOPIC = "/stop_explore_cmd#std_msgs.Bool"
 BRIDGE_PORT = 8090
 
@@ -232,8 +233,12 @@ class TestDimSimCrossWall:
 
             print(f"[test] Odom online. Robot at ({robot_x:.2f}, {robot_y:.2f})")
 
-            # Let the nav stack warm up (build voxel map from lidar)
-            print(f"[test] Warming up for {WARMUP_SEC}s…")
+            # Start frontier exploration to build the initial map.
+            # The explorer drives the robot around, building voxels + costmap.
+            explore_msg = Bool()
+            explore_msg.data = True
+            lc.publish(EXPLORE_TOPIC, explore_msg.lcm_encode())
+            print(f"[test] Frontier exploration started, warming up for {WARMUP_SEC}s…")
             time.sleep(WARMUP_SEC)
             with lock:
                 print(
