@@ -15,7 +15,7 @@
 
 """Twitch Plays Go2 with odom-based turn feedback.
 
-Chat votes on categories: ``forward`` / ``back`` / ``turn`` / ``jump`` / ``sit``
+Chat votes on categories: ``forward`` / ``back`` / ``turn`` / ``jump`` / ``sit`` / ``stand``
 (plurality over a 5-second window).
 
 - forward/back → drive at 0.3 m/s for 1 second
@@ -108,7 +108,7 @@ def _match_direction(word: str) -> str | None:
 
 
 def _categorize(content: str) -> str | None:
-    """Return 'forward' | 'back' | 'turn' | 'jump' | 'sit' | None."""
+    """Return 'forward' | 'back' | 'turn' | 'jump' | 'sit' | 'stand' | None."""
     words = set(re.findall(r"[a-zA-Z]+", content.lower()))
     if "turn" in words:
         return "turn"
@@ -120,6 +120,8 @@ def _categorize(content: str) -> str | None:
         return "jump"
     if words & {"sit", "sitdown"}:
         return "sit"
+    if words & {"stand", "standup", "getup"}:
+        return "stand"
     return None
 
 
@@ -242,6 +244,8 @@ class TwitchPlaysGo2(Module):
                 self._do_sport_command("FrontJump")
             elif winner == "sit":
                 self._do_sport_command("Sit")
+            elif winner == "stand":
+                self._do_sport_command("StandUp")
 
     def _do_sport_command(self, command_name: str) -> None:
         api_id = SPORT_CMD[command_name]

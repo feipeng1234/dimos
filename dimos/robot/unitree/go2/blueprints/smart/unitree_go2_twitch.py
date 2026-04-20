@@ -25,12 +25,15 @@ from __future__ import annotations
 
 import time
 
+from unitree_webrtc_connect.constants import RTC_TOPIC, SPORT_CMD
+
 from dimos.core.blueprints import autoconnect
 from dimos.core.core import rpc
 from dimos.core.module import Module, ModuleConfig
 from dimos.core.stream import In, Out
 from dimos.msgs.geometry_msgs.Twist import Twist
 from dimos.robot.unitree.go2.blueprints.basic.unitree_go2_basic import unitree_go2_basic
+from dimos.robot.unitree.go2.connection_spec import GO2ConnectionSpec
 from dimos.stream.twitch.votes import TwitchChoice, TwitchVotes
 from dimos.utils.logging_config import setup_logger
 
@@ -44,12 +47,23 @@ class _ChoiceToCmdVel(Module):
     chat_vote_choice: In[TwitchChoice]
     cmd_vel: Out[Twist]
 
+    _connection: GO2ConnectionSpec
+
     @rpc
     def start(self) -> None:
         super().start()
         self.chat_vote_choice.subscribe(self._on_choice)
 
     def _on_choice(self, choice: TwitchChoice) -> None:
+        logger.info("[TwitchPlays] Executing: %s", choice.winner)
+
+        if choice.winner == "sit":
+            self._do_sport_command("Sit")
+            return
+        elif choice.winner == "stand":
+            self._do_sport_command("StandUp")
+            return
+
         t = Twist()
         if choice.winner == "forward":
             t.linear.x = 0.3
@@ -60,8 +74,6 @@ class _ChoiceToCmdVel(Module):
         elif choice.winner == "right":
             t.angular.z = -0.5
 
-        logger.info("[TwitchPlays] Executing: %s", choice.winner)
-
         end = time.time() + self.command_duration
         while time.time() < end:
             self.cmd_vel.publish(t)
@@ -69,11 +81,18 @@ class _ChoiceToCmdVel(Module):
 
         self.cmd_vel.publish(Twist())
 
+    def _do_sport_command(self, command_name: str) -> None:
+        api_id = SPORT_CMD[command_name]
+        logger.info("[TwitchPlays] Sport command: %s (api_id=%d)", command_name, api_id)
+        try:
+            self._connection.publish_request(RTC_TOPIC["SPORT_MOD"], {"api_id": api_id})
+        except Exception:
+            logger.exception("[TwitchPlays] Failed to execute %s", command_name)
+
 
 unitree_go2_twitch = autoconnect(
     unitree_go2_basic,
     TwitchVotes.blueprint(
-        choices=["forward", "back", "left", "right", "stop"],
         vote_window_seconds=5.0,
         vote_mode="plurality",
     ),

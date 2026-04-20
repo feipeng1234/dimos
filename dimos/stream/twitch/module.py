@@ -29,6 +29,8 @@ import threading
 import time
 from typing import Any
 
+from twitchio.ext import commands as twitch_commands
+
 from dimos.core.core import rpc
 from dimos.core.module import Module, ModuleConfig
 from dimos.core.stream import Out
@@ -296,10 +298,6 @@ class _TwitchBot:
         on_message_cb: Any,
         on_ready_cb: Any,
     ) -> None:
-        from twitchio.ext import (  # type: ignore[import-not-found]
-            commands as twitch_commands,  # type: ignore[import-untyped]
-        )
-
         cb_message = on_message_cb
         cb_ready = on_ready_cb
         chan = channel
