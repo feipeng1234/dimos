@@ -1,0 +1,38 @@
+pr: 1645
+branch: jeff/feat/nav1
+
+responses:
+  - comment_id: 2970638601
+    author: "greptile-apps[bot]"
+    file: "pgo.py"
+    line: 478
+    concern: >
+      _SimplePGO accessed from two threads without locking.
+      _on_scan and _publish_loop both access the shared _SimplePGO instance without mutual exclusion.
+    solution: >
+      Valid thread safety concern. _on_scan (transport thread) and _publish_loop (dedicated thread)
+      both access _pgo without synchronization. The lock already exists but its scope needs to be
+      extended to cover all _pgo accesses. Jeff noted this is barebones/experimental code.
+      Deferring fix to when the branch conflicts are resolved.
+    commit: null
+
+  - comment_id: 2970638615
+    author: "greptile-apps[bot]"
+    file: "pgo.py"
+    concern: >
+      super().start() not called in PGO.start()
+    solution: >
+      Correct — PGO.start() should call super().start() first to set up base Module lifecycle.
+      Deferring fix to when the branch conflicts are resolved.
+    commit: null
+
+  - comment_id: 2970638627
+    author: "greptile-apps[bot]"
+    file: "websocket_server.py"
+    line: 102
+    concern: >
+      Race condition: stop() may miss the stop signal if called before _run_server sets _ws_loop
+    solution: >
+      Valid race condition. A threading.Event for readiness and thread join in stop() would fix this.
+      Note: this file is also modified in PR #1784 which addresses similar issues. Deferring.
+    commit: null
