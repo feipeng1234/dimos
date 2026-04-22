@@ -28,7 +28,7 @@ from dimos.utils.testing.moment import Moment, SensorMoment
 
 pytestmark = pytest.mark.slow
 
-data_dir = get_data("unitree_go2_office_walk2")
+_DATA_DIR_NAME = "unitree_go2_office_walk2"
 
 
 class Go2Moment(Moment):
@@ -37,6 +37,7 @@ class Go2Moment(Moment):
     odom: SensorMoment[PoseStamped]
 
     def __init__(self) -> None:
+        data_dir = get_data(_DATA_DIR_NAME)
         self.lidar = SensorMoment(f"{data_dir}/lidar", LCMTransport("/lidar", PointCloud2))
         self.video = SensorMoment(f"{data_dir}/video", LCMTransport("/color_image", Image))
         self.odom = SensorMoment(f"{data_dir}/odom", LCMTransport("/odom", PoseStamped))

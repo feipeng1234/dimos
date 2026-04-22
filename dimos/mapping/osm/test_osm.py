@@ -27,14 +27,12 @@ from dimos.utils.data import get_data
 
 pytestmark = pytest.mark.slow
 
-_fixture_dir = get_data("osm_map_test")
-
 
 def _tile_callback(request: Request, context: Any) -> bytes:
     parts = (request.url or "").split("/")
     zoom, x, y_png = parts[-3], parts[-2], parts[-1]
     y = y_png.removesuffix(".png")
-    tile_path = _fixture_dir / f"{zoom}_{x}_{y}.png"
+    tile_path = get_data("osm_map_test") / f"{zoom}_{x}_{y}.png"
     context.headers["Content-Type"] = "image/png"
     return tile_path.read_bytes()
 
