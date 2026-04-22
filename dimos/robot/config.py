@@ -14,7 +14,7 @@
 
 """Unified robot configuration.
 
-Single source of truth for a robot. The URDF/MJCF model file is the
+Single source of truth for a robot arm. The URDF/MJCF model file is the
 ground truth — joint names, DOF, limits, and link hierarchy are parsed
 automatically. Generates RobotModelConfig, HardwareComponent, and TaskConfig.
 """
@@ -22,16 +22,11 @@ automatically. Generates RobotModelConfig, HardwareComponent, and TaskConfig.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from pydantic import BaseModel, Field, PrivateAttr
 
 from dimos.robot.model_parser import ModelDescription, parse_model
-
-if TYPE_CHECKING:
-    from dimos.control.components import HardwareComponent
-    from dimos.control.coordinator import TaskConfig
-    from dimos.manipulation.planning.spec.config import RobotModelConfig
 
 
 class GripperConfig(BaseModel):
@@ -44,6 +39,14 @@ class GripperConfig(BaseModel):
     close_position: float = 0.0
 
 
+from dimos.control.components import HardwareComponent, HardwareType
+from dimos.control.coordinator import TaskConfig
+from dimos.manipulation.planning.spec.config import RobotModelConfig
+from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
+from dimos.msgs.geometry_msgs.Quaternion import Quaternion
+from dimos.msgs.geometry_msgs.Vector3 import Vector3
+
+
 class RobotConfig(BaseModel):
     """Unified robot configuration — URDF/MJCF is the ground truth.
 
@@ -53,18 +56,7 @@ class RobotConfig(BaseModel):
     # Required fields
     name: str
     model_path: Path
-    end_effector_link: str | None = None
-
-    # Physical dimensions (meters)
-    height_clearance: float | None = None  # max height
-    width_clearance: float | None = None  # max width
-
-    # These offsets are applied so that odometry  at 0,0,0 corresponds roughly with the floor
-    # Note: these cannot (easily) be calculated from the URDF because
-    #       the URDF doesn't always have an initial robot pose/stance so the
-    # This is a quality of life offset, not exact
-    # The key names should match keys in the urdf
-    internal_odom_offsets: dict[str, Any] = Field(default_factory=dict)
+    end_effector_link: str
 
     # Hardware connection
     adapter_type: str = "mock"
@@ -109,7 +101,7 @@ class RobotConfig(BaseModel):
     def _ensure_prefix(self) -> None:
         """Ensure joint_prefix is set (no model parsing needed)."""
         if self.joint_prefix is None:
-            self.joint_prefix = f"{self.name}_"
+            self.joint_prefix = f"{self.name}/"
 
     def _ensure_parsed(self) -> ModelDescription:
         """Parse model lazily on first access."""
@@ -187,16 +179,6 @@ class RobotConfig(BaseModel):
 
     def to_robot_model_config(self) -> RobotModelConfig:
         """Generate RobotModelConfig for ManipulationModule."""
-        from dimos.manipulation.planning.spec.config import RobotModelConfig as _RobotModelConfig
-        from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
-        from dimos.msgs.geometry_msgs.Quaternion import Quaternion
-        from dimos.msgs.geometry_msgs.Vector3 import Vector3
-
-        if self.end_effector_link is None:
-            raise ValueError(
-                f"RobotConfig '{self.name}' has no end_effector_link — "
-                "cannot generate RobotModelConfig for manipulation."
-            )
         bp = self.base_pose
         base_pose = PoseStamped(
             position=Vector3(x=bp[0], y=bp[1], z=bp[2]),
@@ -213,7 +195,7 @@ class RobotConfig(BaseModel):
         )
         base_link = self.base_link if self.base_link is not None else self.resolved_base_link
 
-        return _RobotModelConfig(
+        return RobotModelConfig(
             name=self.name,
             model_path=self.model_path,
             base_pose=base_pose,
@@ -236,8 +218,7 @@ class RobotConfig(BaseModel):
 
     def to_hardware_component(self) -> HardwareComponent:
         """Generate HardwareComponent for ControlCoordinator."""
-        from dimos.control.components import HardwareComponent as _HardwareComponent, HardwareType
-
+        self._ensure_prefix()
         gripper_joints: list[str] = []
         if self.gripper and self.gripper.joints:
             gripper_joints = [f"{self.joint_prefix}{j}" for j in self.gripper.joints]
@@ -246,7 +227,7 @@ class RobotConfig(BaseModel):
         if self.home_joints is not None:
             adapter_kwargs.setdefault("initial_positions", self.home_joints)
 
-        return _HardwareComponent(
+        return HardwareComponent(
             hardware_id=self.name,
             hardware_type=HardwareType.MANIPULATOR,
             joints=self.coordinator_joint_names,

@@ -45,6 +45,7 @@ from typing import Any
 
 from dimos.core.blueprints import autoconnect
 from dimos.hardware.sensors.lidar.fastlio2.module import FastLio2
+from dimos.navigation.cmd_vel_mux import CmdVelMux
 from dimos.navigation.smart_nav.blueprints._rerun_helpers import (
     goal_path_override,
     path_override,
@@ -56,7 +57,6 @@ from dimos.navigation.smart_nav.blueprints._rerun_helpers import (
     waypoint_override,
 )
 from dimos.navigation.smart_nav.modules.click_to_goal.click_to_goal import ClickToGoal
-from dimos.navigation.cmd_vel_mux import CmdVelMux
 from dimos.navigation.smart_nav.modules.far_planner.far_planner import FarPlanner
 from dimos.navigation.smart_nav.modules.local_planner.local_planner import LocalPlanner
 from dimos.navigation.smart_nav.modules.path_follower.path_follower import PathFollower

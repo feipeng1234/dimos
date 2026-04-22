@@ -16,8 +16,8 @@ class QwenVlModelConfig(VlModelConfig):
     api_key: str | None = None
 
 
-class QwenVlModel(VlModel[QwenVlModelConfig]):
-    default_config = QwenVlModelConfig
+class QwenVlModel(VlModel):
+    config: QwenVlModelConfig
 
     @cached_property
     def _client(self) -> OpenAI:
@@ -32,7 +32,7 @@ class QwenVlModel(VlModel[QwenVlModelConfig]):
             api_key=api_key,
         )
 
-    def query(self, image: Image | np.ndarray, query: str) -> str:  # type: ignore[override, type-arg]
+    def query(self, image: Image | np.ndarray, query: str) -> str:  # type: ignore[override]
         if isinstance(image, np.ndarray):
             import warnings
 
@@ -73,7 +73,7 @@ class QwenVlModel(VlModel[QwenVlModelConfig]):
         query: str,
         response_format: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> list[str]:  # type: ignore[override]
+    ) -> list[str]:
         """Query VLM with multiple images using a single API call."""
         if not images:
             return []

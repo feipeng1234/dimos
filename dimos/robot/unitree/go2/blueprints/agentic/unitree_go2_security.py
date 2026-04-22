@@ -15,7 +15,7 @@
 
 from typing import Any
 
-from dimos.core.blueprints import autoconnect
+from dimos.core.coordination.blueprints import autoconnect
 from dimos.protocol.pubsub.impl.lcmpubsub import LCM
 from dimos.robot.unitree.go2.blueprints.agentic.unitree_go2_agentic import unitree_go2_agentic
 from dimos.visualization.rerun.bridge import RerunBridgeModule
@@ -26,10 +26,6 @@ def _convert_camera_info(camera_info: Any) -> Any:
         image_topic="/world/color_image",
         optical_frame="camera_optical",
     )
-
-
-def _convert_global_map(grid: Any) -> Any:
-    return grid.to_rerun(voxel_size=0.1, mode="boxes")
 
 
 def _convert_navigation_costmap(grid: Any) -> Any:
@@ -80,7 +76,6 @@ rerun_config = {
     "pubsubs": [LCM()],
     "visual_override": {
         "world/camera_info": _convert_camera_info,
-        "world/global_map": _convert_global_map,
         "world/navigation_costmap": _convert_navigation_costmap,
     },
     "static": {
