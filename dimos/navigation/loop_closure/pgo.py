@@ -424,7 +424,6 @@ class PGO(Module[PGOConfig]):
         super().stop()
 
     def _on_raw_odom(self, msg: PoseStamped) -> None:
-
         q = [
             msg.orientation.x,
             msg.orientation.y,
