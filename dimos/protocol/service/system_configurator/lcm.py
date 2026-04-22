@@ -267,7 +267,7 @@ class BufferConfiguratorMacOS(SystemConfigurator):
     def fix(self) -> None:
         saved = _load_sysctl_conf()
         for key, target, current in self.needs:
-            while target >= current:
+            while target >= current and target > 0:
                 try:
                     _write_sysctl_int(key, target)
                 except subprocess.CalledProcessError:
