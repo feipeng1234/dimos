@@ -1,38 +1,76 @@
-pr: 1645
-branch: jeff/feat/nav1
+pr: 1663
+branch: jeff/fix/native_threading
 
 responses:
-  - comment_id: 2970638601
-    author: "greptile-apps[bot]"
-    file: "pgo.py"
-    line: 478
-    concern: >
-      _SimplePGO accessed from two threads without locking.
-      _on_scan and _publish_loop both access the shared _SimplePGO instance without mutual exclusion.
-    solution: >
-      Valid thread safety concern. _on_scan (transport thread) and _publish_loop (dedicated thread)
-      both access _pgo without synchronization. The lock already exists but its scope needs to be
-      extended to cover all _pgo accesses. Jeff noted this is barebones/experimental code.
-      Deferring fix to when the branch conflicts are resolved.
+  - comment_id: 2992188836
+    author: paul-nechifor
+    file: thread_utils.py
+    line: 161
+    comment: "I don't think you need join since you're already join()-ing in stop."
+    solution: "Jeff agreed this was AI redundancy and will remove it. Awaiting code fix — branch has conflicts with dev preventing safe changes."
     commit: null
 
-  - comment_id: 2970638615
-    author: "greptile-apps[bot]"
-    file: "pgo.py"
-    concern: >
-      super().start() not called in PGO.start()
-    solution: >
-      Correct — PGO.start() should call super().start() first to set up base Module lifecycle.
-      Deferring fix to when the branch conflicts are resolved.
+  - comment_id: 2992190260
+    author: paul-nechifor
+    file: thread_utils.py
+    comment: "Why do you need _stopped and _stop_lock? You have _stop_event."
+    solution: "Needs Jeff's decision. No reply and no code fix applied."
     commit: null
 
-  - comment_id: 2970638627
-    author: "greptile-apps[bot]"
-    file: "websocket_server.py"
-    line: 102
-    concern: >
-      Race condition: stop() may miss the stop signal if called before _run_server sets _ws_loop
-    solution: >
-      Valid race condition. A threading.Event for readiness and thread join in stop() would fix this.
-      Note: this file is also modified in PR #1784 which addresses similar issues. Deferring.
+  - comment_id: 2992238722
+    author: paul-nechifor
+    file: thread_utils.py
+    comment: "You don't need this. It's already off. If you want ModuleThread to be restartable, then you need to use another thread since threads aren't restartable."
+    solution: "Needs Jeff's decision. No reply and no code fix applied."
+    commit: null
+
+  - comment_id: 2992244544
+    author: paul-nechifor
+    file: thread_utils.py
+    comment: "Noooooo, don't autostart in the constructor."
+    solution: "Jeff replied suggesting 'ModuleThread().start()' pattern — discussion ongoing. Needs Jeff's decision."
+    commit: null
+
+  - comment_id: 2992248840
+    author: paul-nechifor
+    file: thread_utils.py
+    line: 118
+    comment: "It would be nice if ModuleThread used self.module.__class__.__name__ as the prefix"
+    solution: "Jeff replied with a suggestion but change not yet applied. Awaiting code fix — branch has conflicts with dev preventing safe changes."
+    commit: null
+
+  - comment_id: 2992249798
+    author: paul-nechifor
+    file: thread_utils.py
+    comment: "Why add this if there's a docstring below?"
+    solution: "Needs Jeff's decision. No reply and no code fix applied."
+    commit: null
+
+  - comment_id: 2992340306
+    author: paul-nechifor
+    file: module.py
+    comment: "_close_module is a remnant... could be deleted if you want and moved into def stop."
+    solution: "Jeff agreed ('happily! I thought it was a rpc vs non-rpc thing') but change not yet applied. Awaiting code fix — branch has conflicts with dev preventing safe changes."
+    commit: null
+
+  - comment_id: 3002702496
+    author: paul-nechifor
+    file: test_mcp_server.py
+    line: 120
+    comment: "This already exists as _find_free_port in the codebase."
+    solution: "Needs Jeff's decision. No reply and no code fix applied."
+    commit: null
+
+  - comment_id: 3002714331
+    author: paul-nechifor
+    file: test_mcp_server.py
+    comment: "Stash already has 3 instances of this exact sequence. Please don't add a 4th that is inlined."
+    solution: "Needs Jeff's decision. No reply and no code fix applied."
+    commit: null
+
+  - comment_id: 3002720334
+    author: paul-nechifor
+    file: test_mcp_server.py
+    comment: "The server should be stopped even if the test fails. The best way to do it is to use a fixture for the mcp server."
+    solution: "Needs Jeff's decision. No reply and no code fix applied."
     commit: null
