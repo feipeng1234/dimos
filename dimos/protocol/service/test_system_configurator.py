@@ -445,19 +445,6 @@ class TestBufferConfiguratorMacOS:
             saved = json.loads(conf.read_text())
             assert saved["kern.ipc.maxsockbuf"] == _32MiB
 
-    def test_accept_current_saves_current_values(self, tmp_path) -> None:
-        conf = tmp_path / "sysctl.json"
-        configurator = BufferConfiguratorMacOS()
-        configurator.needs = [
-            ("kern.ipc.maxsockbuf", IDEAL_RMEM_SIZE, _32MiB),
-            ("net.inet.udp.recvspace", IDEAL_RMEM_SIZE, _32MiB),
-        ]
-        with patch("dimos.protocol.service.system_configurator.lcm._SYSCTL_CONF", conf):
-            configurator.accept_current()
-            saved = json.loads(conf.read_text())
-            assert saved["kern.ipc.maxsockbuf"] == _32MiB
-            assert saved["net.inet.udp.recvspace"] == _32MiB
-
 
 # MaxFileConfiguratorMacOS tests
 

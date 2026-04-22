@@ -282,13 +282,6 @@ class BufferConfiguratorMacOS(SystemConfigurator):
         # Write achieved/current amounts to config to avoid requesting TARGET every startup.
         _save_sysctl_conf(saved)
 
-    def accept_current(self) -> None:
-        """Save current OS values so check() won't re-prompt."""
-        saved = _load_sysctl_conf()
-        for key, _target, current in self.needs:
-            saved[key] = current
-        _save_sysctl_conf(saved)
-
 
 # specific checks: ulimit
 
