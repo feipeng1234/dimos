@@ -13,6 +13,8 @@
 # limitations under the License.
 
 
+import pathlib
+
 import pytest
 
 from dimos.utils.cli.graph import main
@@ -23,19 +25,15 @@ def test_file_not_found() -> None:
         main("/nonexistent/path.py")
 
 
-def test_no_blueprints(tmp_path: object) -> None:
-    import pathlib
-
-    p = pathlib.Path(str(tmp_path)) / "empty.py"
+def test_no_blueprints(tmp_path: pathlib.Path) -> None:
+    p = tmp_path / "empty.py"
     p.write_text("x = 42\n")
     with pytest.raises(RuntimeError, match="No Blueprint instances"):
         main(str(p))
 
 
-def test_module_load_failure(tmp_path: object) -> None:
-    import pathlib
-
-    p = pathlib.Path(str(tmp_path)) / "bad.py"
+def test_module_load_failure(tmp_path: pathlib.Path) -> None:
+    p = tmp_path / "bad.py"
     p.write_text("raise ImportError('boom')\n")
     with pytest.raises(ImportError, match="boom"):
         main(str(p))

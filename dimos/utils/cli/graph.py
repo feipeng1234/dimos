@@ -103,9 +103,7 @@ def _build_html(python_file: str, *, show_disconnected: bool = True) -> str:
         per_bp_disconnected.append(disconnected)
 
         active_cls = " active" if idx == 0 else ""
-        tab_buttons.append(
-            f'<button class="tab-btn{active_cls}" data-idx="{idx}">{name}</button>'
-        )
+        tab_buttons.append(f'<button class="tab-btn{active_cls}" data-idx="{idx}">{name}</button>')
         tab_panels.append(
             f'<div class="tab-panel{active_cls}" data-idx="{idx}">'
             f'<div class="viewport"><div class="canvas">'
@@ -381,15 +379,20 @@ def _build_html_graphviz(python_file: str, *, show_disconnected: bool = True) ->
             "                  apt install graphviz    (Debian/Ubuntu)"
         )
 
+    import html
+
     sections = []
     for name, bp in blueprints:
         fd, svg_path = tempfile.mkstemp(suffix=".svg", prefix=f"dimos_{name}_")
         os.close(fd)
-        to_svg(bp, svg_path, show_disconnected=show_disconnected)
-        with open(svg_path) as f:
-            svg_content = f.read()
-        os.unlink(svg_path)
-        sections.append(f'<h2>{name}</h2>\n<div class="diagram">{svg_content}</div>')
+        try:
+            to_svg(bp, svg_path, show_disconnected=show_disconnected)
+            with open(svg_path) as f:
+                svg_content = f.read()
+        finally:
+            os.unlink(svg_path)
+        escaped_name = html.escape(name)
+        sections.append(f'<h2>{escaped_name}</h2>\n<div class="diagram">{svg_content}</div>')
 
     return f"""\
 <!DOCTYPE html>
@@ -451,7 +454,7 @@ def main(
         def log_message(self, format: str, *args: object) -> None:
             pass
 
-    server = HTTPServer(("0.0.0.0", port), Handler)
+    server = HTTPServer(("127.0.0.1", port), Handler)
     actual_port = server.server_address[1]
     url = f"http://localhost:{actual_port}"
     print(f"Serving at {url}  (will exit after first request)")
