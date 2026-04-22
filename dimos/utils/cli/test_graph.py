@@ -14,6 +14,8 @@
 
 
 import pathlib
+import sys
+import types
 
 import pytest
 
@@ -25,7 +27,37 @@ def test_file_not_found() -> None:
         main("/nonexistent/path.py")
 
 
+def _ensure_blueprints_module() -> type:
+    """Ensure ``dimos.core.blueprints`` is importable, creating a stub if needed.
+
+    Returns the ``Blueprint`` class (real or stub).
+    """
+    try:
+        from dimos.core.blueprints import Blueprint
+
+        return Blueprint
+    except (ImportError, ModuleNotFoundError):
+        pass
+
+    # Create a minimal stub so that _load_blueprints can import the module.
+    bp_mod = types.ModuleType("dimos.core.blueprints")
+
+    class _StubBlueprint:
+        pass
+
+    bp_mod.Blueprint = _StubBlueprint  # type: ignore[attr-defined]
+    sys.modules.setdefault("dimos.core.blueprints", bp_mod)
+
+    # Also ensure the parent packages exist in sys.modules.
+    for parent in ("dimos.core",):
+        if parent not in sys.modules:
+            sys.modules[parent] = types.ModuleType(parent)
+
+    return _StubBlueprint
+
+
 def test_no_blueprints(tmp_path: pathlib.Path) -> None:
+    _ensure_blueprints_module()
     p = tmp_path / "empty.py"
     p.write_text("x = 42\n")
     with pytest.raises(RuntimeError, match="No Blueprint instances"):
