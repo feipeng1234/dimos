@@ -24,3 +24,66 @@
   problem: "Server should be stopped even if the test fails — use a fixture"
   solution: "Wrapped the test body in try/finally so server.stop() is called on any failure. A proper pytest fixture would be cleaner but requires the shared conftest work from PR #1665."
   commit: null
+
+- pr: 1663
+  comment_id: 2992188836
+  author: paul-nechifor
+  file: dimos/utils/thread_utils.py
+  line: 184
+  problem: "I don't think you need join since you're already join()-ing in stop."
+  solution: "Addressed in refactoring commit 218b72ebc — merged _stop into stop() to eliminate redundant join paths."
+  commit: 218b72ebc
+
+- pr: 1663
+  comment_id: 2992190260
+  author: paul-nechifor
+  file: dimos/utils/thread_utils.py
+  line: 154
+  problem: "Why do you need _stopped and _stop_lock? You have _stop_event."
+  solution: "Addressed in refactoring commit 218b72ebc — simplified stop state management."
+  commit: 218b72ebc
+
+- pr: 1663
+  comment_id: 2992238722
+  author: paul-nechifor
+  file: dimos/utils/thread_utils.py
+  line: 166
+  problem: "You don't need this. It's already off."
+  solution: "Addressed in refactoring — ModuleThread is not restartable."
+  commit: 218b72ebc
+
+- pr: 1663
+  comment_id: 2992244544
+  author: paul-nechifor
+  file: dimos/utils/thread_utils.py
+  line: 157
+  problem: "Don't autostart in the constructor."
+  solution: "Ongoing discussion — Jeff prefers reducing boilerplate. The constructor does not autostart; callers use thread_start() helper or .start() explicitly."
+  commit: 218b72ebc
+
+- pr: 1663
+  comment_id: 2992248840
+  author: paul-nechifor
+  file: dimos/utils/thread_utils.py
+  line: 133
+  problem: "ModuleThread should use self.module.__class__.__name__ as prefix for useful debugging names."
+  solution: "Jeff agreed and applied the suggestion."
+  commit: f62a0b057
+
+- pr: 1663
+  comment_id: 2992249798
+  author: paul-nechifor
+  file: dimos/utils/thread_utils.py
+  line: 114
+  problem: "Why add this if there's a docstring below?"
+  solution: "Jeff agreed and removed the redundant comment."
+  commit: f62a0b057
+
+- pr: 1663
+  comment_id: 2992340306
+  author: paul-nechifor
+  file: dimos/core/module.py
+  line: 131
+  problem: "_close_module is a remnant from the old Module class hierarchy"
+  solution: "Jeff acknowledged and cleaned this up."
+  commit: a1586f326
