@@ -16,8 +16,8 @@ class QwenVlModelConfig(VlModelConfig):
     api_key: str | None = None
 
 
-class QwenVlModel(VlModel[QwenVlModelConfig]):
-    default_config = QwenVlModelConfig
+class QwenVlModel(VlModel):
+    config: QwenVlModelConfig
 
     @cached_property
     def _client(self) -> OpenAI:
@@ -32,7 +32,7 @@ class QwenVlModel(VlModel[QwenVlModelConfig]):
             api_key=api_key,
         )
 
-    def query(self, image: Image | np.ndarray, query: str) -> str:  # type: ignore[override, type-arg]
+    def query(self, image: Image | np.ndarray, query: str) -> str:  # type: ignore[override]
         if isinstance(image, np.ndarray):
             import warnings
 
@@ -68,17 +68,23 @@ class QwenVlModel(VlModel[QwenVlModelConfig]):
         return response.choices[0].message.content  # type: ignore[return-value]
 
     def query_batch(
-        self, images: list[Image], query: str, response_format: dict[str, Any] | None = None, **kwargs: Any
-    ) -> list[str]:  # type: ignore[override]
+        self,
+        images: list[Image],
+        query: str,
+        response_format: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> list[str]:
         """Query VLM with multiple images using a single API call."""
         if not images:
             return []
 
         content: list[dict[str, Any]] = [
-                {
-                    "type": "image_url",
-                "image_url": {"url": f"data:image/png;base64,{self._prepare_image(img)[0].to_base64()}"},
-                }
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/png;base64,{self._prepare_image(img)[0].to_base64()}"
+                },
+            }
             for img in images
         ]
         content.append({"type": "text", "text": query})

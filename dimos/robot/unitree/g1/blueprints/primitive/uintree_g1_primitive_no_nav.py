@@ -19,10 +19,10 @@ from typing import Any
 
 from dimos_lcm.sensor_msgs import CameraInfo
 
-from dimos.core.blueprints import autoconnect
+from dimos.core.coordination.blueprints import autoconnect
 from dimos.core.global_config import global_config
 from dimos.core.transport import LCMTransport
-from dimos.hardware.sensors.camera.module import CameraModule  # type: ignore[attr-defined]
+from dimos.hardware.sensors.camera.module import CameraModule
 from dimos.hardware.sensors.camera.webcam import Webcam
 from dimos.hardware.sensors.camera.zed import compat as zed
 from dimos.mapping.costmapper import CostMapper
@@ -49,10 +49,6 @@ def _convert_camera_info(camera_info: Any) -> Any:
         image_topic="/world/color_image",
         optical_frame="camera_optical",
     )
-
-
-def _convert_global_map(grid: Any) -> Any:
-    return grid.to_rerun(voxel_size=0.1, mode="boxes")
 
 
 def _convert_navigation_costmap(grid: Any) -> Any:
@@ -101,7 +97,6 @@ rerun_config = {
     "pubsubs": [LCM()],
     "visual_override": {
         "world/camera_info": _convert_camera_info,
-        "world/global_map": _convert_global_map,
         "world/navigation_costmap": _convert_navigation_costmap,
     },
     "static": {
@@ -152,7 +147,7 @@ uintree_g1_primitive_no_nav = (
     autoconnect(
         _with_vis,
         _camera,
-        VoxelGridMapper.blueprint(voxel_size=0.1),
+        VoxelGridMapper.blueprint(),
         CostMapper.blueprint(),
         WavefrontFrontierExplorer.blueprint(),
         # Visualization

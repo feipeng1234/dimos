@@ -1,0 +1,17 @@
+- pr: 1724
+  comment_id: null
+  author: merge-conflict
+  file: dimos/core/blueprints.py
+  line: null
+  problem: "modify/delete conflict — dev moved blueprints.py to dimos/core/coordination/blueprints.py (#1744). PR added DeploySpec, StreamWiring, ModuleRefWiring, RpcWiringPlan dataclasses."
+  solution: "Accepted deletion. PR's dataclass additions (DeploySpec, StreamWiring, ModuleRefWiring, RpcWiringPlan) need to be ported to dimos/core/coordination/blueprints.py. The new coordination/blueprints.py may already contain equivalent types."
+  commit: ff22815fb
+
+- pr: 1724
+  comment_id: null
+  author: merge-conflict
+  file: dimos/core/module_coordinator.py
+  line: null
+  problem: "modify/delete conflict — dev moved module_coordinator.py to dimos/core/coordination/module_coordinator.py (#1744). PR added DeploySpec integration, _wire_streams, _wire_rpc_methods, _wire_module_refs, _wire_disabled_ref_proxies methods."
+  solution: "Accepted deletion. PR's ModuleCoordinator enhancements (auto-wiring from DeploySpec, docstring additions) need to be ported to dimos/core/coordination/module_coordinator.py."
+  commit: ff22815fb
