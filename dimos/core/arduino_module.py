@@ -34,7 +34,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import errno
-import fcntl
 import functools
 import glob
 import inspect
@@ -301,6 +300,8 @@ class ArduinoModule(NativeModule):
 
     def _build_bridge(self) -> None:
         """Build the C++ bridge via nix. File-locked to handle concurrent modules."""
+        import fcntl  # POSIX-only; deferred here so the module can be imported on Windows
+
         bridge_bin = _ARDUINO_HW_DIR / "result" / "bin" / "arduino_bridge"
 
         # Ensure the lock file exists (nix flake dir is always present).
@@ -798,7 +799,9 @@ class ArduinoModule(NativeModule):
             text=True,
             timeout=30,
         )
-        if list_result.returncode == 0 and core_id in list_result.stdout:
+        if list_result.returncode == 0 and any(
+            line.split()[0] == core_id for line in list_result.stdout.splitlines() if line.strip()
+        ):
             return
 
         logger.info("Installing arduino core", core=core_id)
