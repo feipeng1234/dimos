@@ -266,7 +266,14 @@ class NativeModule(Module):
                     pid=proc.pid,
                 )
                 proc.kill()
-                proc.wait(timeout=self.config.shutdown_timeout)
+                try:
+                    proc.wait(timeout=self.config.shutdown_timeout)
+                except subprocess.TimeoutExpired:
+                    logger.error(
+                        "Native process not reapable after SIGKILL",
+                        module=self._mod_label,
+                        pid=proc.pid,
+                    )
 
         if watchdog is not None and watchdog is not threading.current_thread():
             watchdog.join(timeout=self.config.shutdown_timeout)
