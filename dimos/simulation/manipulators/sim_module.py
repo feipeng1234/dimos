@@ -38,9 +38,10 @@ class SimulationModuleConfig(ModuleConfig):
     headless: bool = False
 
 
-class SimulationModule(Module[SimulationModuleConfig]):
+class SimulationModule(Module):
     """Module wrapper for manipulator simulation across engines."""
 
+    config: SimulationModuleConfig
     default_config = SimulationModuleConfig
 
     joint_state: Out[JointState]
