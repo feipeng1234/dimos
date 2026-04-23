@@ -41,8 +41,10 @@ Example usage::
 
 from __future__ import annotations
 
+import enum
 import functools
 import inspect
+import json
 import os
 from pathlib import Path
 import signal
@@ -56,24 +58,19 @@ from pydantic import Field
 
 from dimos.constants import DEFAULT_THREAD_JOIN_TIMEOUT
 from dimos.core.core import rpc
+from dimos.core.global_config import global_config
 from dimos.core.module import Module, ModuleConfig
 from dimos.utils.logging_config import setup_logger
 
-# ctypes is only needed for the Linux child-preexec helper below.  Hoisting
-# the import out of the inner function avoids re-importing on every start().
 if sys.platform.startswith("linux"):
     import ctypes
+    from ctypes.util import find_library
 
-    _LIBC = ctypes.CDLL("libc.so.6", use_errno=True)
+    _LIBC = ctypes.CDLL(find_library("c"), use_errno=True)
     _PR_SET_PDEATHSIG = 1
 
     def _child_preexec_linux() -> None:
-        """Kill child when parent dies. Linux only.
-
-        Runs in the child between fork() and exec().  Async-signal-safe
-        operations only — the call into libc.prctl is fine, but anything
-        that touches the threading runtime (allocating, importing) is not.
-        """
+        """Set child to receive SIGTERM when parent dies (Linux-only, runs between fork/exec)."""
         if _LIBC.prctl(_PR_SET_PDEATHSIG, signal.SIGTERM) != 0:
             err = ctypes.get_errno()
             raise OSError(err, f"prctl(PR_SET_PDEATHSIG) failed: {os.strerror(err)}")
@@ -88,6 +85,11 @@ else:
 logger = setup_logger()
 
 
+class LogFormat(enum.Enum):
+    TEXT = "text"
+    JSON = "json"
+
+
 class NativeModuleConfig(ModuleConfig):
     """Configuration for a native (C/C++) subprocess module."""
 
@@ -97,6 +99,8 @@ class NativeModuleConfig(ModuleConfig):
     extra_args: list[str] = Field(default_factory=list)
     extra_env: dict[str, str] = Field(default_factory=dict)
     shutdown_timeout: float = DEFAULT_THREAD_JOIN_TIMEOUT
+    log_format: LogFormat = LogFormat.TEXT
+    auto_build: bool = False
 
     # Override in subclasses to exclude fields from CLI arg generation
     cli_exclude: frozenset[str] = frozenset()
@@ -345,29 +349,26 @@ class NativeModule(Module):
             line = raw.decode("utf-8", errors="replace").rstrip()
             if not line:
                 continue
-            # Use the captured pid rather than self._process.pid — stop() can
-            # null self._process out from under us between the check and the
-            # attribute read.
+            if self.config.log_format == LogFormat.JSON:
+                try:
+                    data = json.loads(line)
+                    event = data.pop("event", line)
+                    log_fn(event, module=self._mod_label, pid=pid, **data)
+                    continue
+                except (json.JSONDecodeError, TypeError):
+                    pass
             log_fn(line, module=self._mod_label, pid=pid)
         stream.close()
 
     def _maybe_build(self) -> None:
-        """Run ``build_command`` when not in PROD mode, or if the executable is missing.
+        """Run ``build_command`` if the executable is missing or auto_build is enabled.
 
-        When ``PROD`` env var is set, skip rebuilding entirely — the executable
-        must already exist.  Otherwise, always invoke ``build_command`` and let
-        nix handle caching/cache-busting.
+        When the executable already exists and ``auto_build`` is False, skip
+        rebuilding (avoids expensive nix invocations when you have many native
+        modules).  When the executable is missing, always build regardless of
+        ``auto_build`` — this covers first-run in prod (like pip building wheels).
         """
         exe = Path(self.config.executable)
-        is_prod = os.environ.get("PROD")
-
-        if is_prod:
-            if not exe.exists():
-                raise FileNotFoundError(
-                    f"[{self._mod_label}] PROD is set but executable not found: {exe}. "
-                    "Build it before deploying."
-                )
-            return
 
         if self.config.build_command is None:
             if not exe.exists():
@@ -377,12 +378,21 @@ class NativeModule(Module):
                 )
             return
 
+        # If the exe already exists: in prod, never rebuild; in dev, only
+        # rebuild if the developer opted in via auto_build for this module
+        # (avoids expensive nix invocations when you have many native modules).
+        if exe.exists():
+            if global_config.prod or not self.config.auto_build:
+                return
+
         logger.info(
             "Building native module",
             executable=str(exe),
             build_command=self.config.build_command,
         )
         build_start = time.perf_counter()
+        # shell=True is required for nix build commands that use shell features.
+        # build_command comes from the config dataclass default — trusted source only.
         proc = subprocess.Popen(
             self.config.build_command,
             shell=True,
@@ -438,6 +448,7 @@ class NativeModule(Module):
 
 
 __all__ = [
+    "LogFormat",
     "NativeModule",
     "NativeModuleConfig",
 ]
