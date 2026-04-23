@@ -67,15 +67,14 @@ if sys.platform.startswith("linux"):
     from ctypes.util import find_library
 
     _LIBC = ctypes.CDLL(find_library("c"), use_errno=True)
-    _PR_SET_PDEATHSIG = 1
 
-    def _child_preexec_linux() -> None:
-        """Set child to receive SIGTERM when parent dies (Linux-only, runs between fork/exec)."""
+    def _set_process_to_die_when_parent_dies() -> None:
+        _PR_SET_PDEATHSIG = 1
         if _LIBC.prctl(_PR_SET_PDEATHSIG, signal.SIGTERM) != 0:
             err = ctypes.get_errno()
-            raise OSError(err, f"prctl(PR_SET_PDEATHSIG) failed: {os.strerror(err)}")
+            raise OSError(err, f"_set_process_to_die_when_parent_dies failed: {os.strerror(err)}")
 else:
-    _child_preexec_linux = None  # type: ignore[assignment]
+    _set_process_to_die_when_parent_dies = None  # type: ignore[assignment]
 
 if sys.version_info < (3, 13):
     from typing_extensions import TypeVar
@@ -212,7 +211,7 @@ class NativeModule(Module):
         # from terminal signals (SIGINT from the tty).  preexec_fn is unsafe
         # in the presence of threads (subprocess docs), so we only use it on
         # Linux where prctl(PR_SET_PDEATHSIG) has no alternative — see
-        # _child_preexec_linux defined at module scope.
+        # _set_process_to_die_when_parent_dies defined at module scope.
         self._process = subprocess.Popen(
             cmd,
             env=env,
@@ -220,7 +219,7 @@ class NativeModule(Module):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             start_new_session=True,
-            preexec_fn=_child_preexec_linux,
+            preexec_fn=_set_process_to_die_when_parent_dies,
         )
         logger.info(
             "Native process started",
