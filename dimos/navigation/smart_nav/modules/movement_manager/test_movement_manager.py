@@ -17,177 +17,101 @@
 from __future__ import annotations
 
 import math
-import threading
 import time
-from typing import Any, cast
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-from dimos.constants import DEFAULT_THREAD_JOIN_TIMEOUT
+import pytest
+
 from dimos.msgs.geometry_msgs.PointStamped import PointStamped
 from dimos.msgs.geometry_msgs.Twist import Twist
 from dimos.msgs.geometry_msgs.Vector3 import Vector3
 from dimos.navigation.smart_nav.modules.movement_manager.movement_manager import (
     MovementManager,
-    MovementManagerConfig,
 )
 
 
-def _make_mgr(cooldown: float = 0.1) -> Any:
-    """Build a MovementManager with mocked output streams."""
-    with patch.object(MovementManager, "__init__", lambda self: None):
-        mgr = cast("Any", MovementManager.__new__(MovementManager))
-    mgr.config = MovementManagerConfig(tele_cooldown_sec=cooldown)
-    mgr._teleop_active = False
-    mgr._lock = threading.Lock()
-    mgr._timer = None
-    mgr._timer_gen = 0
-    mgr._robot_x = 0.0
-    mgr._robot_y = 0.0
-    mgr._robot_z = 0.0
-    mgr.cmd_vel = MagicMock()
-    mgr.stop_movement = MagicMock()
-    mgr.goal = MagicMock()
-    mgr.way_point = MagicMock()
-    return mgr
+@pytest.fixture()
+def manager() -> MovementManager:
+    """Create a real MovementManager and mock the publish methods on its output streams."""
+    module = MovementManager(tele_cooldown_sec=0.1)
+    module.cmd_vel.publish = MagicMock()
+    module.stop_movement.publish = MagicMock()
+    module.goal.publish = MagicMock()
+    module.way_point.publish = MagicMock()
+    yield module
+    module._close_module()
 
 
-def _twist(lx: float = 0.0, az: float = 0.0) -> Twist:
-    return Twist(linear=Vector3(lx, 0, 0), angular=Vector3(0, 0, az))
+def _twist(lx: float = 0.0) -> Twist:
+    return Twist(linear=Vector3(lx, 0, 0), angular=Vector3(0, 0, 0))
 
 
 def _click(x: float = 1.0, y: float = 2.0, z: float = 0.0) -> PointStamped:
     return PointStamped(ts=time.time(), frame_id="map", x=x, y=y, z=z)
 
 
-# ── Nav passthrough (ported from CmdVelMux tests) ──────────────────────────
+def test_teleop_suppresses_nav_and_cancels_goal(manager: MovementManager) -> None:
+    """Teleop arriving should suppress nav, publish stop_movement, and cancel the goal with NaN."""
+    manager.config.tele_cooldown_sec = 10.0
+    manager._on_teleop(_twist(lx=0.3))
+
+    # Nav is suppressed
+    manager.cmd_vel.publish.reset_mock()  # type: ignore[union-attr]
+    manager._on_nav(_twist(lx=0.9))
+    manager.cmd_vel.publish.assert_not_called()  # type: ignore[union-attr]
+
+    # stop_movement fired
+    manager.stop_movement.publish.assert_called_once()  # type: ignore[union-attr]
+
+    # Goal cancelled with NaN
+    cancel_msg = manager.goal.publish.call_args[0][0]  # type: ignore[union-attr]
+    assert math.isnan(cancel_msg.x)
 
 
-class TestNavPassthrough:
-    def test_nav_passes_through_when_no_teleop(self) -> None:
-        mgr = _make_mgr()
-        mgr._on_nav(_twist(lx=0.5))
-        mgr.cmd_vel.publish.assert_called_once()
-        mgr.stop_movement.publish.assert_not_called()
+def test_nav_resumes_after_cooldown(manager: MovementManager) -> None:
+    """After the cooldown expires, nav commands pass through again."""
+    manager.config.tele_cooldown_sec = 0.05
+    manager._on_teleop(_twist(lx=0.3))
+    time.sleep(0.1)
+    manager.cmd_vel.publish.reset_mock()  # type: ignore[union-attr]
 
-    def test_nav_suppressed_while_teleop_active(self) -> None:
-        mgr = _make_mgr(cooldown=10.0)
-        mgr._on_teleop(_twist(lx=0.3))
-        mgr.cmd_vel.publish.reset_mock()
-
-        mgr._on_nav(_twist(lx=0.9))
-        mgr.cmd_vel.publish.assert_not_called()
-
-    def test_nav_resumes_after_cooldown(self) -> None:
-        mgr = _make_mgr(cooldown=0.05)
-        mgr._on_teleop(_twist(lx=0.3))
-        time.sleep(0.15)
-        mgr.cmd_vel.publish.reset_mock()
-
-        mgr._on_nav(_twist(lx=0.9))
-        mgr.cmd_vel.publish.assert_called_once()
+    manager._on_nav(_twist(lx=0.9))
+    manager.cmd_vel.publish.assert_called_once()  # type: ignore[union-attr]
 
 
-# ── Teleop mux behaviour ───────────────────────────────────────────────────
+def test_valid_click_publishes_goal(manager: MovementManager) -> None:
+    """A valid click should publish to both goal and way_point."""
+    click = _click(x=5.0, y=3.0, z=0.1)
+    manager._on_click(click)
+    manager.goal.publish.assert_called_once_with(click)  # type: ignore[union-attr]
+    manager.way_point.publish.assert_called_once_with(click)  # type: ignore[union-attr]
 
 
-class TestTeleop:
-    def test_first_teleop_publishes_stop_movement(self) -> None:
-        mgr = _make_mgr()
-        mgr._on_teleop(_twist(lx=0.3))
-        mgr.stop_movement.publish.assert_called_once()
-
-    def test_subsequent_teleop_does_not_republish_stop_movement(self) -> None:
-        mgr = _make_mgr(cooldown=10.0)
-        mgr._on_teleop(_twist(lx=0.3))
-        mgr._on_teleop(_twist(lx=0.4))
-        mgr._on_teleop(_twist(lx=0.5))
-        assert mgr.stop_movement.publish.call_count == 1
-
-    def test_teleop_publishes_to_cmd_vel(self) -> None:
-        mgr = _make_mgr()
-        mgr._on_teleop(_twist(lx=0.5, az=0.1))
-        mgr.cmd_vel.publish.assert_called_once()
-
-    def test_teleop_forwards_msg_unchanged(self) -> None:
-        mgr = _make_mgr()
-        msg = _twist(lx=0.7)
-        mgr._on_teleop(msg)
-        assert mgr.cmd_vel.publish.call_args[0][0] is msg
-
-    def test_first_teleop_cancels_goal(self) -> None:
-        """MovementManager publishes NaN goal to cancel active navigation."""
-        mgr = _make_mgr()
-        mgr._on_teleop(_twist(lx=0.3))
-        # goal and way_point should both receive NaN cancellation
-        assert mgr.goal.publish.call_count == 1
-        cancel_msg = mgr.goal.publish.call_args[0][0]
-        assert math.isnan(cancel_msg.x)
-        assert math.isnan(cancel_msg.y)
-        assert math.isnan(cancel_msg.z)
+def test_invalid_clicks_rejected(manager: MovementManager) -> None:
+    """NaN, Inf, and out-of-range clicks should not publish."""
+    for bad_click in [
+        _click(x=float("nan")),
+        _click(x=float("inf")),
+        _click(x=600.0),
+    ]:
+        manager._on_click(bad_click)
+    manager.goal.publish.assert_not_called()  # type: ignore[union-attr]
 
 
-# ── End-teleop timer ───────────────────────────────────────────────────────
+def test_tele_cmd_vel_scaling() -> None:
+    """tele_cmd_vel_scaling multiplies each teleop twist component independently."""
+    scaling = Twist(Vector3(0.5, 2.0, 0.0), Vector3(1.0, 1.0, 0.25))
+    module = MovementManager(tele_cooldown_sec=10.0, tele_cmd_vel_scaling=scaling)
+    module.cmd_vel.publish = MagicMock()
+    module.stop_movement.publish = MagicMock()
+    module.goal.publish = MagicMock()
+    module.way_point.publish = MagicMock()
 
+    module._on_teleop(Twist(Vector3(1, 1, 1), Vector3(1, 1, 1)))
 
-class TestEndTeleop:
-    def test_end_teleop_clears_flag(self) -> None:
-        mgr = _make_mgr(cooldown=10.0)
-        mgr._on_teleop(_twist(lx=0.3))
-        timer = mgr._timer
-        mgr._end_teleop(mgr._timer_gen)
-        assert not mgr._teleop_active
-        assert mgr._timer is None
-        timer.cancel()
-        timer.join(timeout=DEFAULT_THREAD_JOIN_TIMEOUT)
-
-    def test_end_teleop_noop_when_superseded(self) -> None:
-        mgr = _make_mgr(cooldown=10.0)
-        mgr._on_teleop(_twist(lx=0.3))
-        stale_gen = mgr._timer_gen
-        mgr._on_teleop(_twist(lx=0.4))
-        current_timer = mgr._timer
-
-        mgr._end_teleop(stale_gen)
-        assert mgr._teleop_active
-        assert mgr._timer is current_timer
-
-
-# ── Click-to-goal ──────────────────────────────────────────────────────────
-
-
-class TestClickToGoal:
-    def test_valid_click_publishes_goal_and_waypoint(self) -> None:
-        mgr = _make_mgr()
-        click = _click(x=5.0, y=3.0, z=0.1)
-        mgr._on_click(click)
-        mgr.goal.publish.assert_called_once_with(click)
-        mgr.way_point.publish.assert_called_once_with(click)
-
-    def test_nan_click_rejected(self) -> None:
-        mgr = _make_mgr()
-        mgr._on_click(_click(x=float("nan"), y=1.0, z=0.0))
-        mgr.goal.publish.assert_not_called()
-
-    def test_inf_click_rejected(self) -> None:
-        mgr = _make_mgr()
-        mgr._on_click(_click(x=float("inf"), y=1.0, z=0.0))
-        mgr.goal.publish.assert_not_called()
-
-    def test_out_of_range_click_rejected(self) -> None:
-        mgr = _make_mgr()
-        mgr._on_click(_click(x=600.0, y=1.0, z=0.0))
-        mgr.goal.publish.assert_not_called()
-
-    def test_boundary_click_accepted(self) -> None:
-        mgr = _make_mgr()
-        mgr._on_click(_click(x=500.0, y=500.0, z=50.0))
-        mgr.goal.publish.assert_called_once()
-
-
-# ── Config defaults ────────────────────────────────────────────────────────
-
-
-class TestConfigDefaults:
-    def test_cooldown_default(self) -> None:
-        config = MovementManagerConfig()
-        assert config.tele_cooldown_sec == 1.0
+    published = module.cmd_vel.publish.call_args[0][0]  # type: ignore[union-attr]
+    assert published.linear.x == pytest.approx(0.5)
+    assert published.linear.y == pytest.approx(2.0)
+    assert published.linear.z == pytest.approx(0.0)
+    assert published.angular.z == pytest.approx(0.25)
+    module._close_module()

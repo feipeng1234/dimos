@@ -18,9 +18,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import field
+import socket
 import subprocess
 import time
 from typing import (
+    TYPE_CHECKING,
     Any,
     Protocol,
     TypeAlias,
@@ -29,11 +31,14 @@ from typing import (
     get_args,
     runtime_checkable,
 )
+from urllib.parse import urlparse
 
 from reactivex.disposable import Disposable
-from rerun._baseclasses import Archetype
-from rerun.blueprint import Blueprint
 from toolz import pipe  # type: ignore[import-untyped]
+
+if TYPE_CHECKING:
+    from rerun._baseclasses import Archetype
+    from rerun.blueprint import Blueprint
 
 from dimos.core.core import rpc
 from dimos.core.module import Module, ModuleConfig
@@ -42,10 +47,11 @@ from dimos.protocol.pubsub.impl.lcmpubsub import LCM
 from dimos.protocol.pubsub.patterns import Glob, pattern_matches
 from dimos.protocol.pubsub.spec import SubscribeAllCapable
 from dimos.utils.logging_config import setup_logger
-from dimos.visualization.constants import (
+from dimos.visualization.rerun.constants import (
     RERUN_ENABLE_WEB,
     RERUN_GRPC_PORT,
     RERUN_OPEN_DEFAULT,
+    RERUN_WEB_PORT,
     RerunOpenOption,
 )
 
@@ -101,6 +107,8 @@ RerunData: TypeAlias = "Archetype | RerunMulti"
 
 def is_rerun_multi(data: Any) -> TypeGuard[RerunMulti]:
     """Check if data is a list of (entity_path, archetype) tuples."""
+    from rerun._baseclasses import Archetype
+
     return (
         isinstance(data, list)
         and bool(data)
@@ -164,12 +172,7 @@ class Config(ModuleConfig):
     pubsubs: list[SubscribeAllCapable[Any, Any]] = field(default_factory=lambda: [LCM()])
 
     visual_override: dict[Glob | str, Callable[[Any], Archetype]] = field(default_factory=dict)
-
-    # Static items logged once after start. Maps entity_path -> callable(rr) returning Archetype
     static: dict[str, Callable[[Any], Archetype]] = field(default_factory=dict)
-
-    # Per-entity max update rate (Hz). Entities not listed are unthrottled.
-    # Use for heavy entities to prevent viewer backpressure.
     max_hz: dict[str, float] = field(default_factory=dict)
 
     entity_prefix: str = "world"
@@ -178,10 +181,18 @@ class Config(ModuleConfig):
     memory_limit: str = "25%"
     rerun_open: RerunOpenOption = RERUN_OPEN_DEFAULT
     rerun_web: bool = RERUN_ENABLE_WEB
-
-    # Blueprint factory: callable(rrb) -> Blueprint for viewer layout configuration
-    # Set to None to disable default blueprint
+    web_port: int = RERUN_WEB_PORT
     blueprint: BlueprintFactory | None = _default_blueprint
+
+
+def _rebuild_config() -> None:
+    from rerun._baseclasses import Archetype
+    from rerun.blueprint import Blueprint
+
+    Config.model_rebuild(_types_namespace={"Archetype": Archetype, "Blueprint": Blueprint})
+
+
+_rebuild_config()
 
 
 class RerunBridgeModule(Module):
@@ -211,10 +222,6 @@ class RerunBridgeModule(Module):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._last_log = {}
-        # Manual cache replaces @lru_cache on this method.  lru_cache captures
-        # ``self`` as a cache key, which prevents garbage collection of the
-        # entire RerunBridgeModule (and everything it references).  A plain
-        # dict on the instance avoids the leak and is cleared in stop().
         self._override_cache: dict[str, Callable[[Any], RerunData | None]] = {}
 
     def _visual_override_for_entity_path(
@@ -223,7 +230,8 @@ class RerunBridgeModule(Module):
         """Return a composed visual override for the entity path.
 
         Chains matching overrides from config, ending with final_convert
-        which handles .to_rerun() or passes through Archetypes.
+        which handles .to_rerun() or passes through Archetypes. Cached per
+        instance (not via ``lru_cache`` on a method, which would leak ``self``).
         """
         cached = self._override_cache.get(entity_path)
         if cached is not None:
@@ -244,6 +252,8 @@ class RerunBridgeModule(Module):
 
         # final step (ensures we return Archetype or None)
         def final_convert(msg: Any) -> RerunData | None:
+            from rerun._baseclasses import Archetype
+
             if isinstance(msg, Archetype):
                 return msg
             if is_rerun_multi(msg):
@@ -298,9 +308,6 @@ class RerunBridgeModule(Module):
 
     @rpc
     def start(self) -> None:
-        import socket
-        from urllib.parse import urlparse
-
         import rerun as rr
 
         super().start()
@@ -382,7 +389,11 @@ class RerunBridgeModule(Module):
         # web
         open_web = self.config.rerun_open == "web" or self.config.rerun_open == "both"
         if open_web or self.config.rerun_web:
-            rr.serve_web_viewer(connect_to=server_uri, open_browser=open_web)
+            rr.serve_web_viewer(
+                connect_to=server_uri,
+                open_browser=open_web,
+                web_port=self.config.web_port,
+            )
 
         # printout
         if self.config.rerun_open == "none" or (self.config.rerun_open == "native" and not spawned):
@@ -412,8 +423,6 @@ class RerunBridgeModule(Module):
 
     def _log_connect_hints(self, grpc_port: int) -> None:
         """Log CLI commands for connecting a viewer to this bridge."""
-        import socket
-
         from dimos.utils.generic import get_local_ips
 
         local_ips = get_local_ips()

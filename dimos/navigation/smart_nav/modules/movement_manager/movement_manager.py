@@ -31,17 +31,15 @@ import math
 import threading
 import time
 from typing import Any
-import weakref
 
 from dimos_lcm.std_msgs import Bool  # type: ignore[import-untyped]
 
-from dimos.constants import DEFAULT_THREAD_JOIN_TIMEOUT
 from dimos.core.core import rpc
 from dimos.core.module import Module, ModuleConfig
 from dimos.core.stream import In, Out
 from dimos.msgs.geometry_msgs.PointStamped import PointStamped
 from dimos.msgs.geometry_msgs.Twist import Twist
-from dimos.navigation.smart_nav.frames import FRAME_BODY, FRAME_MAP, FRAME_ODOM
+from dimos.msgs.geometry_msgs.Vector3 import Vector3
 from dimos.utils.logging_config import setup_logger
 
 logger = setup_logger()
@@ -52,6 +50,9 @@ class MovementManagerConfig(ModuleConfig):
 
     # Seconds after the last teleop message before nav_cmd_vel is re-enabled.
     tele_cooldown_sec: float = 1.0
+    # Element-wise multiplier for incoming teleop twists.
+    # Default is identity (all 1.0). Set a component to 0.0 to lock it out.
+    tele_cmd_vel_scaling: Twist = Twist(Vector3(1, 1, 1), Vector3(1, 1, 1))
 
 
 class MovementManager(Module):
@@ -86,29 +87,7 @@ class MovementManager(Module):
         super().__init__(**kwargs)
         self._lock = threading.Lock()
         self._teleop_active = False
-        self._timer: threading.Timer | None = None
-        self._timer_gen = 0
-        self._robot_x = 0.0
-        self._robot_y = 0.0
-        self._robot_z = 0.0
-
-    def __getstate__(self) -> dict[str, Any]:
-        state: dict[str, Any] = super().__getstate__()  # type: ignore[no-untyped-call]
-        for k in ("_lock", "_timer"):
-            state.pop(k, None)
-        return state
-
-    def __setstate__(self, state: dict[str, Any]) -> None:
-        super().__setstate__(state)
-        self._lock = threading.Lock()
-        self._timer = None
-        self._timer_gen = 0
-
-    def __del__(self) -> None:
-        timer = getattr(self, "_timer", None)
-        if timer is not None:
-            timer.cancel()
-            timer.join(timeout=DEFAULT_THREAD_JOIN_TIMEOUT)
+        self._last_teleop_time = 0.0
 
     @rpc
     def start(self) -> None:
@@ -120,35 +99,8 @@ class MovementManager(Module):
     @rpc
     def stop(self) -> None:
         with self._lock:
-            self._timer_gen += 1
-            if self._timer is not None:
-                self._timer.cancel()
-                self._timer = None
+            self._teleop_active = False
         super().stop()
-
-    # ── TF pose query ────────────────────────────────────────────────────
-
-    # Ordered (parent, child) TF lookups — first match wins.
-    _TF_POSE_QUERIES: list[tuple[str, str]] = [
-        (FRAME_MAP, FRAME_BODY),
-        (FRAME_ODOM, FRAME_BODY),
-        (FRAME_MAP, "sensor"),
-    ]
-
-    def _query_pose(self) -> tuple[float, float, float]:
-        """Return (x, y, z) from the TF tree, falling back to cached values."""
-        for parent, child in self._TF_POSE_QUERIES:
-            tf = self.tf.get(parent, child)
-            if tf is not None:
-                with self._lock:
-                    self._robot_x = float(tf.translation.x)
-                    self._robot_y = float(tf.translation.y)
-                    self._robot_z = float(tf.translation.z)
-                break
-        with self._lock:
-            return self._robot_x, self._robot_y, self._robot_z
-
-    # ── Click-to-goal ─────────────────────────────────────────────────────
 
     def _on_click(self, msg: PointStamped) -> None:
         if not all(math.isfinite(v) for v in (msg.x, msg.y, msg.z)):
@@ -163,13 +115,12 @@ class MovementManager(Module):
         self.goal.publish(msg)
 
     def _cancel_goal(self) -> None:
-        """Publish NaN goal so planners clear their active goal."""
         self.stop_movement.publish(Bool(data=True))
-        # NOTE: this NaN goal is more of a saftey fallback.
+        # NOTE: this NaN goal is more of a safety fallback.
         # It can be REALLY bad if a robot is supposed to stop moving but wont
         # we should probably think a more robust/strict requirement on planners
         cancel = PointStamped(
-            ts=time.time(), frame_id=FRAME_MAP, x=float("nan"), y=float("nan"), z=float("nan")
+            ts=time.time(), frame_id="map", x=float("nan"), y=float("nan"), z=float("nan")
         )
         self.way_point.publish(cancel)
         self.goal.publish(cancel)
@@ -180,44 +131,34 @@ class MovementManager(Module):
     def _on_nav(self, msg: Twist) -> None:
         with self._lock:
             if self._teleop_active:
-                return
+                # Check if cooldown has expired.
+                elapsed = time.monotonic() - self._last_teleop_time
+                if elapsed < self.config.tele_cooldown_sec:
+                    return
+                self._teleop_active = False
         self.cmd_vel.publish(msg)
 
     def _on_teleop(self, msg: Twist) -> None:
-        was_active: bool
-        old_timer: threading.Timer | None = None
         with self._lock:
             was_active = self._teleop_active
             self._teleop_active = True
-            if self._timer is not None:
-                self._timer.cancel()
-                old_timer = self._timer
-            self._timer_gen += 1
-            my_gen = self._timer_gen
-            self_ref = weakref.ref(self)
-
-            def _end() -> None:
-                obj = self_ref()
-                if obj is not None:
-                    obj._end_teleop(my_gen)
-
-            self._timer = threading.Timer(self.config.tele_cooldown_sec, _end)
-            self._timer.daemon = True
-            self._timer.start()
-
-        if old_timer is not None:
-            old_timer.join(timeout=DEFAULT_THREAD_JOIN_TIMEOUT)
+            self._last_teleop_time = time.monotonic()
 
         if not was_active:
-            # Cancel the nav goal directly and notify external listeners.
             self._cancel_goal()
             logger.info("Teleop active")
 
-        self.cmd_vel.publish(msg)
-
-    def _end_teleop(self, expected_gen: int) -> None:
-        with self._lock:
-            if expected_gen != self._timer_gen:
-                return
-            self._teleop_active = False
-            self._timer = None
+        scale = self.config.tele_cmd_vel_scaling
+        scaled = Twist(
+            linear=Vector3(
+                msg.linear.x * scale.linear.x,
+                msg.linear.y * scale.linear.y,
+                msg.linear.z * scale.linear.z,
+            ),
+            angular=Vector3(
+                msg.angular.x * scale.angular.x,
+                msg.angular.y * scale.angular.y,
+                msg.angular.z * scale.angular.z,
+            ),
+        )
+        self.cmd_vel.publish(scaled)
