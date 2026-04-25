@@ -293,6 +293,15 @@ sim = [
     "pygame>=2.6.1",
 ]
 
+# 3D Gaussian splat camera renderer (Linux+CUDA only).  Opt-in.
+# gsplat builds CUDA kernels via nvcc/ninja on first import; first-time
+# install is slow.  Required only by the SplatCameraModule that
+# publishes splat-rendered camera images alongside the viser viewer.
+splat = [
+    "gsplat>=1.5.0",
+    "gsplat>=1.5.0; platform_machine == 'x86_64' and sys_platform == 'linux'",
+]
+
 # NOTE: jetson-jp6-cuda126 extra is disabled due to 404 errors from wheel URLs
 # The pypi.jetson-ai-lab.io URLs are currently unavailable. Update with working URLs when available.
 # jetson-jp6-cuda126 = [

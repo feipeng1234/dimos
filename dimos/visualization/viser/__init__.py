@@ -12,6 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from dimos.visualization.viser.splat_camera import SplatCameraModule, splat_camera
 from dimos.visualization.viser.viser_render_module import ViserRenderModule, viser_render
 
-__all__ = ["ViserRenderModule", "viser_render"]
+__all__ = [
+    "SplatCameraModule",
+    "ViserRenderModule",
+    "splat_camera",
+    "viser_render",
+]

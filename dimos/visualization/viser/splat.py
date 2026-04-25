@@ -91,10 +91,14 @@ class SplatAlignment:
 
 @dataclass
 class SplatData:
-    centers: np.ndarray  # (N, 3) float32
-    covariances: np.ndarray  # (N, 3, 3) float32
-    rgbs: np.ndarray  # (N, 3) float32
-    opacities: np.ndarray  # (N, 1) float32
+    centers: np.ndarray  # (N, 3) float32, world frame
+    covariances: np.ndarray  # (N, 3, 3) float32, world frame.  For viser.
+    rgbs: np.ndarray  # (N, 3) float32, [0, 1]
+    opacities: np.ndarray  # (N, 1) float32, [0, 1]
+    # Primitive form for renderers that prefer it (e.g. gsplat).
+    # All in the same world frame as ``centers``/``covariances``.
+    quats_wxyz: np.ndarray  # (N, 4) float32
+    scales: np.ndarray  # (N, 3) float32, post-alignment uniform-scaled
 
 
 def load_splat(ply_path: str | Path, alignment: SplatAlignment | None = None) -> SplatData:
@@ -163,4 +167,50 @@ def load_splat(ply_path: str | Path, alignment: SplatAlignment | None = None) ->
     centers = (alignment.scale * pos @ M.T) + np.asarray(alignment.translation, dtype=np.float32)
     covariances = (alignment.scale * alignment.scale) * np.einsum("ij,njk,lk->nil", M, cov_splat, M)
 
-    return SplatData(centers=centers, covariances=covariances, rgbs=rgbs, opacities=op)
+    # Same alignment applied to the primitive (quat, scale) form.  Renderers
+    # like gsplat operate directly on these instead of full covariances.
+    quats_splat = np.stack([rw, rx, ry, rz], axis=-1) if "rot_0" in props else None
+    if quats_splat is None:
+        quats_world = np.tile(np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32), (len(pos), 1))
+    else:
+        # Rotate every Gaussian's local frame by M: q_world = q_M ⊗ q_splat.
+        qM = _mat3_to_wxyz(M)
+        quats_world = _quat_mul_left(qM, quats_splat).astype(np.float32)
+    scales_world = (alignment.scale * s).astype(np.float32)
+
+    return SplatData(
+        centers=centers,
+        covariances=covariances,
+        rgbs=rgbs,
+        opacities=op,
+        quats_wxyz=quats_world,
+        scales=scales_world,
+    )
+
+
+def _mat3_to_wxyz(R: np.ndarray) -> np.ndarray:
+    """3x3 rotation matrix -> (w, x, y, z), via mujoco for numerical stability."""
+    import mujoco
+
+    out = np.zeros(4, dtype=np.float64)
+    mujoco.mju_mat2Quat(out, np.asarray(R, dtype=np.float64).flatten())
+    return out.astype(np.float32)
+
+
+def _quat_mul_left(q1: np.ndarray, q2: np.ndarray) -> np.ndarray:
+    """Left-multiply ``q1 ⊗ q2`` for q1: (4,) wxyz and q2: (N, 4) wxyz.
+
+    Vectorised — the per-Gaussian alternative through ``mujoco.mju_mulQuat``
+    in a Python loop is ~50x slower for 1M Gaussians.
+    """
+    aw, ax, ay, az = q1[0], q1[1], q1[2], q1[3]
+    bw, bx, by, bz = q2[:, 0], q2[:, 1], q2[:, 2], q2[:, 3]
+    return np.stack(
+        [
+            aw * bw - ax * bx - ay * by - az * bz,
+            aw * bx + ax * bw + ay * bz - az * by,
+            aw * by - ax * bz + ay * bw + az * bx,
+            aw * bz + ax * by - ay * bx + az * bw,
+        ],
+        axis=-1,
+    )

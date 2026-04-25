@@ -72,9 +72,9 @@ from dimos.core.blueprints import autoconnect
 from dimos.core.global_config import global_config
 from dimos.core.transport import LCMTransport
 from dimos.msgs.geometry_msgs import PoseStamped, Twist
-from dimos.msgs.sensor_msgs import JointState
+from dimos.msgs.sensor_msgs import CameraInfo, Image, JointState
 from dimos.msgs.std_msgs.Bool import Bool as DimosBool
-from dimos.visualization.viser import viser_render
+from dimos.visualization.viser import splat_camera, viser_render
 from dimos.web.websocket_vis.websocket_vis_module import websocket_vis
 
 _g1_joints = make_humanoid_joints("g1")
@@ -296,7 +296,23 @@ if global_config.simulation:
                 ("odom", PoseStamped): LCMTransport("/odom", PoseStamped),
             },
         )
-        _viser_modules = (_g1_viser,)
+        # Splat-rendered head camera images.  Same splat + alignment as
+        # the viser viewer; backend is auto-selected (gsplat on Linux+CUDA,
+        # stub elsewhere).  Publishes /splat/color_image + /splat/camera_info.
+        _g1_splat_cam = splat_camera(
+            splat_path=str(_splat_path),
+            mjcf_path=_mjcf_path,
+            alignment_yaml=str(_alignment_yaml) if _alignment_yaml.exists() else None,
+            render_hz=10.0,
+        ).transports(
+            {
+                ("joint_state", JointState): LCMTransport("/coordinator/joint_state", JointState),
+                ("odom", PoseStamped): LCMTransport("/odom", PoseStamped),
+                ("color_image", Image): LCMTransport("/splat/color_image", Image),
+                ("camera_info", CameraInfo): LCMTransport("/splat/camera_info", CameraInfo),
+            },
+        )
+        _viser_modules = (_g1_viser, _g1_splat_cam)
 
 unitree_g1_groot_wbc = autoconnect(_g1_coordinator, _g1_ws_vis, *_viser_modules)
 

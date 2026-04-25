@@ -30,6 +30,7 @@ import threading
 import time
 from typing import Any
 
+import mujoco
 import numpy as np
 from reactivex.disposable import Disposable
 
@@ -40,6 +41,7 @@ from dimos.core.stream import In
 from dimos.msgs.geometry_msgs import PoseStamped
 from dimos.msgs.sensor_msgs import JointState
 from dimos.utils.logging_config import setup_logger
+from dimos.visualization.viser.camera import CameraSpec, g1_d435_default, world_pose
 from dimos.visualization.viser.robot_meshes import (
     RobotMeshes,
     apply_state,
@@ -70,6 +72,7 @@ class ViserRenderModule(Module):
         port: int = 8082,
         alignment_yaml: str | FilePath | None = None,
         render_hz: float = 30.0,
+        camera_spec: CameraSpec | None = None,
         cfg: GlobalConfig = global_config,
         **kwargs: Any,
     ) -> None:
@@ -80,6 +83,7 @@ class ViserRenderModule(Module):
         self._alignment_yaml = FilePath(alignment_yaml) if alignment_yaml else None
         self._port = port
         self._render_dt = 1.0 / float(render_hz)
+        self._camera_spec = camera_spec if camera_spec is not None else g1_d435_default()
 
         # Mutable shared state — written from In subscribers, read from
         # the render loop.  Plain dict + lock; values are lightweight.
@@ -90,6 +94,8 @@ class ViserRenderModule(Module):
 
         self._server: Any = None  # viser.ViserServer
         self._body_frames: dict[int, Any] = {}  # body_id -> viser frame handle
+        self._camera_body_id: int | None = None
+        self._camera_frustum: Any = None  # viser frustum handle
         self._robot: RobotMeshes | None = None
         self._render_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
@@ -151,6 +157,27 @@ class ViserRenderModule(Module):
                 opacity=float(geom.rgba[3]) if geom.rgba[3] > 0 else 1.0,
                 position=tuple(geom.local_pos),
                 wxyz=tuple(geom.local_wxyz),
+            )
+
+        # Camera frustum overlay — shows where a robot-mounted RGB sensor
+        # would look from.  Stays None if the configured mount body
+        # isn't in this MJCF (e.g. swap to a robot without head_link).
+        cam_body_id = mujoco.mj_name2id(
+            self._robot.model, mujoco.mjtObj.mjOBJ_BODY, self._camera_spec.body_name
+        )
+        if cam_body_id < 0:
+            logger.warning(
+                f"Viser: camera mount body '{self._camera_spec.body_name}' not in MJCF; "
+                "frustum overlay disabled"
+            )
+        else:
+            self._camera_body_id = cam_body_id
+            self._camera_frustum = self._server.scene.add_camera_frustum(
+                "/robot/_camera_frustum",
+                fov=float(np.radians(self._camera_spec.vfov_deg)),
+                aspect=float(self._camera_spec.aspect),
+                scale=float(self._camera_spec.frustum_scale),
+                color=self._camera_spec.frustum_color,
             )
 
         try:
@@ -221,6 +248,7 @@ class ViserRenderModule(Module):
                     base_wxyz=base_wxyz,
                     joint_positions=joints,
                 )
+                self._update_camera_frustum()
                 xpos = self._robot.data.xpos
                 xquat = self._robot.data.xquat
                 for body_id, frame in self._body_frames.items():
@@ -235,6 +263,17 @@ class ViserRenderModule(Module):
                 time.sleep(sleep_for)
             else:
                 next_tick = time.monotonic()
+
+    def _update_camera_frustum(self) -> None:
+        """Place the camera frustum at the current pose of its mount body."""
+        if self._camera_frustum is None or self._camera_body_id is None:
+            return
+        assert self._robot is not None
+        body_pos = self._robot.data.xpos[self._camera_body_id]
+        body_wxyz = self._robot.data.xquat[self._camera_body_id]
+        cam_pos, cam_wxyz = world_pose(body_pos, body_wxyz, self._camera_spec)
+        self._camera_frustum.position = tuple(float(x) for x in cam_pos)
+        self._camera_frustum.wxyz = tuple(float(x) for x in cam_wxyz)
 
 
 viser_render = ViserRenderModule.blueprint
