@@ -126,6 +126,16 @@ class ViserRenderModule(Module):
         )
 
         self._server = viser.ViserServer(host="0.0.0.0", port=self._port)
+        # Strip the floating control panel down to just a collapse button —
+        # the viewer is render-only, no GUI controls live in the panel, and
+        # viser exposes no API to hide the panel entirely.
+        self._server.gui.set_panel_label(None)
+        self._server.gui.configure_theme(
+            control_layout="collapsible",
+            show_logo=False,
+            show_share_button=False,
+            dark_mode=True,
+        )
         logger.info(f"Viser viewer: http://localhost:{self._port}/")
 
         self._server.scene.add_gaussian_splats(
