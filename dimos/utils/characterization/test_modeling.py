@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Copyright 2025-2026 Dimensional Inc.
-# Licensed under the Apache License, Version 2.0.
 
 """Unit and integration tests for the FOPDT modeling pipeline.
 
@@ -385,7 +383,6 @@ def test_aggregate_session_buckets_by_recipe() -> None:
 
 # -------------------------- pool -----------------------------------------
 
-
 def _summary_for_pool(K_at_amps: dict[float, float]) -> dict:
     """Build a minimal model_summary by fabricating GroupFits at each
     (amp, direction) cell."""
@@ -437,7 +434,6 @@ def test_compare_models_identical_sessions() -> None:
 
 
 # -------------------------- step-down (fall) ----------------------------
-
 
 def test_select_edge_projects_params_down_onto_params() -> None:
     """select_edge('fall') should swap params := params_down for downstream
@@ -542,7 +538,6 @@ def test_run_fit_smoke_includes_params_down(real_session: Path) -> None:
 
 
 # -------------------------- integration (real session) -------------------
-
 
 @pytest.fixture
 def real_session() -> Path:
