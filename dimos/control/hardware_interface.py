@@ -351,25 +351,29 @@ class ConnectedWholeBody(ConnectedHardware):
         self._component = component
         self._joint_names = component.joints
 
-        # Resolve per-joint PD gains once at wire-up time.  Falls back
-        # to _DEFAULT_KP / _DEFAULT_KD if the blueprint didn't specify.
+        # Resolve per-joint PD gains once at wire-up time.  Gains live on
+        # the WB-specific sub-config; fall back to _DEFAULT_KP/_DEFAULT_KD
+        # if the blueprint didn't supply a wb_config.
         n = len(self._joint_names)
-        if component.kp is not None:
-            if len(component.kp) != n:
+        wb = component.wb_config
+        kp_in = wb.kp if wb is not None else None
+        kd_in = wb.kd if wb is not None else None
+        if kp_in is not None:
+            if len(kp_in) != n:
                 raise ValueError(
-                    f"HardwareComponent '{component.hardware_id}': kp length "
-                    f"{len(component.kp)} does not match joints length {n}"
+                    f"HardwareComponent '{component.hardware_id}': wb_config.kp length "
+                    f"{len(kp_in)} does not match joints length {n}"
                 )
-            self._kp = list(component.kp)
+            self._kp = list(kp_in)
         else:
             self._kp = [_DEFAULT_KP] * n
-        if component.kd is not None:
-            if len(component.kd) != n:
+        if kd_in is not None:
+            if len(kd_in) != n:
                 raise ValueError(
-                    f"HardwareComponent '{component.hardware_id}': kd length "
-                    f"{len(component.kd)} does not match joints length {n}"
+                    f"HardwareComponent '{component.hardware_id}': wb_config.kd length "
+                    f"{len(kd_in)} does not match joints length {n}"
                 )
-            self._kd = list(component.kd)
+            self._kd = list(kd_in)
         else:
             self._kd = [_DEFAULT_KD] * n
         self._kp_by_name = dict(zip(self._joint_names, self._kp, strict=False))

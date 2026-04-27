@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from dimos.hardware.whole_body.spec import WholeBodyConfig
+
 HardwareId = str
 JointName = str
 TaskName = str
@@ -65,6 +67,13 @@ class HardwareComponent:
         domain_id: DDS domain ID for adapters that use DDS transport
             (e.g. Unitree G1). Real robot uses 0; unitree_mujoco sim
             defaults to 1. Ignored by non-DDS adapters.
+        adapter_kwargs: Generic untyped kwargs forwarded to the adapter
+            constructor — use for adapter-specific knobs that don't
+            belong in the spec.
+        wb_config: Whole-body-specific config (PD gains etc.).  Populate
+            on hardware_type=WHOLE_BODY components.  Keeps WB-only knobs
+            off the generic HardwareComponent shared by manipulators,
+            bases, and grippers.
     """
 
     hardware_id: HardwareId
@@ -75,12 +84,8 @@ class HardwareComponent:
     auto_enable: bool = True
     gripper_joints: list[JointName] = field(default_factory=list)
     domain_id: int = 0
-    # Per-joint PD gains used by ConnectedWholeBody when translating
-    # position commands to MotorCommand. None → adapter/component
-    # defaults. Must match `joints` length when set.
-    kp: list[float] | None = None
-    kd: list[float] | None = None
     adapter_kwargs: dict[str, Any] = field(default_factory=dict)
+    wb_config: WholeBodyConfig | None = None
 
     @property
     def all_joints(self) -> list[JointName]:

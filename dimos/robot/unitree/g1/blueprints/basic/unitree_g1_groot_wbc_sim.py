@@ -54,6 +54,7 @@ from dimos.control.components import HardwareComponent, HardwareType
 from dimos.control.coordinator import ControlCoordinator, TaskConfig
 from dimos.core.coordination.blueprints import autoconnect
 from dimos.core.transport import LCMTransport
+from dimos.hardware.whole_body.spec import WholeBodyConfig
 from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
 from dimos.msgs.geometry_msgs.Twist import Twist
 from dimos.msgs.sensor_msgs.CameraInfo import CameraInfo
@@ -89,8 +90,7 @@ _g1_coordinator = (
                 address=None,
                 domain_id=0,
                 auto_enable=True,
-                kp=G1_GROOT_KP,
-                kd=G1_GROOT_KD,
+                wb_config=WholeBodyConfig(kp=tuple(G1_GROOT_KP), kd=tuple(G1_GROOT_KD)),
             ),
         ],
         tasks=[
