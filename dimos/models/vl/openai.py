@@ -45,8 +45,12 @@ class OpenAIVlModel(VlModel):
         return OpenAI(api_key=api_key)
 
     def query(
-        self, image: Image | np.ndarray, query: str, response_format: dict | None = None, **kwargs
-    ) -> str:  # type: ignore[no-untyped-def, type-arg]
+        self,
+        image: Image | np.ndarray,
+        query: str,
+        response_format: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> str:
         if isinstance(image, np.ndarray):
             import warnings
 
