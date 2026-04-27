@@ -25,8 +25,10 @@ from dimos.models.embedding.base import Embedding, EmbeddingModel, EmbeddingMode
 from dimos.msgs.sensor_msgs.Image import Image
 from dimos.utils.data import get_data
 
+
 class MobileCLIPModelConfig(EmbeddingModelConfig):
     model_name: str = "MobileCLIP2-S4"
+
 
 class MobileCLIPModel(EmbeddingModel, LocalModel):
     """MobileCLIP embedding model for vision-language re-identification."""
