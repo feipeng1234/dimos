@@ -18,7 +18,7 @@ from typing import Any, overload
 import open_clip
 from PIL import Image as PILImage
 import torch
-import torch.nn.functional as F
+import torch.nn.functional as F  # noqa: N812
 
 from dimos.models.base import LocalModel
 from dimos.models.embedding.base import Embedding, EmbeddingModel, EmbeddingModelConfig
