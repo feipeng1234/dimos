@@ -32,6 +32,8 @@ import threading
 import time
 from typing import Any
 
+import mujoco
+import numpy as np
 from pydantic import Field
 import reactivex as rx
 from scipy.spatial.transform import Rotation as R
@@ -45,6 +47,7 @@ from dimos.msgs.geometry_msgs.Transform import Transform
 from dimos.msgs.geometry_msgs.Vector3 import Vector3
 from dimos.msgs.sensor_msgs.CameraInfo import CameraInfo
 from dimos.msgs.sensor_msgs.Image import Image, ImageFormat
+from dimos.msgs.sensor_msgs.Imu import Imu
 from dimos.msgs.sensor_msgs.JointState import JointState
 from dimos.msgs.sensor_msgs.PointCloud2 import PointCloud2
 from dimos.simulation.engines.mujoco_engine import (
@@ -53,6 +56,7 @@ from dimos.simulation.engines.mujoco_engine import (
     MujocoEngine,
 )
 from dimos.simulation.engines.mujoco_shm import (
+    CMD_MODE_PD_TAU,
     ManipShmWriter,
     shm_key_from_path,
 )
@@ -60,6 +64,17 @@ from dimos.spec import perception
 from dimos.utils.logging_config import setup_logger
 
 logger = setup_logger()
+
+
+def _find_sensor_slice(model: mujoco.MjModel, *names: str, dim: int = 3) -> slice | None:
+    """Return the first matching MJCF sensor's slice into sensordata, or None."""
+    for n in names:
+        sid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SENSOR, n)
+        if sid >= 0:
+            adr = int(model.sensor_adr[sid])
+            return slice(adr, adr + dim)
+    return None
+
 
 _RX180 = R.from_euler("x", 180, degrees=True)
 
@@ -111,6 +126,7 @@ class MujocoSimModule(
     pointcloud: Out[PointCloud2]
     camera_info: Out[CameraInfo]
     depth_camera_info: Out[CameraInfo]
+    imu: Out[Imu]
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -122,6 +138,22 @@ class MujocoSimModule(
         self._stop_event = threading.Event()
         self._publish_thread: threading.Thread | None = None
         self._camera_info_base: CameraInfo | None = None
+
+        # IMU sensor slices into MjData.sensordata, resolved once at start.
+        # None if the MJCF has no recognized IMU sensors (e.g. arm-only sims).
+        self._imu_gyro_slice: slice | None = None
+        self._imu_accel_slice: slice | None = None
+        # Quaternion is read from the floating-base qpos[3:7] when the model
+        # has a free joint at the root; None otherwise.
+        self._imu_base_qpos_slice: slice | None = None
+
+        # Latched PD-with-feedforward command state.  GR00T-style adapters
+        # write kp/kd/q_target every tick; we apply them to MjData.ctrl in
+        # the pre-step hook as tau = kp*(q_t - q) + kd*(0 - dq) + tau_ff.
+        self._latest_pd_pos_target: np.ndarray | None = None
+        self._latest_pd_kp: np.ndarray | None = None
+        self._latest_pd_kd: np.ndarray | None = None
+        self._latest_pd_tau: np.ndarray | None = None
 
     @property
     def _camera_link(self) -> str:
@@ -201,6 +233,33 @@ class MujocoSimModule(
                 ctrl_range=ctrl_range,
                 joint_range=joint_range,
             )
+
+        # Resolve IMU sensors once.  Whole-body MJCFs declare gyro/accel
+        # under various names; we accept the menagerie and dimos-bundled
+        # variants.  Manipulator MJCFs typically have neither — we just
+        # leave the slices as None and skip IMU publishing for those.
+        self._imu_gyro_slice = _find_sensor_slice(
+            self._engine.model,
+            "imu-pelvis-angular-velocity",
+            "gyro_pelvis",
+            "imu_gyro",
+            dim=3,
+        )
+        self._imu_accel_slice = _find_sensor_slice(
+            self._engine.model,
+            "imu-pelvis-linear-acceleration",
+            "accelerometer_pelvis",
+            "imu_accel",
+            dim=3,
+        )
+        # Floating-base orientation is qpos[3:7] (w,x,y,z) when the root
+        # joint is a free joint.  Detect by checking jnt_type[0].
+        if self._engine.model.njnt > 0 and int(self._engine.model.jnt_type[0]) == int(
+            mujoco.mjtJoint.mjJNT_FREE
+        ):
+            self._imu_base_qpos_slice = slice(3, 7)
+        else:
+            self._imu_base_qpos_slice = None
 
         # Start physics (sim thread spawned inside engine.connect()).
         if not self._engine.connect():
@@ -284,11 +343,44 @@ class MujocoSimModule(
 
         pos_cmd = shm.read_position_command(dof)
         if pos_cmd is not None:
-            engine.write_joint_command(JointState(position=pos_cmd.tolist()))
+            if shm.read_command_mode() == CMD_MODE_PD_TAU:
+                # Latch position target for the per-step PD computation
+                # below; do NOT route through engine.write_joint_command
+                # (that would set position-mode and override our tau).
+                self._latest_pd_pos_target = pos_cmd
+            else:
+                engine.write_joint_command(JointState(position=pos_cmd.tolist()))
 
         vel_cmd = shm.read_velocity_command(dof)
         if vel_cmd is not None:
             engine.write_joint_command(JointState(velocity=vel_cmd.tolist()))
+
+        kp_cmd = shm.read_kp_command(dof)
+        if kp_cmd is not None:
+            self._latest_pd_kp = kp_cmd
+        kd_cmd = shm.read_kd_command(dof)
+        if kd_cmd is not None:
+            self._latest_pd_kd = kd_cmd
+        tau_cmd = shm.read_tau_command(dof)
+        if tau_cmd is not None:
+            self._latest_pd_tau = tau_cmd
+
+        # Apply latched PD-tau if all four pieces have arrived at least once.
+        # Manipulator path (no kp/kd writes) skips this entirely.
+        if (
+            self._latest_pd_pos_target is not None
+            and self._latest_pd_kp is not None
+            and self._latest_pd_kd is not None
+        ):
+            q = np.asarray(engine.joint_positions[:dof], dtype=np.float64)
+            dq = np.asarray(engine.joint_velocities[:dof], dtype=np.float64)
+            tau_ff = self._latest_pd_tau if self._latest_pd_tau is not None else np.zeros(dof)
+            tau = (
+                self._latest_pd_kp * (self._latest_pd_pos_target - q)
+                + self._latest_pd_kd * (-dq)
+                + tau_ff
+            )
+            engine.write_joint_command(JointState(effort=tau.tolist()))
 
         if self._gripper_idx is not None:
             gripper_cmd = shm.read_gripper_command()
@@ -297,7 +389,7 @@ class MujocoSimModule(
                 engine.set_position_target(self._gripper_idx, ctrl_value)
 
     def _publish_shm_state(self, engine: MujocoEngine) -> None:
-        """Post-step hook: publish joint state to SHM."""
+        """Post-step hook: publish joint state + IMU to SHM."""
         shm = self._shm
         if shm is None:
             return
@@ -310,6 +402,41 @@ class MujocoSimModule(
             positions = engine.joint_positions
             if self._gripper_idx < len(positions):
                 shm.write_gripper_state(positions[self._gripper_idx])
+
+        # IMU — only if MJCF declared the sensors.
+        if (
+            self._imu_gyro_slice is None
+            and self._imu_accel_slice is None
+            and self._imu_base_qpos_slice is None
+        ):
+            return
+        data = engine._data  # type: ignore[attr-defined]  # in-process, same MjData
+        if self._imu_base_qpos_slice is not None:
+            q = data.qpos[self._imu_base_qpos_slice]
+            quat = (float(q[0]), float(q[1]), float(q[2]), float(q[3]))
+        else:
+            quat = (1.0, 0.0, 0.0, 0.0)
+        if self._imu_gyro_slice is not None:
+            g = data.sensordata[self._imu_gyro_slice]
+            gyro = (float(g[0]), float(g[1]), float(g[2]))
+        else:
+            gyro = (0.0, 0.0, 0.0)
+        if self._imu_accel_slice is not None:
+            a = data.sensordata[self._imu_accel_slice]
+            accel = (float(a[0]), float(a[1]), float(a[2]))
+        else:
+            accel = (0.0, 0.0, 0.0)
+        shm.write_imu(quaternion=quat, gyroscope=gyro, accelerometer=accel)
+        # Also publish on the stream port for downstream consumers.
+        self.imu.publish(
+            Imu(
+                ts=time.time(),
+                frame_id="pelvis",
+                orientation=Quaternion(quat[1], quat[2], quat[3], quat[0]),
+                angular_velocity=Vector3(gyro[0], gyro[1], gyro[2]),
+                linear_acceleration=Vector3(accel[0], accel[1], accel[2]),
+            )
+        )
 
     def _gripper_joint_to_ctrl(self, joint_position: float) -> float:
         """Map joint-space gripper position to actuator control value."""
