@@ -69,12 +69,17 @@ from dimos.robot.unitree.g1.blueprints.basic._groot_wbc_common import (
     g1_joints,
     g1_legs_waist,
 )
+from dimos.simulation.engines.mujoco_sim_module import MujocoSimModule
 from dimos.utils.data import get_data
 from dimos.utils.logging_config import setup_logger
 from dimos.visualization.viser import SplatCameraModule, ViserRenderModule
 from dimos.web.websocket_vis.websocket_vis_module import WebsocketVisModule
 
 logger = setup_logger()
+
+# MJCF the GR00T policies were trained against — torque actuators, the
+# subprocess (and now the in-process MujocoEngine) computes PD itself.
+_MJCF_PATH = "data/mujoco_sim/g1_gear_wbc.xml"
 
 _g1_coordinator = (
     ControlCoordinator.blueprint(
@@ -86,8 +91,10 @@ _g1_coordinator = (
                 hardware_id="g1",
                 hardware_type=HardwareType.WHOLE_BODY,
                 joints=g1_joints,
-                adapter_type="sim_mujoco_g1",
-                address=None,
+                # In-process engine via MujocoSimModule — adapter and
+                # engine share state through SHM keyed on the MJCF path.
+                adapter_type="sim_mujoco_engine_g1",
+                address=_MJCF_PATH,
                 domain_id=0,
                 auto_enable=True,
                 wb_config=WholeBodyConfig(kp=tuple(G1_GROOT_KP), kd=tuple(G1_GROOT_KD)),
@@ -130,12 +137,26 @@ _g1_coordinator = (
         }
     )
     .global_config(
-        # Picked up by MujocoConnection → mujoco_process.py.  robot_model
-        # selects which MJCF the sim child loads; mujoco_room wraps it
-        # in a flat floor.
+        # global_config.simulation gates real-vs-sim adapter selection
+        # in some upstream blueprints; harmless to set even though the
+        # in-process engine + adapter pair don't read robot_model anymore.
         robot_model="unitree_g1",
-        mujoco_room="empty",
     )
+)
+
+# In-process MuJoCo engine.  Owns the MujocoEngine (single thread, no
+# subprocess) and publishes joint state + IMU into SHM for the WB
+# adapter, plus camera/lidar/pointcloud streams for downstream consumers.
+# The G1 GR00T MJCF has no head_camera so we point camera_name at the
+# torso lidar instead — a separate splat camera handles RGB perception.
+_g1_engine = MujocoSimModule.blueprint(
+    address=_MJCF_PATH,
+    headless=False,
+    dof=29,
+    enable_depth=True,
+    enable_pointcloud=True,
+    pointcloud_fps=2.0,
+    camera_name="lidar_front_camera",
 )
 
 # WASD teleop dashboard at http://localhost:7779/.
@@ -159,10 +180,9 @@ except Exception as e:
     logger.warning(f"Splat asset unavailable: {e}; viser viewer + splat camera disabled")
     _splat_path = None
 if _splat_path is not None and _splat_path.exists():
-    _mjcf_path = "data/mujoco_sim/g1_gear_wbc.xml"
     _g1_viser = ViserRenderModule.blueprint(
         splat_path=str(_splat_path),
-        mjcf_path=_mjcf_path,
+        mjcf_path=_MJCF_PATH,
         alignment_yaml=str(_alignment_yaml) if _alignment_yaml.exists() else None,
         port=8082,
     ).transports(
@@ -173,7 +193,7 @@ if _splat_path is not None and _splat_path.exists():
     )
     _g1_splat_cam = SplatCameraModule.blueprint(
         splat_path=str(_splat_path),
-        mjcf_path=_mjcf_path,
+        mjcf_path=_MJCF_PATH,
         alignment_yaml=str(_alignment_yaml) if _alignment_yaml.exists() else None,
         render_hz=10.0,
     ).transports(
@@ -186,6 +206,6 @@ if _splat_path is not None and _splat_path.exists():
     )
     _viser_modules = (_g1_viser, _g1_splat_cam)
 
-unitree_g1_groot_wbc_sim = autoconnect(_g1_coordinator, _g1_ws_vis, *_viser_modules)
+unitree_g1_groot_wbc_sim = autoconnect(_g1_coordinator, _g1_engine, _g1_ws_vis, *_viser_modules)
 
 __all__ = ["unitree_g1_groot_wbc_sim"]
