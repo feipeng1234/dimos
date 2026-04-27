@@ -243,6 +243,7 @@ def build_session_blueprint(
         transports[("measured", PoseStamped)] = LCMTransport("/go2/odom", PoseStamped)
 
     atoms = [CharacterizationRecorder.blueprint(db_path=str(db_path))]
+    remappings: list[tuple[Any, str, str]] = []
 
     if include_teleop:
         from dimos.robot.unitree.keyboard_teleop import KeyboardTeleop

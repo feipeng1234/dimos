@@ -67,7 +67,13 @@ python -m dimos.utils.characterization.scripts.analyze compare $SESSION/0* --out
 ```
 
 Each step writes derived artifacts; nothing destructive. Per-step rationale
-in `processing/<name>.py` docstrings.
+in `processing/<name>.py` and `modeling/<name>.py` docstrings.
+
+`fit` produces `<session>/modeling/{model_summary.json, model_report.md, plots/}`
+with K/τ/L per (channel, amplitude, direction) plus pooled per-channel
+values, gain-schedule analysis, and overlay plots. Run after `validate` +
+`aggregate`. `compare-models` is the cross-mode follow-up; it consumes
+two `model_summary.json` files and emits a verdict per channel.
 
 ## Velocity reconstruction
 
