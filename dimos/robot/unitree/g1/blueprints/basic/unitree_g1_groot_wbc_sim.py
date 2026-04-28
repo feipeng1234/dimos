@@ -249,7 +249,7 @@ if _splat_path is not None and _splat_path.exists():
 # sim.  The base sim publishes pointcloud → /lidar (see the engine
 # transports above) and color_image → /splat/color_image; downstream
 # subscribers bind to those topics by name.
-_g1_perception_stack = (
+_g1_perception_stack: tuple = (
     VoxelGridMapper.blueprint().transports(
         {
             ("lidar", PointCloud2): LCMTransport("/lidar", PointCloud2),
@@ -263,8 +263,18 @@ _g1_perception_stack = (
             ("lidar", PointCloud2): LCMTransport("/lidar", PointCloud2),
         }
     ),
-    RerunBridgeModule.blueprint(viewer_mode=_resolve_viewer_mode()),
 )
+
+# Rerun telemetry — opt-in via env var.  Default off because dimos-viewer
+# and rerun-sdk version compatibility is fragile (gRPC port mismatch
+# between adjacent rerun releases).  Run a separate `dimos rerun-bridge`
+# in another terminal if you want telemetry without coupling sim startup
+# to rerun env state.
+if os.getenv("DIMOS_RERUN_BRIDGE", "0") == "1":
+    _g1_perception_stack = (
+        *_g1_perception_stack,
+        RerunBridgeModule.blueprint(viewer_mode=_resolve_viewer_mode()),
+    )
 
 unitree_g1_groot_wbc_sim = autoconnect(
     _g1_coordinator,
