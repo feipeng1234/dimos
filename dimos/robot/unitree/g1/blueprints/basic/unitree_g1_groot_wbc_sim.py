@@ -195,6 +195,12 @@ _g1_engine = MujocoSimModule.blueprint(
         # (VoxelGridMapper, G1Memory) with ``lidar`` In ports can
         # subscribe by topic regardless of port-name mismatch.
         ("pointcloud", PointCloud2): LCMTransport("/lidar", PointCloud2),
+        # MujocoSimModule unconditionally publishes RGB from its camera
+        # (lidar_front_camera here).  Route it to a sim-only topic so
+        # it doesn't collide with the splat camera on /splat/color_image
+        # (otherwise rerun's image panel oscillates between the two).
+        ("color_image", Image): LCMTransport("/sim/raw_color_image", Image),
+        ("camera_info", CameraInfo): LCMTransport("/sim/raw_camera_info", CameraInfo),
     }
 )
 
