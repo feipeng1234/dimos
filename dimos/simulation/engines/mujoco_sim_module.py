@@ -102,6 +102,7 @@ class MujocoSimModuleConfig(ModuleConfig, DepthCameraConfig):
     base_frame_id: str = "link7"
     base_transform: Transform | None = Field(default_factory=_default_identity_transform)
     align_depth_to_color: bool = True
+    enable_color: bool = True
     enable_depth: bool = True
     enable_pointcloud: bool = False
     pointcloud_fps: float = 5.0
@@ -548,13 +549,14 @@ class MujocoSimModule(
             last_timestamp = frame.timestamp
             ts = time.time()
 
-            color_img = Image(
-                data=frame.rgb,
-                format=ImageFormat.RGB,
-                frame_id=self._color_optical_frame,
-                ts=ts,
-            )
-            self.color_image.publish(color_img)
+            if self.config.enable_color:
+                color_img = Image(
+                    data=frame.rgb,
+                    format=ImageFormat.RGB,
+                    frame_id=self._color_optical_frame,
+                    ts=ts,
+                )
+                self.color_image.publish(color_img)
 
             if self.config.enable_depth:
                 depth_img = Image(
