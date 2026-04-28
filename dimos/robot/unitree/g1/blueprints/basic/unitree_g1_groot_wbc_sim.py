@@ -68,6 +68,9 @@ from dimos.msgs.sensor_msgs.JointState import JointState
 from dimos.msgs.sensor_msgs.PointCloud2 import PointCloud2
 from dimos.msgs.std_msgs.Bool import Bool as DimosBool
 from dimos.navigation.replanning_a_star.module import ReplanningAStarPlanner
+from dimos.perception.object_tracker import ObjectTracking
+from dimos.perception.spatial_perception import SpatialMemory
+from dimos.robot.unitree.g1.blueprints.agentic._agentic_skills import _agentic_skills
 from dimos.robot.unitree.g1.blueprints.basic._groot_wbc_common import (
     ARM_DEFAULT_POSE,
     G1_GROOT_KD,
@@ -79,7 +82,6 @@ from dimos.robot.unitree.g1.blueprints.basic._groot_wbc_common import (
 from dimos.simulation.engines.mujoco_sim_module import MujocoSimModule
 from dimos.utils.data import get_data
 from dimos.utils.logging_config import setup_logger
-from dimos.visualization.rerun.bridge import RerunBridgeModule, _resolve_viewer_mode
 from dimos.visualization.viser import SplatCameraModule, ViserRenderModule
 from dimos.web.websocket_vis.websocket_vis_module import WebsocketVisModule
 
@@ -256,6 +258,7 @@ if _splat_path is not None and _splat_path.exists():
 # transports above) and color_image → /splat/color_image; downstream
 # subscribers bind to those topics by name.
 _g1_perception_stack = (
+    # Mapping + planning
     VoxelGridMapper.blueprint().transports(
         {
             ("lidar", PointCloud2): LCMTransport("/lidar", PointCloud2),
@@ -263,13 +266,16 @@ _g1_perception_stack = (
     ),
     CostMapper.blueprint(),
     ReplanningAStarPlanner.blueprint(),
+    # Visual perception (object detection + tracking, semantic spatial memory)
+    SpatialMemory.blueprint(),
+    ObjectTracking.blueprint(frame_id="camera_link"),
+    # Episode recording (memory2)
     G1Memory.blueprint().transports(
         {
             ("color_image", Image): LCMTransport("/splat/color_image", Image),
             ("lidar", PointCloud2): LCMTransport("/lidar", PointCloud2),
         }
     ),
-    RerunBridgeModule.blueprint(viewer_mode=_resolve_viewer_mode()),
 )
 
 unitree_g1_groot_wbc_sim = autoconnect(
@@ -278,6 +284,10 @@ unitree_g1_groot_wbc_sim = autoconnect(
     _g1_ws_vis,
     *_viser_modules,
     *_g1_perception_stack,
-).global_config(n_workers=10)
+    # Agentic loop: McpServer + McpClient (LLM agent) + Navigation/Speak/G1
+    # skill containers.  Requires OPENAI_API_KEY (LLM is gpt-4o by default,
+    # SpeakSkill uses OpenAI TTS).
+    _agentic_skills,
+).global_config(n_workers=14)
 
 __all__ = ["unitree_g1_groot_wbc_sim"]
