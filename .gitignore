@@ -83,3 +83,8 @@ htmlcov/
 
 # Memory2 autorecord
 recording*.db
+
+# memory2 recording artifacts
+recording_*.db
+recording_*.db-shm
+recording_*.db-wal

@@ -49,12 +49,17 @@ Usage:
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from dimos.control.components import HardwareComponent, HardwareType
 from dimos.control.coordinator import ControlCoordinator, TaskConfig
 from dimos.core.coordination.blueprints import autoconnect
+from dimos.core.stream import In
 from dimos.core.transport import LCMTransport
 from dimos.hardware.whole_body.spec import WholeBodyConfig
+from dimos.mapping.costmapper import CostMapper
+from dimos.mapping.voxels import VoxelGridMapper
+from dimos.memory2.module import Recorder, RecorderConfig
 from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
 from dimos.msgs.geometry_msgs.Twist import Twist
 from dimos.msgs.sensor_msgs.CameraInfo import CameraInfo
@@ -62,6 +67,7 @@ from dimos.msgs.sensor_msgs.Image import Image
 from dimos.msgs.sensor_msgs.JointState import JointState
 from dimos.msgs.sensor_msgs.PointCloud2 import PointCloud2
 from dimos.msgs.std_msgs.Bool import Bool as DimosBool
+from dimos.navigation.replanning_a_star.module import ReplanningAStarPlanner
 from dimos.robot.unitree.g1.blueprints.basic._groot_wbc_common import (
     ARM_DEFAULT_POSE,
     G1_GROOT_KD,
@@ -73,10 +79,28 @@ from dimos.robot.unitree.g1.blueprints.basic._groot_wbc_common import (
 from dimos.simulation.engines.mujoco_sim_module import MujocoSimModule
 from dimos.utils.data import get_data
 from dimos.utils.logging_config import setup_logger
+from dimos.visualization.rerun.bridge import RerunBridgeModule, _resolve_viewer_mode
 from dimos.visualization.viser import SplatCameraModule, ViserRenderModule
 from dimos.web.websocket_vis.websocket_vis_module import WebsocketVisModule
 
 logger = setup_logger()
+
+
+class G1MemoryConfig(RecorderConfig):
+    db_path: str | Path = "recording_g1.db"
+
+
+class G1Memory(Recorder):
+    """G1 ``Recorder`` subclass — records the visual + spatial streams.
+
+    Mirrors ``Go2Memory`` shape so memory2's existing playback / search
+    tooling works on G1 recordings without special-casing.
+    """
+
+    color_image: In[Image]
+    lidar: In[PointCloud2]
+    config: G1MemoryConfig
+
 
 # MJCF the GR00T policies were trained against — torque actuators, the
 # subprocess (and now the in-process MujocoEngine) computes PD itself.
@@ -221,6 +245,33 @@ if _splat_path is not None and _splat_path.exists():
     )
     _viser_modules = (_g1_viser, _g1_splat_cam)
 
-unitree_g1_groot_wbc_sim = autoconnect(_g1_coordinator, _g1_engine, _g1_ws_vis, *_viser_modules)
+# Mapping + planning + memory + telemetry layered on top of the base
+# sim.  The base sim publishes pointcloud → /lidar (see the engine
+# transports above) and color_image → /splat/color_image; downstream
+# subscribers bind to those topics by name.
+_g1_perception_stack = (
+    VoxelGridMapper.blueprint().transports(
+        {
+            ("lidar", PointCloud2): LCMTransport("/lidar", PointCloud2),
+        }
+    ),
+    CostMapper.blueprint(),
+    ReplanningAStarPlanner.blueprint(),
+    G1Memory.blueprint().transports(
+        {
+            ("color_image", Image): LCMTransport("/splat/color_image", Image),
+            ("lidar", PointCloud2): LCMTransport("/lidar", PointCloud2),
+        }
+    ),
+    RerunBridgeModule.blueprint(viewer_mode=_resolve_viewer_mode()),
+)
+
+unitree_g1_groot_wbc_sim = autoconnect(
+    _g1_coordinator,
+    _g1_engine,
+    _g1_ws_vis,
+    *_viser_modules,
+    *_g1_perception_stack,
+).global_config(n_workers=10)
 
 __all__ = ["unitree_g1_groot_wbc_sim"]
