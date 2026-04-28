@@ -378,6 +378,7 @@ tests = [
     "gdown==5.2.0",
     "tensorboard==2.20.0",
     "xacro",
+    "pygame>=2.6.1",
 ]
 
 # Full CI test group for the self-hosted runner. Inherits `tests` and adds
