@@ -49,6 +49,7 @@ from dimos.visualization.viser.robot_meshes import (
     dimos_joint_to_mjcf,
     load_robot_meshes,
 )
+from dimos.visualization.viser.scene_editor import SceneEditor
 from dimos.visualization.viser.splat import SplatAlignment, load_splat
 
 logger = setup_logger()
@@ -191,6 +192,13 @@ class ViserRenderModule(Module):
                 scale=float(self._camera_spec.frustum_scale),
                 color=self._camera_spec.frustum_color,
             )
+
+        # In-viewer scene editor.  Spawns boxes / planes the user can
+        # drag with transform-control gizmos; "Export OBJ" writes them
+        # to data/mujoco_sim/dimos_office_edited.obj for hand-off into
+        # the MJCF.
+        self._scene_editor = SceneEditor(server=self._server)
+        self._scene_editor.attach()
 
         # Click-to-navigate. We arm a one-shot scene click callback when
         # the user presses "Set nav goal", because viser disables camera

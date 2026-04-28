@@ -42,6 +42,9 @@ def get_assets() -> dict[str, bytes]:
     # Assets used from https://sketchfab.com/3d-models/mersus-office-8714be387bcd406898b2615f7dae3a47
     # Created by Ryan Cassidy and Coleman Costello
     mjx_env.update_assets(assets, data_dir, "*.xml")
+    mjx_env.update_assets(
+        assets, data_dir, "*.obj"
+    )  # top-level scene meshes (e.g. dimos_office.obj)
     mjx_env.update_assets(assets, data_dir / "scene_office1/textures", "*.png")
     mjx_env.update_assets(assets, data_dir / "scene_office1/office_split", "*.obj")
     mjx_env.update_assets(assets, mjx_env.MENAGERIE_PATH / "unitree_go1" / "assets")
