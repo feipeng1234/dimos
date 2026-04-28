@@ -160,6 +160,13 @@ _g1_engine = MujocoSimModule.blueprint(
     # G1 GR00T MJCF references meshes by bare filename (menagerie convention);
     # without the legacy asset injection MjModel.from_xml_path can't find them.
     inject_legacy_assets=True,
+).transports(
+    {
+        # ShmMujocoG1WholeBodyAdapter.read_odom returns None (no SHM
+        # base-pose channel); MujocoSimModule publishes the floating
+        # base pose directly so the viser viewer + nav stack see it.
+        ("odom", PoseStamped): LCMTransport("/odom", PoseStamped),
+    }
 )
 
 # WASD teleop dashboard at http://localhost:7779/.

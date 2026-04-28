@@ -42,6 +42,7 @@ from dimos.core.core import rpc
 from dimos.core.module import Module, ModuleConfig
 from dimos.core.stream import Out
 from dimos.hardware.sensors.camera.spec import DepthCameraConfig, DepthCameraHardware
+from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
 from dimos.msgs.geometry_msgs.Quaternion import Quaternion
 from dimos.msgs.geometry_msgs.Transform import Transform
 from dimos.msgs.geometry_msgs.Vector3 import Vector3
@@ -132,6 +133,10 @@ class MujocoSimModule(
     camera_info: Out[CameraInfo]
     depth_camera_info: Out[CameraInfo]
     imu: Out[Imu]
+    # Floating-base pose (qpos[0:7]) for robots whose MJCF has a free
+    # joint at the root.  Published every step; consumers like the viser
+    # viewer use this to translate the robot in world space.
+    odom: Out[PoseStamped]
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -416,6 +421,28 @@ class MujocoSimModule(
             if self._gripper_idx < len(positions):
                 shm.write_gripper_state(positions[self._gripper_idx])
 
+        # Odom — when the MJCF has a free-joint root, publish base pose
+        # from qpos[0:7] every step.  Without this, downstream consumers
+        # (viser viewer, nav stack) only see joint articulation, not
+        # base translation through the world.
+        data = engine._data  # type: ignore[attr-defined]  # in-process, same MjData
+        if self._imu_base_qpos_slice is not None:
+            base_pos = data.qpos[0:3]
+            base_quat = data.qpos[3:7]  # (w, x, y, z) per MuJoCo convention
+            self.odom.publish(
+                PoseStamped(
+                    ts=time.time(),
+                    frame_id="world",
+                    position=Vector3(float(base_pos[0]), float(base_pos[1]), float(base_pos[2])),
+                    orientation=Quaternion(
+                        float(base_quat[1]),
+                        float(base_quat[2]),
+                        float(base_quat[3]),
+                        float(base_quat[0]),
+                    ),  # PoseStamped uses x,y,z,w
+                )
+            )
+
         # IMU — only if MJCF declared the sensors.
         if (
             self._imu_gyro_slice is None
@@ -423,7 +450,6 @@ class MujocoSimModule(
             and self._imu_base_qpos_slice is None
         ):
             return
-        data = engine._data  # type: ignore[attr-defined]  # in-process, same MjData
         if self._imu_base_qpos_slice is not None:
             q = data.qpos[self._imu_base_qpos_slice]
             quat = (float(q[0]), float(q[1]), float(q[2]), float(q[3]))
