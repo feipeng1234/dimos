@@ -268,8 +268,6 @@ class RerunBridgeModule(Module):
         return f"{self.config.entity_prefix}{topic_str}"
 
     def _on_message(self, msg: Any, topic: Any) -> None:
-        """Handle incoming message - log to rerun."""
-
         entity_path: str = self._get_entity_path(topic)
 
         # Throttle entities with a max_hz limit
