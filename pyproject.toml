@@ -375,6 +375,7 @@ tests = [
     "openai",
     "moondream",
     "torchreid==0.2.5",
+    "gdown==5.2.0",
 ]
 
 # Full CI test group for the self-hosted runner. Inherits `tests` and adds
