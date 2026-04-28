@@ -167,7 +167,7 @@ class Config(ModuleConfig):
 
     entity_prefix: str = "world"
     topic_to_entity: Callable[[Any], str] | None = None
-    connect_url: str = "rerun+http://127.0.0.1:9877/proxy"
+    connect_url: str = "rerun+http://127.0.0.1:9876/proxy"
     memory_limit: str = "25%"
     rerun_open: RerunOpenOption = RERUN_OPEN_DEFAULT
     rerun_web: bool = RERUN_ENABLE_WEB

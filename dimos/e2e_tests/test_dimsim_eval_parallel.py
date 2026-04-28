@@ -247,7 +247,7 @@ def parallel_env():
     call0 = DimosCliCall()
     call0.demo_args = ["sim-parallel-eval"]
     call0.process = subprocess.Popen(
-        ["dimos", "--simulation", "run", "sim-parallel-eval"],
+        ["dimos", "--simulation", "--viewer", "none", "run", "sim-parallel-eval"],
         env=env0,
         stdout=log0 or subprocess.DEVNULL,
         stderr=log0 or subprocess.DEVNULL,
@@ -276,7 +276,7 @@ def parallel_env():
             call_i = DimosCliCall()
             call_i.demo_args = ["sim-parallel-eval"]
             call_i.process = subprocess.Popen(
-                ["dimos", "--simulation", "run", "sim-parallel-eval"],
+                ["dimos", "--simulation", "--viewer", "none", "run", "sim-parallel-eval"],
                 env=env_i,
                 stdout=log_i or subprocess.DEVNULL,
                 stderr=log_i or subprocess.DEVNULL,

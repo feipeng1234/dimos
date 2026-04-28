@@ -28,7 +28,7 @@ from dimos.robot.sim.blueprints.basic.sim_basic import sim_basic
 
 sim_nav = autoconnect(
     sim_basic,
-    VoxelGridMapper.blueprint(voxel_size=0.1, publish_interval=0.5),
+    VoxelGridMapper.blueprint(voxel_size=0.1),
     CostMapper.blueprint(
         algo="height_cost", config=HeightCostConfig(can_pass_under=1.5, smoothing=2.0)
     ),

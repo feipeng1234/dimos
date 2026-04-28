@@ -147,7 +147,7 @@ class DimSimTF(Module):
 
         from reactivex.disposable import Disposable
 
-        self._disposables.add(Disposable(self.odom.subscribe(self._on_odom)))
+        self.register_disposable(Disposable(self.odom.subscribe(self._on_odom)))
 
         # Publish camera_info immediately so the rerun pinhole exists
         # before the first image arrives (avoids "2D visualizers require

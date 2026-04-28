@@ -112,8 +112,10 @@ def sim_nav():
     }
     call = DimosCliCall()
     call.demo_args = ["sim-nav"]
+    # `--viewer none` skips RerunBridgeModule, which blocks indefinitely on
+    # headless macOS and prevents `_send_on_system_modules` from firing.
     call.process = subprocess.Popen(
-        ["dimos", "--simulation", "run", "sim-nav"],
+        ["dimos", "--simulation", "--viewer", "none", "run", "sim-nav"],
         env=env,
         stdout=log_file or subprocess.DEVNULL,
         stderr=log_file or subprocess.DEVNULL,
@@ -149,7 +151,8 @@ def spy(sim_nav):
     s.stop()
 
 
-@pytest.mark.slow
+# Runs in CI: spawns dimos sim-nav headless, verifies the sensor + control pipeline.
+# Requires multicast routing, network egress (dimsim binary download), and headless Chrome.
 class TestSimNav:
     """Smoke tests for the sim-nav pipeline — sensors, control, and data integrity."""
 

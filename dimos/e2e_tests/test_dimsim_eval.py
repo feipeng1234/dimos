@@ -33,6 +33,7 @@ import time
 import pytest
 import websocket
 
+from dimos.core.transport import pLCMTransport
 from dimos.e2e_tests.dimos_cli_call import DimosCliCall
 from dimos.e2e_tests.lcm_spy import LcmSpy
 
@@ -83,6 +84,20 @@ def _wait_for_port_free(port: int, timeout: float = 30) -> bool:
     return False
 
 
+def _send_task_to_agent(message: str) -> None:
+    """Publish the task directly to /human_input LCM so McpClient picks it up.
+
+    Mirrors what McpServer.agent_send does internally — bypasses MCP/HTTP so
+    we don't depend on the FastAPI skill registry being populated.
+    """
+    transport: pLCMTransport[str] = pLCMTransport("/human_input")
+    try:
+        transport.start()
+        transport.publish(message)
+    finally:
+        transport.stop()
+
+
 class EvalClient:
     """Talks to the browser eval harness via the bridge WebSocket."""
 
@@ -119,11 +134,18 @@ class EvalClient:
         return False
 
     def run_workflow(self, workflow: dict) -> dict:
-        """Send loadEnv + startWorkflow, wait for workflowComplete."""
+        """Send loadEnv + startWorkflow, prompt the agent over LCM, wait for workflowComplete."""
         timeout = workflow.get("timeoutSec", 120) + 30
         self._send({"type": "loadEnv", "scene": workflow.get("environment", "apt")})
         self._wait_for("envReady", timeout=30)
         self._send({"type": "startWorkflow", "workflow": workflow})
+        # Prompt the dimos agent with the workflow task. The harness teleports
+        # the agent on startWorkflow; we then publish the task to /human_input
+        # over LCM, which McpClient (the agent brain in sim_agentic) consumes
+        # to drive the agent stack.
+        task = workflow.get("task", "").strip()
+        if task:
+            _send_task_to_agent(task)
         return self._wait_for("workflowComplete", timeout=timeout)
 
     def close(self):
@@ -163,8 +185,13 @@ def sim_eval():
     }
     call = DimosCliCall()
     call.demo_args = ["sim-eval"]
+    # `--viewer none` skips RerunBridgeModule. The default RerunBridge.start()
+    # blocks indefinitely under headless macOS, which prevents
+    # `_send_on_system_modules` from firing — without that, McpClient never
+    # starts the LangChain agent worker thread, so prompts published to
+    # /human_input are never consumed.
     call.process = subprocess.Popen(
-        ["dimos", "--simulation", "run", "sim-eval"],
+        ["dimos", "--simulation", "--viewer", "none", "run", "sim-eval"],
         env=env,
         stdout=log_file or subprocess.DEVNULL,
         stderr=log_file or subprocess.DEVNULL,
@@ -187,15 +214,18 @@ def sim_eval():
 
 @pytest.fixture(scope="class")
 def eval_client(sim_eval):
-    """Connect to bridge WS and wait for eval harness."""
+    """Connect to bridge WS, wait for eval harness, then give the dimos agent
+    thread time to initialize before any test runs (LangChain agent setup +
+    MCP tool fetch typically completes within ~15s after module deploy)."""
     client = EvalClient(PORT)
     assert client.wait_for_harness(timeout=60), "Eval harness not responding"
+    time.sleep(20)
     yield client
     client.close()
 
 
-@pytest.mark.skipif_in_ci
-@pytest.mark.slow
+# Runs in CI: spawns dimos sim-eval headless, exercises the eval harness over WS.
+# Requires multicast routing, network egress (dimsim binary download), and headless Chrome.
 class TestSimEvalSequential:
     """Run DimSim evals sequentially against a live dimos sim-eval instance."""
 

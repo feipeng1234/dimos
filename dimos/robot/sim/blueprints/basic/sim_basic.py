@@ -187,11 +187,15 @@ if global_config.viewer == "foxglove":
         FoxgloveBridge.blueprint(shm_channels=["/color_image#sensor_msgs.Image"]),
     )
 elif global_config.viewer.startswith("rerun"):
-    from dimos.visualization.rerun.bridge import RerunBridgeModule, _resolve_viewer_mode
+    from dimos.visualization.rerun.bridge import RerunBridgeModule
 
     with_vis = autoconnect(
         _transports_base,
-        RerunBridgeModule.blueprint(viewer_mode=_resolve_viewer_mode(), **rerun_config),
+        RerunBridgeModule.blueprint(
+            rerun_open=global_config.rerun_open,
+            rerun_web=global_config.rerun_web,
+            **rerun_config,
+        ),
     )
 else:
     with_vis = _transports_base
