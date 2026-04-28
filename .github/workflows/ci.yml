@@ -45,7 +45,7 @@ jobs:
           sudo sysctl -w net.core.rmem_default=67108864
 
       - name: Install Python dependencies
-        run: uv sync --all-extras --no-extra dds --no-extra cuda --frozen
+        run: uv sync --only-group tests --frozen
 
       - name: Build C++ extensions
         run: |
@@ -97,7 +97,7 @@ jobs:
           git clean -ffdx -e .venv
 
       - name: Install Python dependencies
-        run: uv sync --all-extras --no-extra dds --frozen
+        run: uv sync --only-group tests-self-hosted --frozen
 
       - name: Remove pydrake stubs
         run: |
