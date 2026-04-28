@@ -34,7 +34,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libturbojpeg0-dev portaudio19-dev build-essential \
-            libgl1 libgl1-mesa-dri python3-dev libcyclonedds-dev
+            libgl1 libgl1-mesa-dri python3-dev cyclonedds-dev
           sudo rm -f /usr/bin/git-lfs
 
       - name: Configure LCM networking
