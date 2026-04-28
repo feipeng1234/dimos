@@ -51,6 +51,10 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from dimos.agents.mcp.mcp_client import McpClient
+from dimos.agents.mcp.mcp_server import McpServer
+from dimos.agents.skills.navigation import NavigationSkillContainer
+from dimos.agents.skills.speak_skill import SpeakSkill
 from dimos.control.components import HardwareComponent, HardwareType
 from dimos.control.coordinator import ControlCoordinator, TaskConfig
 from dimos.core.coordination.blueprints import autoconnect
@@ -70,7 +74,6 @@ from dimos.msgs.std_msgs.Bool import Bool as DimosBool
 from dimos.navigation.replanning_a_star.module import ReplanningAStarPlanner
 from dimos.perception.object_tracker import ObjectTracking
 from dimos.perception.spatial_perception import SpatialMemory
-from dimos.robot.unitree.g1.blueprints.agentic._agentic_skills import _agentic_skills
 from dimos.robot.unitree.g1.blueprints.basic._groot_wbc_common import (
     ARM_DEFAULT_POSE,
     G1_GROOT_KD,
@@ -79,6 +82,7 @@ from dimos.robot.unitree.g1.blueprints.basic._groot_wbc_common import (
     g1_joints,
     g1_legs_waist,
 )
+from dimos.robot.unitree.g1.system_prompt import G1_SYSTEM_PROMPT
 from dimos.simulation.engines.mujoco_sim_module import MujocoSimModule
 from dimos.utils.data import get_data
 from dimos.utils.logging_config import setup_logger
@@ -284,10 +288,18 @@ unitree_g1_groot_wbc_sim = autoconnect(
     _g1_ws_vis,
     *_viser_modules,
     *_g1_perception_stack,
-    # Agentic loop: McpServer + McpClient (LLM agent) + Navigation/Speak/G1
-    # skill containers.  Requires OPENAI_API_KEY (LLM is gpt-4o by default,
-    # SpeakSkill uses OpenAI TTS).
-    _agentic_skills,
+    # Agentic loop: MCP server + LLM client + skill containers.
+    # Requires OPENAI_API_KEY (LLM is gpt-4o by default, SpeakSkill uses
+    # OpenAI TTS).  We compose a sim-friendly subset: skip
+    # UnitreeG1SkillContainer (its move()/arm-gesture/mode skills require
+    # a G1Connection-spec module, i.e. the old subprocess sim path that
+    # would conflict with our in-process MujocoSimModule).  Agent has
+    # navigate_with_text/tag_location/etc. via NavigationSkillContainer
+    # and speak() via SpeakSkill.  TODO: G1Sim-compatible move() skill.
+    McpServer.blueprint(),
+    McpClient.blueprint(system_prompt=G1_SYSTEM_PROMPT),
+    NavigationSkillContainer.blueprint(),
+    SpeakSkill.blueprint(),
 ).global_config(n_workers=14)
 
 __all__ = ["unitree_g1_groot_wbc_sim"]
