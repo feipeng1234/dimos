@@ -52,7 +52,8 @@ IGNORED_DIRS = {
     ".tox",
     # third-party vendored code
     "gtsam",
-    # auto-generated enhancement artifacts
+    # hidden/personal directories
+    ".hidden",
     ".ignore.enhance",
 }
 
