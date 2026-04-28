@@ -156,7 +156,7 @@ _g1_coordinator = (
             ("joint_state", JointState): LCMTransport("/coordinator/joint_state", JointState),
             ("odom", PoseStamped): LCMTransport("/odom", PoseStamped),
             ("joint_command", JointState): LCMTransport("/g1/joint_command", JointState),
-            ("twist_command", Twist): LCMTransport("/g1/cmd_vel", Twist),
+            ("twist_command", Twist): LCMTransport("/cmd_vel", Twist),
             ("activate", DimosBool): LCMTransport("/g1/activate", DimosBool),
             ("dry_run", DimosBool): LCMTransport("/g1/dry_run", DimosBool),
         }
@@ -201,7 +201,7 @@ _g1_engine = MujocoSimModule.blueprint(
 # WASD teleop dashboard at http://localhost:7779/.
 _g1_ws_vis = WebsocketVisModule.blueprint().transports(
     {
-        ("cmd_vel", Twist): LCMTransport("/g1/cmd_vel", Twist),
+        ("cmd_vel", Twist): LCMTransport("/cmd_vel", Twist),
         ("activate", DimosBool): LCMTransport("/g1/activate", DimosBool),
         ("dry_run", DimosBool): LCMTransport("/g1/dry_run", DimosBool),
     },
