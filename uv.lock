@@ -2033,6 +2033,7 @@ tests = [
     { name = "ultralytics" },
     { name = "unitree-webrtc-connect-leshy" },
     { name = "watchdog" },
+    { name = "xacro" },
 ]
 tests-self-hosted = [
     { name = "coverage" },
@@ -2089,6 +2090,7 @@ tests-self-hosted = [
     { name = "ultralytics" },
     { name = "unitree-webrtc-connect-leshy" },
     { name = "watchdog" },
+    { name = "xacro" },
 ]
 
 [package.metadata]
@@ -2281,6 +2283,7 @@ tests = [
     { name = "ultralytics", specifier = ">=8.3.70" },
     { name = "unitree-webrtc-connect-leshy", specifier = ">=2.0.7" },
     { name = "watchdog", specifier = ">=3.0.0" },
+    { name = "xacro" },
 ]
 tests-self-hosted = [
     { name = "coverage", specifier = ">=7.0" },
@@ -2336,6 +2339,7 @@ tests-self-hosted = [
     { name = "ultralytics", specifier = ">=8.3.70" },
     { name = "unitree-webrtc-connect-leshy", specifier = ">=2.0.7" },
     { name = "watchdog", specifier = ">=3.0.0" },
+    { name = "xacro" },
 ]
 
 [[package]]

@@ -377,6 +377,7 @@ tests = [
     "torchreid==0.2.5",
     "gdown==5.2.0",
     "tensorboard==2.20.0",
+    "xacro",
 ]
 
 # Full CI test group for the self-hosted runner. Inherits `tests` and adds
