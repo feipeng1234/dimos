@@ -279,6 +279,12 @@ if _splat_path is not None and _splat_path.exists():
         mjcf_path=_MJCF_PATH,
         alignment_yaml=str(_alignment_yaml) if _alignment_yaml.exists() else None,
         render_hz=10.0,
+        # Match the MJCF camera name MujocoSimModule renders depth from
+        # so the published color frame_id == depth frame_id ==
+        # head_color_color_optical_frame.  ObjectSceneRegistration's
+        # tf.get(target_frame, color.frame_id, ts) succeeds because
+        # MujocoSimModule already publishes TF for that frame.
+        frame_id="head_color_color_optical_frame",
     ).transports(
         {
             ("joint_state", JointState): LCMTransport("/coordinator/joint_state", JointState),
