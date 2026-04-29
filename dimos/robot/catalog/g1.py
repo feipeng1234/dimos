@@ -131,11 +131,13 @@ def _g1_arm(
     return G1ArmCatalogEntry(name=name, robot_model_config=rmc, task_config=task)
 
 
-def g1_left_arm(name: str = "g1_left_arm") -> G1ArmCatalogEntry:
+def g1_left_arm(name: str = "left_arm") -> G1ArmCatalogEntry:
+    """Default name "left_arm" rather than "g1_left_arm" because LLMs reach
+    for the natural English name first when the user says "the left arm"."""
     return _g1_arm(name, _LEFT_ARM_JOINT_PAIRS, "left_wrist_yaw_link")
 
 
-def g1_right_arm(name: str = "g1_right_arm") -> G1ArmCatalogEntry:
+def g1_right_arm(name: str = "right_arm") -> G1ArmCatalogEntry:
     return _g1_arm(name, _RIGHT_ARM_JOINT_PAIRS, "right_wrist_yaw_link")
 
 
