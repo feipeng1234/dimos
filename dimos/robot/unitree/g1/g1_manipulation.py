@@ -169,10 +169,22 @@ class G1ManipulationModule(ManipulationModule):
     def get_robot_state(self, robot_name: str | None = None) -> str:
         """Get current robot state with EE pose **in world frame**.
 
+        If ``robot_name`` is omitted, reports all configured arms.
+
         Joint positions are absolute (no transform).  EE pose is
         translated from pelvis-local (Drake's frame) to world via the
         live /odom.
         """
+        if not robot_name:
+            names = list(self._robots.keys())
+            if not names:
+                return "No robots configured."
+            sections = [f"=== {n} ===\n{self._describe_one(n)}" for n in names]
+            sections.append(f"\nState: {self.get_state()}")
+            return "\n\n".join(sections)
+        return self._describe_one(robot_name) + f"\n\nState: {self.get_state()}"
+
+    def _describe_one(self, robot_name: str) -> str:
         lines: list[str] = []
         joints = self.get_current_joints(robot_name)
         if joints is not None:
@@ -198,11 +210,6 @@ class G1ManipulationModule(ManipulationModule):
             lines.append(f"Gripper: {gripper_pos:.3f}m")
         else:
             lines.append("Gripper: not configured")
-
-        state = self.get_state(robot_name)
-        if state is not None:
-            lines.append(f"State: {state.name}")
-
         return "\n".join(lines)
 
 
