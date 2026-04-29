@@ -84,7 +84,7 @@ from dimos.perception.object_scene_registration import ObjectSceneRegistrationMo
 from dimos.perception.object_tracker import ObjectTracking
 from dimos.perception.perceive_loop_skill import PerceiveLoopSkill
 from dimos.perception.spatial_perception import SpatialMemory
-from dimos.robot.catalog.g1 import g1_left_arm, g1_right_arm
+from dimos.robot.catalog.g1 import g1_left_arm
 from dimos.robot.unitree.g1.blueprints.basic._groot_wbc_common import (
     G1_GROOT_KD,
     G1_GROOT_KP,
@@ -122,13 +122,18 @@ class G1Memory(Recorder):
 # subprocess (and now the in-process MujocoEngine) computes PD itself.
 _MJCF_PATH = "data/mujoco_sim/g1_gear_wbc.xml"
 
-# Manipulation: each G1 arm as a 7-DOF stationary manipulator rooted
+# Manipulation: G1 left arm as a 7-DOF stationary manipulator rooted
 # at the floating-base pelvis.  Drake-driven IK + RRT plans
-# trajectories; the coordinator's "trajectory" tasks on the same
-# joint subsets execute them.  Both arms are exposed so the agent can
-# pick whichever has the better workspace for the target.
+# trajectories; the coordinator's "trajectory" task on the same
+# joint subset executes them.
+#
+# Left arm only (TODO: dual-arm).  Registering both arms makes Drake
+# parser.AddModels(g1.urdf) twice — two full G1s welded at the same
+# world origin — which causes COLLISION_AT_START failures on every
+# plan because the duplicated bodies overlap.  Real fix is a shared
+# model_instance in ManipulationModule.add_robot (or per-arm subset
+# URDFs); single-arm here keeps planning clean.
 _g1_left_arm_cfg = g1_left_arm()
-_g1_right_arm_cfg = g1_right_arm()
 
 _g1_coordinator = (
     ControlCoordinator.blueprint(
@@ -165,14 +170,11 @@ _g1_coordinator = (
                 auto_dry_run=False,
                 default_ramp_seconds=0.0,
             ),
-            # Both arms: trajectory followers driven by ManipulationModule.
+            # Left arm: trajectory follower driven by ManipulationModule.
             # When idle the arm dangles under the WBC's kp/kd damping;
             # when a trajectory is loaded the task wins arbitration on
-            # those 7 joints.  Agent picks robot_name="left_arm" or
-            # "right_arm" depending on which side of the body the
-            # target sits.
+            # those 7 joints.  Right arm has no controller — hangs limp.
             _g1_left_arm_cfg.task_config,
-            _g1_right_arm_cfg.task_config,
         ],
     )
     .transports(
@@ -343,10 +345,7 @@ _g1_agentic_stack = (
     # joint_state for live state sync.  Meshcat viz off in this
     # composed sim (we already have viser as the live 3D view).
     G1ManipulationModule.blueprint(
-        robots=[
-            _g1_left_arm_cfg.robot_model_config,
-            _g1_right_arm_cfg.robot_model_config,
-        ],
+        robots=[_g1_left_arm_cfg.robot_model_config],
         planning_timeout=10.0,
         # Meshcat viewer for what Drake actually sees: URDF model in
         # the planner's frame, planned trajectories, world-monitored
