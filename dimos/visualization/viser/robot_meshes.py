@@ -94,37 +94,83 @@ def load_robot_meshes(
 
     geoms: list[GeomInstance] = []
     for gid in range(model.ngeom):
-        if int(model.geom_type[gid]) != mujoco.mjtGeom.mjGEOM_MESH:
-            continue
         if int(model.geom_group[gid]) not in visual_groups:
             continue
-        mesh_id = int(model.geom_dataid[gid])
-        if mesh_id < 0:
-            continue
-
-        v_start = int(model.mesh_vertadr[mesh_id])
-        v_count = int(model.mesh_vertnum[mesh_id])
-        f_start = int(model.mesh_faceadr[mesh_id])
-        f_count = int(model.mesh_facenum[mesh_id])
-        vertices = np.array(
-            model.mesh_vert[v_start : v_start + v_count],
-            dtype=np.float32,
-        ).copy()
-        faces = np.array(
-            model.mesh_face[f_start : f_start + f_count],
-            dtype=np.int32,
-        ).copy()
-
+        gtype = int(model.geom_type[gid])
         body_id = int(model.geom_bodyid[gid])
         body_name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, body_id) or f"body_{body_id}"
         rgba = tuple(float(x) for x in model.geom_rgba[gid])
+        local_pos = np.array(model.geom_pos[gid], dtype=np.float32).copy()
+        local_wxyz = np.array(model.geom_quat[gid], dtype=np.float32).copy()
+        size = model.geom_size[gid]
+
+        # Mesh: pull vertices/faces from the model.
+        if gtype == mujoco.mjtGeom.mjGEOM_MESH:
+            mesh_id = int(model.geom_dataid[gid])
+            if mesh_id < 0:
+                continue
+            v_start = int(model.mesh_vertadr[mesh_id])
+            v_count = int(model.mesh_vertnum[mesh_id])
+            f_start = int(model.mesh_faceadr[mesh_id])
+            f_count = int(model.mesh_facenum[mesh_id])
+            vertices = np.array(
+                model.mesh_vert[v_start : v_start + v_count],
+                dtype=np.float32,
+            ).copy()
+            faces = np.array(
+                model.mesh_face[f_start : f_start + f_count],
+                dtype=np.int32,
+            ).copy()
+        # Box: tessellate as 8 verts + 12 triangles, half-sizes from
+        # geom_size[0..2].  Lets us render <geom type="box"> primitives
+        # (manip_table, manip_cube, scene-editor exports) without a
+        # mesh asset.
+        elif gtype == mujoco.mjtGeom.mjGEOM_BOX:
+            hx, hy, hz = float(size[0]), float(size[1]), float(size[2])
+            vertices = np.array(
+                [
+                    [-hx, -hy, -hz],
+                    [hx, -hy, -hz],
+                    [hx, hy, -hz],
+                    [-hx, hy, -hz],
+                    [-hx, -hy, hz],
+                    [hx, -hy, hz],
+                    [hx, hy, hz],
+                    [-hx, hy, hz],
+                ],
+                dtype=np.float32,
+            )
+            # Outward-facing CCW triangles (verified by cross-product).
+            faces = np.array(
+                [
+                    [0, 2, 1],
+                    [0, 3, 2],  # -Z (bottom)
+                    [4, 5, 6],
+                    [4, 6, 7],  # +Z (top)
+                    [0, 1, 5],
+                    [0, 5, 4],  # -Y
+                    [1, 2, 6],
+                    [1, 6, 5],  # +X
+                    [2, 3, 7],
+                    [2, 7, 6],  # +Y
+                    [3, 0, 4],
+                    [3, 4, 7],  # -X
+                ],
+                dtype=np.int32,
+            )
+        else:
+            # Sphere, cylinder, plane, etc. — skip for now.  Only manip
+            # rigs and scene-editor exports use boxes; everything else
+            # the dimos sims care about is a mesh.
+            continue
+
         geoms.append(
             GeomInstance(
                 body_name=body_name,
                 vertices=vertices,
                 faces=faces,
-                local_pos=np.array(model.geom_pos[gid], dtype=np.float32).copy(),
-                local_wxyz=np.array(model.geom_quat[gid], dtype=np.float32).copy(),
+                local_pos=local_pos,
+                local_wxyz=local_wxyz,
                 rgba=rgba,  # type: ignore[arg-type]
             )
         )
