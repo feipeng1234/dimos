@@ -16,7 +16,7 @@ import time
 
 import pytest
 
-pytestmark = pytest.mark.slow
+pytestmark = pytest.mark.self_hosted
 
 
 def test_guess_projection(get_moment_2d, publish_moment) -> None:

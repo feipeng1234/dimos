@@ -181,7 +181,7 @@ class Visualizer(Module):
         return Image.from_file(get_data("cafe-smol.jpg")).to_rgb()
 
 
-@pytest.mark.slow
+@pytest.mark.self_hosted
 def test_image(agent_setup):
     history = agent_setup(
         blueprints=[Visualizer.blueprint()],

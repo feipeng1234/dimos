@@ -22,7 +22,7 @@ from dimos.mapping.occupancy.operations import overlay_occupied, smooth_occupied
 from dimos.mapping.occupancy.visualizations import visualize_occupancy_grid
 from dimos.utils.data import get_data
 
-pytestmark = pytest.mark.slow
+pytestmark = pytest.mark.self_hosted
 
 
 def test_smooth_occupied(occupancy) -> None:

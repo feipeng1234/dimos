@@ -25,7 +25,7 @@ from dimos.mapping.models import LatLon
 from dimos.mapping.osm.osm import get_osm_map
 from dimos.utils.data import get_data
 
-pytestmark = pytest.mark.slow
+pytestmark = pytest.mark.self_hosted
 
 
 def _tile_callback(request: Request, context: Any) -> bytes:

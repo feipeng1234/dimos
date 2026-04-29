@@ -65,7 +65,7 @@ def test_blueprint_is_valid(blueprint_name: str) -> None:
     _check_blueprint(blueprint_name)
 
 
-@pytest.mark.slow
+@pytest.mark.self_hosted
 @pytest.mark.parametrize("blueprint_name", SELF_HOSTED_BLUEPRINTS)
 def test_self_hosted_blueprint_is_valid(blueprint_name: str) -> None:
     """Validate blueprints that need heavy deps or LFS — self-hosted runner only."""

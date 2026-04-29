@@ -17,7 +17,7 @@
 Markers:
     - No special markers needed for unit tests (all run on any platform).
     - Tests that launch the actual Unity binary should use:
-        @pytest.mark.slow
+        @pytest.mark.self_hosted
         @pytest.mark.skipif(platform.system() != "Linux" or platform.machine() not in ("x86_64", "AMD64"),
                             reason="Unity binary requires Linux x86_64")
         @pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="Unity requires a display (X11)")

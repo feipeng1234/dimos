@@ -24,7 +24,7 @@ from dimos.utils.cli.plot import bar
 from dimos.utils.data import get_data, get_data_dir
 from dimos.utils.testing.replay import TimedSensorReplay
 
-pytestmark = pytest.mark.slow
+pytestmark = pytest.mark.self_hosted
 
 
 @pytest.mark.tool

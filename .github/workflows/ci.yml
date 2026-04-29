@@ -75,7 +75,7 @@ jobs:
           name: coverage-report
           path: htmlcov/
 
-  slow-tests:
+  self-hosted-tests:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     timeout-minutes: 60
     runs-on: [self-hosted, Linux]
@@ -106,7 +106,7 @@ jobs:
 
       - name: Run tests
         run: |
-          /entrypoint.sh bash -c "source .venv/bin/activate && pytest --durations=0 -m '(slow or skipif_no_ros) and not (tool or mujoco)'"
+          /entrypoint.sh bash -c "source .venv/bin/activate && pytest --durations=0 -m '(self_hosted or skipif_no_ros) and not (tool or mujoco)'"
 
       - name: Run mypy
         if: ${{ !cancelled() }}
@@ -120,12 +120,12 @@ jobs:
 
   ci-gate:
     if: always()
-    needs: [tests, slow-tests]
+    needs: [tests, self-hosted-tests]
     runs-on: ubuntu-latest
     steps:
       - name: Check results
         run: |
           if [[ "${{ needs.tests.result }}" != "success" ]] || \
-             [[ "${{ needs.slow-tests.result }}" != "success" ]]; then
+             [[ "${{ needs.self-hosted-tests.result }}" != "success" ]]; then
             exit 1
           fi

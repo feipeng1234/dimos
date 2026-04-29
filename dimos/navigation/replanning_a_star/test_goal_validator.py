@@ -20,7 +20,7 @@ from dimos.msgs.nav_msgs.OccupancyGrid import CostValues, OccupancyGrid
 from dimos.navigation.replanning_a_star.goal_validator import find_safe_goal
 from dimos.utils.data import get_data
 
-pytestmark = pytest.mark.slow
+pytestmark = pytest.mark.self_hosted
 
 
 @pytest.fixture

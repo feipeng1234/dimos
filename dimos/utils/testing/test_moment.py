@@ -26,7 +26,7 @@ from dimos.robot.unitree.go2 import connection
 from dimos.utils.data import get_data
 from dimos.utils.testing.moment import Moment, SensorMoment
 
-pytestmark = pytest.mark.slow
+pytestmark = pytest.mark.self_hosted
 
 _DATA_DIR_NAME = "unitree_go2_office_walk2"
 

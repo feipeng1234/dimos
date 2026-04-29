@@ -300,7 +300,7 @@ base = [
 # sentence_transformers, edgetam-dimos, open_clip_torch, torchreid,
 # mujoco, cupy, etc.) which either require LFS-backed model files or
 # significant disk space. Tests that need those libraries are marked
-# `slow` and run on the self-hosted runner via the `tests-self-hosted`
+# `self_hosted` and run on the self-hosted runner via the `tests-self-hosted`
 # group.
 tests = [
     # Test runner
@@ -355,7 +355,7 @@ tests = [
     # Minimum heavy deps required for test collection to succeed.
     # These modules are imported unconditionally by production code that
     # tests transitively reach during pytest collection (even if the
-    # tests themselves are marked `slow` and skipped):
+    # tests themselves are marked `self_hosted` and skipped):
     #   - torch:   `dimos.perception.detection.type.detection2d.seg`
     #              (collected via perception/detection/conftest.py)
     #   - langchain (+ core): `dimos.agents.vlm_agent`
@@ -382,7 +382,7 @@ tests = [
 ]
 
 # Full CI test group for the self-hosted runner. Inherits `tests` and adds
-# the heavy ML/perception/sim extras needed for slow-marked tests (LFS,
+# the heavy ML/perception/sim extras needed for self_hosted-marked tests (LFS,
 # GPU, ROS-dependent integration tests, simulation).
 tests-self-hosted = [
     {include-group = "tests"},
@@ -507,7 +507,7 @@ env = [
   "GOOGLE_MAPS_API_KEY=AIzafake_google_key",
   "PYTHONWARNINGS=ignore:cupyx.jit.rawkernel is experimental:FutureWarning",
 ]
-addopts = "-v -r a -p no:warnings -p no:launch_testing -p no:launch_ros --import-mode=importlib --color=yes -m 'not (tool or slow or mujoco)'"
+addopts = "-v -r a -p no:warnings -p no:launch_testing -p no:launch_ros --import-mode=importlib --color=yes -m 'not (tool or self_hosted or mujoco)'"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 

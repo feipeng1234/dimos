@@ -41,7 +41,10 @@ def _is_macos() -> bool:
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "tool: dev tooling")
-    config.addinivalue_line("markers", "slow: tests that are too slow for the fast loop")
+    config.addinivalue_line(
+        "markers",
+        "self_hosted: tests that need the self-hosted runner (LFS, ROS, CUDA, etc.)",
+    )
     config.addinivalue_line("markers", "mujoco: tests which open mujoco")
     config.addinivalue_line("markers", "skipif_in_ci: skip when CI env var is set")
     config.addinivalue_line("markers", "skipif_no_openai: skip when OPENAI_API_KEY is not set")

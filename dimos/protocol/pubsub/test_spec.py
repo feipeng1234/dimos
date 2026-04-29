@@ -280,7 +280,7 @@ async def test_async_iterator(
         assert received_messages == messages_to_send
 
 
-@pytest.mark.slow
+@pytest.mark.self_hosted
 @pytest.mark.skipif_macos_bug
 @pytest.mark.parametrize("pubsub_context, topic, values", testdata)
 def test_high_volume_messages(

@@ -24,11 +24,11 @@ Rather than waste time on classifying tests, it's better to separate tests by ho
 | Test Group | When to run | Typical usage |
 |------------|-------------|---------------|
 | **fast tests** | after each code change | often run with filesystem watchers so tests rerun whenever a file is saved |
-| **slow tests** | every once in a while to make sure you haven't broken anything | maybe every commit, but definitely before publishing a PR |
+| **self-hosted tests** | every once in a while to make sure you haven't broken anything | maybe every commit, but definitely before publishing a PR |
 
 The purpose of running tests in a loop is to get immediate feedback. The faster the loop, the easier it is to identify a problem since the source is the tiny bit of code you changed.
 
-For the purposes of DimOS, slow tests are marked with `@pytest.mark.slow` and fast tests are all the remaining ones.
+For the purposes of DimOS, self-hosted tests are marked with `@pytest.mark.self_hosted` (they need LFS, ROS, CUDA, or other heavy deps); fast tests are all the remaining ones.
 
 ## Usage
 
@@ -46,22 +46,22 @@ This is the same as:
 pytest dimos
 ```
 
-The default `addopts` in `pyproject.toml` includes a `-m` filter that excludes the `slow`/`mujoco`/`tool`. So plain `pytest dimos` only runs fast tests.
+The default `addopts` in `pyproject.toml` includes a `-m` filter that excludes the `self_hosted`/`mujoco`/`tool`. So plain `pytest dimos` only runs fast tests.
 
-### Slow tests
+### Self-hosted tests
 
-Run the slow tests:
+Run the self-hosted tests:
 
 ```bash
 ./bin/pytest-slow
 ```
 
-(This is just a shortcut for `pytest -m 'not (tool or mujoco)' dimos`. I.e., run both fast tests and slow tests, but not `tool` or `mujoco`.)
+(This is just a shortcut for `pytest -m 'not (tool or mujoco)' dimos`. I.e., run both fast tests and self-hosted tests, but not `tool` or `mujoco`.)
 
-When writing or debugging a specific slow test, override `-m` yourself to run it:
+When writing or debugging a specific self-hosted test, override `-m` yourself to run it:
 
 ```bash
-pytest -m slow dimos/path/to/test_something.py
+pytest -m self_hosted dimos/path/to/test_something.py
 ```
 
 ## Writing tests
@@ -129,7 +129,7 @@ There are other useful things in `mocker`, like `mocker.MagicMock()` for creatin
 
 We have a few markers in use now.
 
-* `slow`: used to mark tests that take more than 1 second to finish.
+* `self_hosted`: used to mark tests that need the self-hosted runner (LFS, ROS, CUDA, heavy deps).
 * `tool`: tests which require human interaction. I don't like this. Please don't use them.
 * `mujoco`: tests which use `MuJoCo`. These are very slow and don't work in CI currently.
 
