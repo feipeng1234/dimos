@@ -49,6 +49,10 @@ from dimos.control.tasks.lyapunov_path_controller import (
     LyapunovPathControllerConfig,
 )
 from dimos.control.tasks.path_distancer import PathDistancer
+from dimos.control.tasks.velocity_tracking_pid import (
+    VelocityTrackingConfig,
+    VelocityTrackingPID,
+)
 from dimos.utils.logging_config import setup_logger
 from dimos.utils.trigonometry import angle_diff
 
@@ -75,6 +79,9 @@ class ReactivePathFollowerTaskConfig:
 
     # Lyapunov controller config (all reactive gains)
     controller: LyapunovPathControllerConfig = field(default_factory=LyapunovPathControllerConfig)
+
+    # Optional inner-loop velocity-tracking PID
+    pid_config: VelocityTrackingConfig | None = None
 
 
 class ReactivePathFollowerTask(BaseControlTask):
@@ -110,6 +117,10 @@ class ReactivePathFollowerTask(BaseControlTask):
 
         # Controller
         self._controller = LyapunovPathController(config.controller)
+        self._pid: VelocityTrackingPID | None = (
+            VelocityTrackingPID(config.pid_config) if config.pid_config else None
+        )
+        self._max_progress_idx: int = 0
 
         # 10 Hz decimation
         self._control_period = 1.0 / config.control_frequency
@@ -152,6 +163,22 @@ class ReactivePathFollowerTask(BaseControlTask):
 
         self._last_compute_time = state.t_now
         output = self._compute_control()
+
+        # Optional inner-loop PI velocity tracking
+        if self._pid is not None and output.velocities is not None:
+            actual_vx = state.joints.joint_velocities.get(self._joint_names_list[0], 0.0)
+            actual_vy = state.joints.joint_velocities.get(self._joint_names_list[1], 0.0)
+            actual_wz = state.joints.joint_velocities.get(self._joint_names_list[2], 0.0)
+            adj_vx, adj_vy, adj_wz = self._pid.compute(
+                output.velocities[0], output.velocities[1], output.velocities[2],
+                actual_vx, actual_vy, actual_wz,
+            )
+            output = JointCommandOutput(
+                joint_names=self._joint_names_list,
+                velocities=[adj_vx, adj_vy, adj_wz],
+                mode=ControlMode.VELOCITY,
+            )
+
         self._cached_output = output
         return output
 
@@ -175,8 +202,19 @@ class ReactivePathFollowerTask(BaseControlTask):
         current_pos = np.array([odom.position.x, odom.position.y])
         distance_to_goal = distancer.distance_to_goal(current_pos)
 
+        # Track furthest-along path index so closed paths (goal == start)
+        # don't trip arrival on tick 1.
+        closest = distancer.find_closest_point_index(current_pos)
+        if closest > self._max_progress_idx:
+            self._max_progress_idx = closest
+        progress_threshold = max(1, int(0.7 * (len(self._path.poses) - 1)))
+
         # ---- Goal reached check ----
-        if distance_to_goal < self._config.goal_tolerance and len(self._path.poses) > 0:
+        if (
+            self._max_progress_idx >= progress_threshold
+            and distance_to_goal < self._config.goal_tolerance
+            and len(self._path.poses) > 0
+        ):
             goal_yaw = self._path.poses[-1].orientation.euler[2]
             robot_yaw = odom.orientation.euler[2]
             yaw_err = angle_diff(goal_yaw, robot_yaw)
