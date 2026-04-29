@@ -43,6 +43,7 @@ class Yoloe2DDetector(Detector):
         prompt_mode: YoloePromptMode = YoloePromptMode.LRPC,
         exclude_class_ids: list[int] | None = None,
         max_area_ratio: float | None = 0.3,
+        conf: float = 0.25,
     ) -> None:
         """
         Initialize YOLO-E 2D detector.
@@ -65,6 +66,7 @@ class Yoloe2DDetector(Detector):
         self.prompt_mode = prompt_mode
         self._visual_prompts: dict[str, NDArray[Any]] | None = None
         self.max_area_ratio = max_area_ratio
+        self.conf = conf
         self._lock = threading.Lock()
 
         if prompt_mode == YoloePromptMode.PROMPT:
@@ -120,7 +122,7 @@ class Yoloe2DDetector(Detector):
         track_kwargs = {
             "source": image.to_opencv(),
             "device": self.device,
-            "conf": 0.6,
+            "conf": self.conf,
             "iou": 0.6,
             "persist": True,
             "verbose": False,
