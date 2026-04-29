@@ -104,6 +104,10 @@ def _g1_arm(
         package_paths={"unitree_g1": _G1_PACKAGE_DIR},
         joint_name_mapping=coord_to_urdf,
         coordinator_task_name=f"traj_{name}",
+        # The G1 URDF references mesh files as .STL, which Drake's
+        # collision pipeline rejects (MakeConvexHull only takes .obj /
+        # .vtk / .gltf).  auto-convert at parse time.
+        auto_convert_meshes=True,
         # Stationary base; relative to the robot's torso. If the WBC
         # walks the robot, IK targets need to be re-expressed from
         # world to torso first — out of scope for this first pass.
