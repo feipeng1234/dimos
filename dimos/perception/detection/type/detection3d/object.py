@@ -128,6 +128,14 @@ class Object(Detection3D):
             "name": self.name,
             "detections": self.detections_count,
             "last_seen": f"{round(time.time() - self.ts)}s ago",
+            # World-frame position so the agent can chain detect() → move_to_pose()
+            # without an extra lookup.  Frame is whatever ObjectSceneRegistration
+            # was configured with (target_frame, defaults to "map").
+            "position": {
+                "x": float(self.pose.position.x),
+                "y": float(self.pose.position.y),
+                "z": float(self.pose.position.z),
+            },
         }
 
     def to_dict(self) -> dict[str, Any]:
