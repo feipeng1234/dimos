@@ -12,13 +12,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""In-viewer scene editor — spawn boxes/planes, drag with gizmos, save to OBJ.
+"""In-viewer scene editor — spawn boxes/planes, drag with gizmos, save scene.
 
 For the case where the user has a gsplat but no Blender skills.  Drop
 boxes for obstacles, thin boxes for walls/floors, position with the
 viser transform-control gizmos, resize per-axis from the GUI panel,
-then export the lot as a single OBJ that
-``data/mujoco_sim/g1_gear_wbc.xml`` already knows how to consume.
+then "Export" writes an MJCF include file
+(``data/mujoco_sim/dimos_office_edited.xml``) the MJCF picks up via
+``<include file="dimos_office_edited.xml"/>``.
+
+Why MJCF, not OBJ:  MuJoCo turns every ``<mesh>`` into a single convex
+hull, so multiple boxes serialised into one OBJ collide as one bounding
+blob.  Native ``<geom type="box">`` per primitive keeps each shape
+distinct — no convex-hull merging, no winding gotchas, and box-vs-box
+collision is the cheapest contact MuJoCo can compute.  An OBJ
+companion is also written for Blender / external tooling.
 """
 
 from __future__ import annotations
@@ -43,8 +51,6 @@ _SIZE_MAX = 20.0
 _SIZE_STEP = 0.05
 _BOX_COLOR: tuple[int, int, int] = (255, 140, 60)
 _PLANE_COLOR: tuple[int, int, int] = (90, 180, 255)
-_ACTIVE_OPACITY = 1.0
-_INACTIVE_OPACITY = 0.55
 
 
 @dataclass
@@ -54,8 +60,9 @@ class _Primitive:
     name: str
     kind: str  # "box" | "plane"
     dimensions: list[float]  # mutable so resize sliders can edit in place
+    color: tuple[int, int, int]
     controls: Any  # TransformControlsHandle
-    box: Any  # BoxHandle — viser supports re-assigning .dimensions live
+    box: Any  # BoxHandle
 
 
 @dataclass
@@ -63,13 +70,11 @@ class SceneEditor:
     """Wires GUI controls + click placement onto an existing viser server."""
 
     server: Any  # viser.ViserServer
-    output_dir: Path = field(
-        default_factory=lambda: Path("data/mujoco_sim/dimos_office_edited.obj").parent
-    )
-    output_filename: str = "dimos_office_edited.obj"
+    output_dir: Path = field(default_factory=lambda: Path("data/mujoco_sim"))
+    output_basename: str = "dimos_office_edited"
 
     _primitives: list[_Primitive] = field(default_factory=list)
-    _active: _Primitive | None = None
+    _last_spawned: _Primitive | None = None
     _next_id: int = 0
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _pending_kind: str | None = None
@@ -80,10 +85,9 @@ class SceneEditor:
     _size_y: Any = None
     _size_z: Any = None
     _status_label: Any = None
-    _active_label: Any = None
+    _last_label: Any = None
 
     def attach(self) -> None:
-        """Add GUI controls to the viser panel."""
         with self.server.gui.add_folder("Scene editor"):
             self._size_x = self.server.gui.add_number(
                 "Size X (m)",
@@ -106,12 +110,12 @@ class SceneEditor:
                 max=_SIZE_MAX,
                 step=_SIZE_STEP,
             )
-            self._active_label = self.server.gui.add_markdown("_Active: none._")
+            self._last_label = self.server.gui.add_markdown("_Last: none._")
 
             box_button = self.server.gui.add_button("Add box (click floor)")
             plane_button = self.server.gui.add_button("Add plane (click floor)")
-            delete_button = self.server.gui.add_button("Delete active")
-            export_button = self.server.gui.add_button("Export OBJ")
+            delete_button = self.server.gui.add_button("Delete last")
+            export_button = self.server.gui.add_button("Export scene")
             self._status_label = self.server.gui.add_markdown("_Idle._")
 
         for size_input in (self._size_x, self._size_y, self._size_z):
@@ -126,24 +130,25 @@ class SceneEditor:
             self._arm("plane")
 
         @delete_button.on_click
-        def _delete_active(_event: Any) -> None:
-            self._delete_active()
+        def _delete(_event: Any) -> None:
+            self._delete_last()
 
         @export_button.on_click
         def _export(_event: Any) -> None:
-            self._export_obj()
+            self._export()
 
     # ------------------------------------------------------------------
     # Spawn / arm
     # ------------------------------------------------------------------
     def _arm(self, kind: str) -> None:
-        # Pull defaults appropriate for the kind. User-edited sliders
-        # take precedence — only refresh when going from one kind to
-        # another fresh start.
+        # Friendly default: when the user picks "plane", auto-thin the Z
+        # slider unless they've already changed it from the box default.
         if kind == "plane" and self._size_z.value == _DEFAULT_BOX_SIZE[2]:
             self._suspend_size_callback = True
-            self._size_z.value = _DEFAULT_PLANE_SIZE[2]
-            self._suspend_size_callback = False
+            try:
+                self._size_z.value = _DEFAULT_PLANE_SIZE[2]
+            finally:
+                self._suspend_size_callback = False
 
         self._pending_kind = kind
         self._status_label.content = f"_Click on the floor to drop a **{kind}**…_"
@@ -153,7 +158,13 @@ class SceneEditor:
             try:
                 self._handle_floor_click(event)
             finally:
-                self.server.scene.remove_pointer_callback()
+                # Always remove the callback — a missed-floor click also
+                # disarms.  The on_pointer_callback_removed handler resets
+                # the status label.
+                try:
+                    self.server.scene.remove_pointer_callback()
+                except Exception:
+                    pass
 
         @self.server.scene.on_pointer_callback_removed
         def _disarm() -> None:
@@ -188,7 +199,6 @@ class SceneEditor:
         ]
         color = _BOX_COLOR if kind == "box" else _PLANE_COLOR
 
-        # Sit base on z=0 by lifting center half-height.
         cx, cy, _cz = position
         center = (cx, cy, dimensions[2] / 2.0)
 
@@ -202,115 +212,130 @@ class SceneEditor:
             f"{name}/geom",
             color=color,
             dimensions=tuple(dimensions),
-            opacity=_INACTIVE_OPACITY,
+            opacity=0.8,
             side="double",
         )
         primitive = _Primitive(
             name=name,
             kind=kind,
             dimensions=dimensions,
+            color=color,
             controls=controls,
             box=box,
         )
         self._primitives.append(primitive)
-
-        # Click on the box itself to make it the active primitive (so
-        # the size sliders bind to it). Box is a child of the gizmo so
-        # the viser scene hierarchy keeps them together.
-        @box.on_click
-        def _select(_event: Any) -> None:
-            self._set_active(primitive)
-
-        self._set_active(primitive)
+        self._last_spawned = primitive
+        self._update_last_label()
         self._status_label.content = f"_Added {kind}. {len(self._primitives)} total._"
 
     # ------------------------------------------------------------------
-    # Selection + resize
+    # Resize
     # ------------------------------------------------------------------
-    def _set_active(self, primitive: _Primitive | None) -> None:
-        with self._lock:
-            # Dim the previously active primitive.
-            if self._active is not None and self._active is not primitive:
-                try:
-                    self._active.box.opacity = _INACTIVE_OPACITY
-                except Exception:
-                    pass
-
-            self._active = primitive
-
-            if primitive is None:
-                self._active_label.content = "_Active: none._"
-                return
-
-            try:
-                primitive.box.opacity = _ACTIVE_OPACITY
-            except Exception:
-                pass
-
-            # Reflect the active primitive's dimensions in the sliders
-            # without re-firing the on_update callback.
-            self._suspend_size_callback = True
-            try:
-                self._size_x.value = float(primitive.dimensions[0])
-                self._size_y.value = float(primitive.dimensions[1])
-                self._size_z.value = float(primitive.dimensions[2])
-            finally:
-                self._suspend_size_callback = False
-            self._active_label.content = (
-                f"_Active: **{primitive.name.rsplit('/', 1)[-1]}** "
-                f"({primitive.dimensions[0]:.2f} x {primitive.dimensions[1]:.2f} "
-                f"x {primitive.dimensions[2]:.2f} m)._"
-            )
-
     def _on_size_changed(self, _event: Any) -> None:
         if self._suspend_size_callback:
             return
-        if self._active is None:
-            # No active primitive — sliders just affect the next spawn.
-            return
+        if self._last_spawned is None:
+            return  # sliders only stage values for the next spawn
         new_dims = (
             float(self._size_x.value),
             float(self._size_y.value),
             float(self._size_z.value),
         )
         with self._lock:
-            self._active.dimensions = list(new_dims)
+            self._last_spawned.dimensions = list(new_dims)
             try:
-                self._active.box.dimensions = new_dims
+                self._last_spawned.box.dimensions = new_dims
             except Exception as e:
-                logger.debug(f"Scene editor: live resize failed: {e}")
-            self._active_label.content = (
-                f"_Active: **{self._active.name.rsplit('/', 1)[-1]}** "
-                f"({new_dims[0]:.2f} x {new_dims[1]:.2f} x {new_dims[2]:.2f} m)._"
-            )
+                # Some viser versions don't allow live `dimensions` writes;
+                # fall back to .scale on the box (which IS settable).
+                logger.debug(f"Scene editor: box.dimensions write failed ({e}); using .scale")
+                try:
+                    base = _DEFAULT_BOX_SIZE
+                    self._last_spawned.box.scale = tuple(new_dims[i] / base[i] for i in range(3))
+                except Exception as e2:
+                    logger.warning(f"Scene editor: live resize failed: {e2}")
+        self._update_last_label()
 
-    def _delete_active(self) -> None:
+    def _delete_last(self) -> None:
         with self._lock:
-            target = self._active or (self._primitives[-1] if self._primitives else None)
-            if target is None:
+            if not self._primitives:
                 self._status_label.content = "_Nothing to delete._"
                 return
-            if target in self._primitives:
-                self._primitives.remove(target)
-            self._active = None
+            target = self._primitives.pop()
+            if self._last_spawned is target:
+                self._last_spawned = self._primitives[-1] if self._primitives else None
         try:
             target.box.remove()
             target.controls.remove()
         except Exception as e:
             logger.debug(f"Scene editor: removal failed: {e}")
-        self._active_label.content = "_Active: none._"
+        self._update_last_label()
         self._status_label.content = f"_Deleted. {len(self._primitives)} remaining._"
+
+    def _update_last_label(self) -> None:
+        if self._last_spawned is None:
+            self._last_label.content = "_Last: none._"
+            return
+        d = self._last_spawned.dimensions
+        short = self._last_spawned.name.rsplit("/", 1)[-1]
+        self._last_label.content = (
+            f"_Last (sliders edit this): **{short}** ({d[0]:.2f} x {d[1]:.2f} x {d[2]:.2f} m)._"
+        )
 
     # ------------------------------------------------------------------
     # Export
     # ------------------------------------------------------------------
-    def _export_obj(self) -> None:
+    def _export(self) -> None:
         with self._lock:
             primitives = list(self._primitives)
         if not primitives:
             self._status_label.content = "_Nothing to export._"
             return
 
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        mjcf_path = self.output_dir / f"{self.output_basename}.xml"
+        obj_path = self.output_dir / f"{self.output_basename}.obj"
+
+        self._write_mjcf(primitives, mjcf_path)
+        self._write_obj(primitives, obj_path)
+
+        logger.info(f"Scene editor: wrote {mjcf_path} + {obj_path}")
+        self._status_label.content = (
+            f"_Wrote `{mjcf_path.name}` + `{obj_path.name}` ({len(primitives)} primitives)._"
+        )
+
+    def _write_mjcf(self, primitives: list[_Primitive], path: Path) -> None:
+        """Write an ``<include>``-able MJCF fragment with one geom per primitive.
+
+        Native MuJoCo box geoms — no convex hull merging, exact contact.
+        """
+        lines = [
+            "<!-- Auto-generated by viser scene editor.  Include from your -->",
+            "<!-- main MJCF inside <worldbody>:                              -->",
+            '<!--   <include file="dimos_office_edited.xml"/>                -->',
+            "<mujocoinclude>",
+        ]
+        for prim in primitives:
+            position = np.asarray(prim.controls.position, dtype=np.float64)
+            wxyz = np.asarray(prim.controls.wxyz, dtype=np.float64)
+            half = np.array(prim.dimensions, dtype=np.float64) * 0.5
+            r, g, b = prim.color
+            short = prim.name.rsplit("/", 1)[-1]
+            lines.append(
+                f'  <geom name="{short}" type="box" '
+                f'pos="{position[0]:.6f} {position[1]:.6f} {position[2]:.6f}" '
+                f'quat="{wxyz[0]:.6f} {wxyz[1]:.6f} {wxyz[2]:.6f} {wxyz[3]:.6f}" '
+                f'size="{half[0]:.6f} {half[1]:.6f} {half[2]:.6f}" '
+                f'rgba="{r / 255:.3f} {g / 255:.3f} {b / 255:.3f} 0.6"/>'
+            )
+        lines.append("</mujocoinclude>")
+        path.write_text("\n".join(lines) + "\n")
+
+    def _write_obj(self, primitives: list[_Primitive], path: Path) -> None:
+        """Write an OBJ companion (debug / Blender import).
+
+        Faces are CCW outward-facing per OBJ convention.
+        """
         verts: list[tuple[float, float, float]] = []
         faces: list[tuple[int, int, int]] = []
         for prim in primitives:
@@ -320,39 +345,38 @@ class SceneEditor:
             half = np.array(prim.dimensions, dtype=np.float64) * 0.5
             corners_local = np.array(
                 [
-                    [-half[0], -half[1], -half[2]],
-                    [half[0], -half[1], -half[2]],
-                    [half[0], half[1], -half[2]],
-                    [-half[0], half[1], -half[2]],
-                    [-half[0], -half[1], half[2]],
-                    [half[0], -half[1], half[2]],
-                    [half[0], half[1], half[2]],
-                    [-half[0], half[1], half[2]],
+                    [-half[0], -half[1], -half[2]],  # 0
+                    [half[0], -half[1], -half[2]],  # 1
+                    [half[0], half[1], -half[2]],  # 2
+                    [-half[0], half[1], -half[2]],  # 3
+                    [-half[0], -half[1], half[2]],  # 4
+                    [half[0], -half[1], half[2]],  # 5
+                    [half[0], half[1], half[2]],  # 6
+                    [-half[0], half[1], half[2]],  # 7
                 ]
             )
             corners_world = (corners_local @ R.T) + position
             base = len(verts) + 1  # OBJ is 1-indexed
             verts.extend((float(x), float(y), float(z)) for x, y, z in corners_world)
+            # Outward-facing CCW — verified by cross-product (V1-V0)x(V2-V0).
             face_offsets = [
-                (0, 1, 2),
-                (0, 2, 3),  # -Z
-                (4, 6, 5),
-                (4, 7, 6),  # +Z
-                (0, 4, 5),
-                (0, 5, 1),  # -Y
-                (1, 5, 6),
-                (1, 6, 2),  # +X
-                (2, 6, 7),
-                (2, 7, 3),  # +Y
-                (3, 7, 4),
-                (3, 4, 0),  # -X
+                (0, 2, 1),
+                (0, 3, 2),  # -Z (bottom)
+                (4, 5, 6),
+                (4, 6, 7),  # +Z (top)
+                (0, 1, 5),
+                (0, 5, 4),  # -Y
+                (1, 2, 6),
+                (1, 6, 5),  # +X
+                (2, 3, 7),
+                (2, 7, 6),  # +Y
+                (3, 0, 4),
+                (3, 4, 7),  # -X
             ]
             for a, b, c in face_offsets:
                 faces.append((base + a, base + b, base + c))
 
-        out_path = self.output_dir / self.output_filename
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        with out_path.open("w") as f:
+        with path.open("w") as f:
             f.write(f"# {len(primitives)} primitive(s) from in-viewer scene editor\n")
             f.write("# Exported at " + time.strftime("%Y-%m-%d %H:%M:%S") + "\n")
             f.write("o scene_editor_export\n")
@@ -360,8 +384,6 @@ class SceneEditor:
                 f.write(f"v {x:.6f} {y:.6f} {z:.6f}\n")
             for a, b, c in faces:
                 f.write(f"f {a} {b} {c}\n")
-        logger.info(f"Scene editor: wrote {out_path} ({len(verts)} verts, {len(faces)} faces)")
-        self._status_label.content = f"_Wrote `{out_path}` ({len(primitives)} primitives)._"
 
 
 def _quat_to_matrix(wxyz: np.ndarray) -> np.ndarray:
