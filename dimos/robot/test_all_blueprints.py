@@ -19,18 +19,30 @@ from dimos.robot.all_blueprints import all_blueprints
 from dimos.robot.get_all_blueprints import get_blueprint_by_name
 
 # Optional dependencies that are allowed to be missing
-pytestmark = pytest.mark.slow
-
 OPTIONAL_DEPENDENCIES = {"pyrealsense2", "pyzed", "geometry_msgs", "turbojpeg"}
 OPTIONAL_ERROR_SUBSTRINGS = {
     "Unable to locate turbojpeg library automatically",
     "ZED SDK not installed",
 }
 
+# These need git LFS, so can't be run on the ubuntu runners.
+SELF_HOSTED_BLUEPRINTS = frozenset(
+    {
+        "dual-xarm6-planner",
+        "xarm-perception",
+        "xarm-perception-agent",
+        "xarm-perception-sim",
+        "xarm-perception-sim-agent",
+        "xarm6-planner-only",
+        "xarm7-planner-coordinator",
+        "xarm7-planner-coordinator-agent",
+    }
+)
 
-@pytest.mark.parametrize("blueprint_name", all_blueprints.keys())
-def test_all_blueprints_are_valid(blueprint_name: str) -> None:
-    """Test that all blueprints in all_blueprints are valid Blueprint instances."""
+UBUNTU_BLUEPRINTS = frozenset(all_blueprints) - SELF_HOSTED_BLUEPRINTS
+
+
+def _check_blueprint(blueprint_name: str) -> None:
     try:
         blueprint = get_blueprint_by_name(blueprint_name)
     except ModuleNotFoundError as e:
@@ -45,3 +57,16 @@ def test_all_blueprints_are_valid(blueprint_name: str) -> None:
     assert isinstance(blueprint, Blueprint), (
         f"Blueprint '{blueprint_name}' is not a Blueprint, got {type(blueprint)}"
     )
+
+
+@pytest.mark.parametrize("blueprint_name", UBUNTU_BLUEPRINTS)
+def test_blueprint_is_valid(blueprint_name: str) -> None:
+    """Validate blueprints that should import on the ubuntu-latest runner."""
+    _check_blueprint(blueprint_name)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("blueprint_name", SELF_HOSTED_BLUEPRINTS)
+def test_self_hosted_blueprint_is_valid(blueprint_name: str) -> None:
+    """Validate blueprints that need heavy deps or LFS — self-hosted runner only."""
+    _check_blueprint(blueprint_name)
