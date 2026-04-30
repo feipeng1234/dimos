@@ -185,13 +185,8 @@ def sim_eval():
     }
     call = DimosCliCall()
     call.demo_args = ["sim-eval"]
-    # `--viewer none` skips RerunBridgeModule. The default RerunBridge.start()
-    # blocks indefinitely under headless macOS, which prevents
-    # `_send_on_system_modules` from firing — without that, McpClient never
-    # starts the LangChain agent worker thread, so prompts published to
-    # /human_input are never consumed.
     call.process = subprocess.Popen(
-        ["dimos", "--simulation", "--viewer", "none", "run", "sim-eval"],
+        ["dimos", "--simulation", "run", "sim-eval"],
         env=env,
         stdout=log_file or subprocess.DEVNULL,
         stderr=log_file or subprocess.DEVNULL,

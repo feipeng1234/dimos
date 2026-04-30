@@ -112,10 +112,8 @@ def sim_nav():
     }
     call = DimosCliCall()
     call.demo_args = ["sim-nav"]
-    # `--viewer none` skips RerunBridgeModule, which blocks indefinitely on
-    # headless macOS and prevents `_send_on_system_modules` from firing.
     call.process = subprocess.Popen(
-        ["dimos", "--simulation", "--viewer", "none", "run", "sim-nav"],
+        ["dimos", "--simulation", "run", "sim-nav"],
         env=env,
         stdout=log_file or subprocess.DEVNULL,
         stderr=log_file or subprocess.DEVNULL,

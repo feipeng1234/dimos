@@ -14,6 +14,7 @@
 
 """Basic DimSim blueprint — connection + visualization."""
 
+import os
 from typing import Any
 
 from dimos.core.coordination.blueprints import autoconnect
@@ -179,23 +180,23 @@ rerun_config = {
     },
 }
 
-if global_config.viewer == "foxglove":
+# Skip rerun/foxglove bridges in headless mode (CI, e2e tests). Without this,
+# RerunBridgeModule fails to find the viewer binary in PATH and errors at start.
+_headless = os.environ.get("DIMSIM_HEADLESS", "").strip() in ("1", "true")
+
+if not _headless and global_config.viewer == "foxglove":
     from dimos.robot.foxglove_bridge import FoxgloveBridge
 
     with_vis = autoconnect(
         _transports_base,
         FoxgloveBridge.blueprint(shm_channels=["/color_image#sensor_msgs.Image"]),
     )
-elif global_config.viewer.startswith("rerun"):
+elif not _headless and global_config.viewer.startswith("rerun"):
     from dimos.visualization.rerun.bridge import RerunBridgeModule
 
     with_vis = autoconnect(
         _transports_base,
-        RerunBridgeModule.blueprint(
-            rerun_open=global_config.rerun_open,
-            rerun_web=global_config.rerun_web,
-            **rerun_config,
-        ),
+        RerunBridgeModule.blueprint(**rerun_config),
     )
 else:
     with_vis = _transports_base
