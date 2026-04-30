@@ -1,11 +1,11 @@
 # DimOS Learning — DatasetSpec template
 #
 # This file is the contract between data collection and training. Same spec is
-# used by `python -m dimos.learning.dataset build` (export to disk) and by
+# used by `python -m dimos.learning.dataprep build` (export to disk) and by
 # `load_dataset(spec)` (training-time PyTorch Dataset).
 #
 # Stream names below must match the topic names recorded by RecordReplay. To
-# discover them: `python -m dimos.learning.dataset inspect dataset.yaml`
+# discover them: `python -m dimos.learning.dataprep inspect dataset.yaml`
 # (or look in the SQLite registry of session.db).
 
 # ─── Source recording ────────────────────────────────────────────────────────
@@ -28,7 +28,9 @@ episodes:
   #   - [1730000000.0, 1730000045.5]
   #   - [1730000060.0, 1730000110.2]
 
-  default_task_label: pick_red_cube  # optional; applied to every extracted episode
+  default_task_label: pick_red_cube  # optional; short categorical tag
+  # Free-form natural-language task string used as language conditioning for VLAs (π₀, π₀.₅).
+  default_task_description: "pick up the red cube and place it on the blue plate"
 
 # ─── What goes into each timestep ────────────────────────────────────────────
 # Each entry: dataset_key -> { stream, type?, field?, preprocess? }
@@ -70,6 +72,11 @@ filters:
   min_duration_s: 1.0
   # max_duration_s: 60.0
   # task_labels: [pick_red_cube, pick_blue_cube]
+
+  # Train/val split — both optional. val_episode_ids takes precedence over val_ratio.
+  # val_episode_ids: [0, 7, 13]
+  # val_ratio: 0.1
+  # val_split_seed: 0
 
 # ─── Output (only required when calling build_dataset / `... build`) ─────────
 output:

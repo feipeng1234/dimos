@@ -33,6 +33,33 @@ from pydantic import BaseModel, ConfigDict, Field
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+class DatasetSpec(BaseModel):
+    """Top-level spec. Same instance used at build, load, and inference time.
+
+    A `DatasetSpec` (loaded from YAML/JSON) is the contract between data
+    collection (raw RecordReplay session -> on-disk dataset) and training
+    (loading the same spec to feed a model). The same spec also drives
+    inference observation construction.
+    """
+
+    source: Path  # path to session.db produced by RecordReplay
+    episodes: EpisodeConfig
+    observation: dict[str, StreamField]  # obs key -> stream field
+    action: dict[str, StreamField]  # action key -> stream field
+    sync: SyncConfig
+    filters: FilterConfig | None = None
+    output: OutputConfig | None = None  # only required by DataPrep.build()
+
+    @classmethod
+    def from_file(cls, path: str | Path) -> DatasetSpec:
+        """Load from .yaml/.yml/.json (dispatch by extension)."""
+        raise NotImplementedError
+
+    def save(self, path: str | Path) -> None:
+        """Write to .yaml/.yml/.json (round-trip safe)."""
+        raise NotImplementedError
+
+
 class EpisodeConfig(BaseModel):
     """How to slice the continuous recording into episodes."""
 
@@ -49,12 +76,15 @@ class EpisodeConfig(BaseModel):
     # RANGES extractor: explicit absolute timestamps
     ranges: list[tuple[float, float]] | None = None
 
-    # Optional default label applied to every extracted episode
+    # Default label/description applied to every extracted episode unless overridden.
+    # task_description is the free-form natural-language string used as language
+    # conditioning for VLA policies (e.g. "pick up the red cube and place it on the blue plate").
     default_task_label: str | None = None
+    default_task_description: str | None = None
 
 
-class FieldRef(BaseModel):
-    """Pointer to a field in a recorded stream."""
+class StreamField(BaseModel):
+    """Pointer to a field in a recorded stream — one (obs|action) key's data source."""
 
     stream: str  # LCM stream / topic name as recorded in session.db
     type: str | None = None  # optional dotted type (e.g. "sensor_msgs.Image"); for codec dispatch
@@ -79,6 +109,13 @@ class FilterConfig(BaseModel):
     max_duration_s: float | None = None
     task_labels: list[str] | None = None  # whitelist; None = all
 
+    # Train/val split. Episodes whose index lands in val become the validation set
+    # at training time; everything else is train. `val_episode_ids` takes precedence
+    # over `val_ratio`. Both None = no split (everything is train).
+    val_episode_ids: list[int] | None = None
+    val_ratio: float | None = None
+    val_split_seed: int = 0
+
 
 class OutputConfig(BaseModel):
     """Where and how to write the built dataset."""
@@ -86,18 +123,6 @@ class OutputConfig(BaseModel):
     format: Literal["lerobot", "hdf5", "rlds"]
     path: Path
     metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class DatasetSpec(BaseModel):
-    """Top-level spec. Same instance used at build, load, and inference time."""
-
-    source: Path  # path to session.db produced by RecordReplay
-    episodes: EpisodeConfig
-    observation: dict[str, FieldRef]  # obs key -> stream field
-    action: dict[str, FieldRef]  # action key -> stream field
-    sync: SyncConfig
-    filters: FilterConfig | None = None
-    output: OutputConfig | None = None  # only required by build_dataset()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -127,7 +152,8 @@ class Episode(BaseModel):
     id: str
     start_ts: float
     end_ts: float
-    task_label: str | None = None
+    task_label: str | None = None  # short categorical tag (e.g. "pick_red_cube")
+    task_description: str | None = None  # free-form natural-language string for VLA conditioning
     success: bool = True
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -145,3 +171,9 @@ class Sample(BaseModel):
     episode_id: str
     observation: dict[str, np.ndarray]
     action: dict[str, np.ndarray]
+
+
+# DatasetSpec is defined before its referenced subclasses so it reads as the
+# top-of-file entry point. Resolve those forward references now that every
+# referenced class exists in the module namespace.
+DatasetSpec.model_rebuild()

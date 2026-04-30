@@ -14,11 +14,15 @@
 
 """Dataset builder/loader for the DimOS Learning Framework.
 
-Reads a `DatasetSpec` (see `dimos.learning.spec`) and either:
+`DataPrep` is the single user-facing entry point. It reads a `DatasetSpec`
+(see `dimos.learning.spec`) and either:
   - builds a training-ready dataset on disk in HDF5/RLDS/LeRobot, or
   - returns a PyTorch Dataset for training.
 
-The same spec also drives inference observation construction.
+Stateless helpers (episode extraction, sample iteration, field resolution)
+live as `@staticmethod`s on `DataPrep` so they share one namespace and are
+callable without an instance — the live `ObsBuilder` at inference time
+reuses `DataPrep.resolve_field` for that reason.
 
 Workflow:
     # 1. Record a teleop session (Sam's PR #1708)
@@ -28,9 +32,9 @@ Workflow:
     python -m dimos.learning.dataprep build dataset.yaml
 
     # 3. Train using the same spec
-    from dimos.learning.dataprep import load_dataset, load_spec
-    spec = load_spec("dataset.yaml")
-    ds = load_dataset(spec)
+    from dimos.learning.dataprep import DataPrep
+    dp = DataPrep.from_file("dataset.yaml")
+    ds = dp.load()
 """
 
 from __future__ import annotations
@@ -45,10 +49,10 @@ from dimos.learning.spec import (
     DatasetSpec,
     Episode,
     EpisodeConfig,
-    FieldRef,
     FilterConfig,
     OutputConfig,
     Sample,
+    StreamField,
 )
 
 Writer = Callable[[Iterator[Sample], OutputConfig], Path]
@@ -60,125 +64,172 @@ if TYPE_CHECKING:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Spec I/O
+# DataPrep — the only thing this module exports besides `main()`
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def load_spec(path: str | Path) -> DatasetSpec:
-    """Load a DatasetSpec from .yaml/.yml/.json (dispatch by extension)."""
-    raise NotImplementedError
+class DataPrep:
+    """Build / load / inspect a dataset from a `DatasetSpec`.
 
+    Holds the open `SqliteStore` and the cached, filtered episode list so
+    repeated operations on the same spec (e.g. `inspect()` then `build()`)
+    don't redo work. Construction is cheap — the store and episodes are
+    computed lazily on first access.
 
-def save_spec(spec: DatasetSpec, path: str | Path) -> None:
-    """Write a DatasetSpec back to .yaml/.yml/.json (round-trip safe)."""
-    raise NotImplementedError
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Episode extraction
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-def extract_episodes(store: SqliteStore, cfg: EpisodeConfig) -> list[Episode]:
-    """Extract episode boundaries from the recording per the configured strategy.
-
-    BUTTONS: scan cfg.button_stream for rising edges on cfg.start/save/discard.
-        State machine:
-            IDLE   --start press-->          RECORDING  (begin episode)
-            RECORDING --save press-->        IDLE       (commit, success=True)
-            RECORDING --discard press-->     IDLE       (drop)
-            RECORDING --start press-->       RECORDING  (auto-commit, begin new)
-            session ends mid-episode:        always discard
-
-    RANGES: emit one Episode per (start_ts, end_ts) tuple in cfg.ranges.
-
-    WHOLE: emit a single Episode covering the entire recording's time range.
+    Not a DimOS Module: no ports, no runtime lifecycle. It's a stateful
+    façade over the static helpers below.
     """
-    raise NotImplementedError
 
+    # ── construction ─────────────────────────────────────────────────────────
 
-def filter_episodes(eps: list[Episode], cfg: FilterConfig | None) -> list[Episode]:
-    """Apply success/duration/label whitelist filters. None = pass-through."""
-    raise NotImplementedError
+    def __init__(self, spec: DatasetSpec) -> None:
+        """Bind to a spec. Does not open the store or extract episodes yet."""
+        raise NotImplementedError
 
+    @classmethod
+    def from_file(cls, path: str | Path) -> DataPrep:
+        """Convenience: `DataPrep.from_file("dataset.yaml")`."""
+        raise NotImplementedError
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Stream synchronization (build per-timestep samples)
-# ─────────────────────────────────────────────────────────────────────────────
+    # ── lazy-cached state ────────────────────────────────────────────────────
 
+    @property
+    def store(self) -> SqliteStore:
+        """Open the recording's SqliteStore on first access; cached thereafter."""
+        raise NotImplementedError
 
-def iter_samples(
-    store: SqliteStore,
-    episode: Episode,
-    spec: DatasetSpec,
-) -> Iterator[Sample]:
-    """Yield synced (obs, action) Samples for one episode.
+    @property
+    def episodes(self) -> list[Episode]:
+        """Extract + filter episodes on first access; cached thereafter.
 
-    Walks the anchor stream at sync.rate_hz between episode.start_ts and
-    episode.end_ts. For each anchor timestamp, pulls the nearest observation/
-    action from each configured stream within sync.tolerance_ms. Applies any
-    declared preprocess (e.g. jpeg_decode for Image, field projection for
-    JointState). Skips frames where any required stream lacks a sample within
-    tolerance.
-    """
-    raise NotImplementedError
+        Equivalent to:
+            DataPrep.filter_episodes(
+                DataPrep.extract_episodes(store, spec.episodes),
+                spec.filters,
+            )
+        """
+        raise NotImplementedError
 
+    # ── operations ───────────────────────────────────────────────────────────
 
-def _resolve_field(msg: Any, ref: FieldRef) -> np.ndarray:
-    """Pull a single field from a stream message and convert to np.ndarray.
+    def iter_samples(self) -> Iterator[Sample]:
+        """Yield synced Samples across every episode, in episode order."""
+        raise NotImplementedError
 
-    Applies ref.field projection (attribute access) and ref.preprocess hook
-    (named transform like jpeg_decode). Returns a numpy array suitable for
-    inclusion in a Sample.
-    """
-    raise NotImplementedError
+    def build(self) -> Path:
+        """End-to-end: source session.db -> on-disk dataset in spec.output.format.
 
+        Returns the path written. Requires `spec.output` to be set. Dispatches
+        to the appropriate writer in `dimos.learning.formats` via `_get_writer`.
+        """
+        raise NotImplementedError
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Public API
-# ─────────────────────────────────────────────────────────────────────────────
+    def load(self) -> torch.utils.data.Dataset[Sample]:
+        """Training-time loader: returns a PyTorch Dataset over the source recording.
 
+        Materializes Samples on-the-fly (lazy). Does not require `spec.output`.
+        Pre-extracts episodes once and indexes anchor timestamps for O(1)
+        `__getitem__`.
+        """
+        raise NotImplementedError
 
-def _get_writer(format_name: str) -> Writer:
-    """Lazy-import the `write` function for a given format. Avoids loading
-    heavy deps (h5py, tfds, lerobot) for unused formats."""
-    if format_name == "lerobot":
-        from dimos.learning.formats.lerobot import write
-    elif format_name == "hdf5":
-        from dimos.learning.formats.hdf5 import write
-    elif format_name == "rlds":
-        from dimos.learning.formats.rlds import write
-    else:
-        raise ValueError(
-            f"Unknown dataset format: {format_name!r}. Supported: lerobot, hdf5, rlds."
-        )
-    return write
+    def inspect(self) -> dict[str, Any]:
+        """Stats for a session: episode count, duration distribution,
+        per-stream sample counts. Used by `python -m dimos.learning.dataprep inspect`.
+        """
+        raise NotImplementedError
 
+    def close(self) -> None:
+        """Close the underlying SqliteStore. Safe to call multiple times."""
+        raise NotImplementedError
 
-def build_dataset(spec: DatasetSpec) -> Path:
-    """End-to-end: raw session.db -> on-disk dataset in spec.output.format.
+    def __enter__(self) -> DataPrep:
+        return self
 
-    Returns the path written. Requires spec.output to be set. Dispatches to
-    the appropriate writer in `dimos.learning.formats` via `_get_writer`.
-    """
-    raise NotImplementedError
+    def __exit__(self, *exc: object) -> None:
+        self.close()
 
+    # ── stateless helpers ────────────────────────────────────────────────────
+    #
+    # Static so they're callable without an instance. `resolve_field` in
+    # particular is reused by `dimos.learning.inference.obs_builder` to build
+    # live observations, so train and infer share exactly one code path for
+    # field projection + preprocess.
 
-def load_dataset(spec: DatasetSpec) -> torch.utils.data.Dataset[Sample]:
-    """Training-time loader: returns a PyTorch Dataset over the source recording.
+    @staticmethod
+    def extract_episodes(store: SqliteStore, cfg: EpisodeConfig) -> list[Episode]:
+        """Extract episode boundaries per the configured strategy.
 
-    Materializes Samples on the fly (lazy). Does not require spec.output.
-    Pre-extracts episodes once and indexes anchor timestamps for O(1) __getitem__.
-    """
-    raise NotImplementedError
+        BUTTONS: scan cfg.button_stream for rising edges on cfg.start/save/discard.
+            State machine:
+                IDLE   --start press-->          RECORDING  (begin episode)
+                RECORDING --save press-->        IDLE       (commit, success=True)
+                RECORDING --discard press-->     IDLE       (drop)
+                RECORDING --start press-->       RECORDING  (auto-commit, begin new)
+                session ends mid-episode:        always discard
 
+        RANGES: emit one Episode per (start_ts, end_ts) tuple in cfg.ranges.
 
-def inspect(spec: DatasetSpec) -> dict[str, Any]:
-    """Stats for a session: episode count, duration distribution, per-stream counts.
+        WHOLE:  emit a single Episode covering the entire recording's time range.
+        """
+        raise NotImplementedError
 
-    Used by `python -m dimos.learning.dataset inspect`.
-    """
-    raise NotImplementedError
+    @staticmethod
+    def filter_episodes(eps: list[Episode], cfg: FilterConfig | None) -> list[Episode]:
+        """Apply success / duration / label whitelist filters. `None` = pass-through.
+
+        Note: train/val split fields on FilterConfig (`val_episode_ids`,
+        `val_ratio`) are *not* applied here — they're consumed by the trainer,
+        which needs the full episode list to materialize both splits.
+        """
+        raise NotImplementedError
+
+    @staticmethod
+    def iter_episode_samples(
+        store: SqliteStore,
+        episode: Episode,
+        spec: DatasetSpec,
+    ) -> Iterator[Sample]:
+        """Yield synced (obs, action) Samples for a single episode.
+
+        Walks the anchor stream at sync.rate_hz between episode.start_ts and
+        episode.end_ts. For each anchor timestamp, pulls the nearest observation/
+        action from each configured stream within sync.tolerance_ms. Applies any
+        declared preprocess (e.g. jpeg_decode for Image, field projection for
+        JointState). Skips frames where any required stream lacks a sample
+        within tolerance.
+        """
+        raise NotImplementedError
+
+    @staticmethod
+    def resolve_field(msg: Any, ref: StreamField) -> np.ndarray:
+        """Pull a single field from a stream message and convert to np.ndarray.
+
+        Applies ref.field projection (attribute access) and ref.preprocess hook
+        (named transform like jpeg_decode). Returns a numpy array suitable for
+        inclusion in a Sample.
+
+        Reused by the live ObsBuilder at inference time — single source of
+        truth for observation construction across train and infer.
+        """
+        raise NotImplementedError
+
+    @staticmethod
+    def _get_writer(format_name: str) -> Writer:
+        """Lazy-import the `write` function for a given format. Avoids loading
+        heavy deps (h5py, tfds, lerobot) for unused formats.
+        """
+        if format_name == "lerobot":
+            from dimos.learning.formats.lerobot import write
+        elif format_name == "hdf5":
+            from dimos.learning.formats.hdf5 import write
+        elif format_name == "rlds":
+            from dimos.learning.formats.rlds import write
+        else:
+            raise ValueError(
+                f"Unknown dataset format: {format_name!r}. Supported: lerobot, hdf5, rlds."
+            )
+        return write
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -187,7 +238,7 @@ def inspect(spec: DatasetSpec) -> dict[str, Any]:
 
 
 def main() -> None:
-    """CLI entrypoint: build / inspect a dataset spec."""
+    """CLI entrypoint: `build` / `inspect` / `review` a dataset spec."""
     raise NotImplementedError
 
 
