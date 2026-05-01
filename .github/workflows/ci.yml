@@ -29,20 +29,12 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: 3.12
-      - name: Install system dependencies
+      - name: Install dependency for pyaudio
         run: |
           sudo apt-get update
           sudo apt-get install -y portaudio19-dev
       - name: Remove git LFS to avoid accidental large downloads
         run: sudo rm -f /usr/bin/git-lfs
-
-      - name: Configure LCM networking
-        run: |
-          sudo ip link set lo multicast on
-          sudo ip route add 224.0.0.0/4 dev lo || true
-          sudo sysctl -w net.core.rmem_max=67108864
-          sudo sysctl -w net.core.rmem_default=67108864
-
       - name: Install Python dependencies
         run: uv sync --only-group tests --frozen
 
