@@ -54,13 +54,13 @@ jobs:
           disable_search: true
           fail_ci_if_error: true
           files: ./coverage.xml
-          use-oidc: true
+          use_oidc: true
       - name: Upload test results to Codecov
         if: ${{ !cancelled() }}
         uses: codecov/codecov-action@v6
         with:
           report-type: test_results
-          use-oidc: true
+          use_oidc: true
 
   self-hosted-tests:
     # Skip on draft PRs and on PRs from forks — the latter would expose the
@@ -74,6 +74,7 @@ jobs:
     runs-on: [self-hosted, Linux]
     permissions:
       contents: read  # For checkout
+      packages: read  # For pulling the ros-dev container from ghcr.io
       id-token: write  # For codecov-action's OIDC upload
     container:
       image: ghcr.io/dimensionalos/ros-dev:dev
