@@ -65,6 +65,7 @@ from dimos.core.stream import In
 from dimos.core.transport import LCMTransport
 from dimos.hardware.whole_body.spec import WholeBodyConfig
 from dimos.mapping.costmapper import CostMapper
+from dimos.mapping.mesh_lidar import MeshLidarModule
 from dimos.mapping.static_costmap import StaticCostmapModule
 from dimos.mapping.voxels import VoxelGridMapper
 from dimos.memory2.module import Recorder, RecorderConfig
@@ -244,15 +245,40 @@ except Exception as e:
     logger.warning(f"Splat asset unavailable: {e}; viser viewer + splat camera disabled")
     _splat_path = None
 if _splat_path is not None and _splat_path.exists():
+    # Optional collidable scene mesh (.usdz / .glb / .obj / etc.) — same
+    # mesh feeds ``MeshLidarModule`` for ray-cast lidar and gets drawn in
+    # viser overlaid on the splat.  Configure via env vars so trying out
+    # different downloaded scenes doesn't require editing the blueprint:
+    #   DIMOS_SCENE_MESH_PATH   = path to .usdz/.glb/.obj/etc.
+    #   DIMOS_SCENE_MESH_SCALE  = e.g. 0.01 if source is centimeters
+    #   DIMOS_SCENE_MESH_TRANSLATION = "x,y,z" world-frame offset
+    #   DIMOS_SCENE_MESH_ROTATION_ZYX_DEG = "z,y,x" extra euler in degrees
+    #   DIMOS_SCENE_MESH_Y_UP   = "0" to disable the y-up→z-up swap
+    _scene_mesh_path = os.environ.get("DIMOS_SCENE_MESH_PATH", "") or None
+    _scene_mesh_scale = float(os.environ.get("DIMOS_SCENE_MESH_SCALE", "1.0"))
+    _scene_mesh_translation = tuple(
+        float(x) for x in os.environ.get("DIMOS_SCENE_MESH_TRANSLATION", "0,0,0").split(",")
+    )
+    _scene_mesh_rotation = tuple(
+        float(x) for x in os.environ.get("DIMOS_SCENE_MESH_ROTATION_ZYX_DEG", "0,0,0").split(",")
+    )
+    _scene_mesh_y_up = os.environ.get("DIMOS_SCENE_MESH_Y_UP", "1") != "0"
+
     _g1_viser = ViserRenderModule.blueprint(
         splat_path=str(_splat_path),
         mjcf_path=_MJCF_PATH,
         alignment_yaml=str(_alignment_yaml) if _alignment_yaml.exists() else None,
         port=8082,
+        scene_mesh_path=_scene_mesh_path,
+        scene_mesh_scale=_scene_mesh_scale,
+        scene_mesh_translation=_scene_mesh_translation,
+        scene_mesh_rotation_zyx_deg=_scene_mesh_rotation,
+        scene_mesh_y_up=_scene_mesh_y_up,
     ).transports(
         {
             ("joint_state", JointState): LCMTransport("/coordinator/joint_state", JointState),
             ("odom", PoseStamped): LCMTransport("/odom", PoseStamped),
+            ("lidar", PointCloud2): LCMTransport("/lidar", PointCloud2),
         },
     )
     _g1_splat_cam = SplatCameraModule.blueprint(
@@ -285,12 +311,44 @@ _g1_perception_stack = (
     # On macOS the depth-render-based ``/lidar`` pipeline is silent
     # (mujoco.Renderer can't build Metal pipeline state in a forkserver
     # child — see splat_camera.py's MlxBackend for the same XPC issue).
-    # CostMapper sits idle without lidar input, so the planner has no
-    # ``/global_costmap`` to plan against and click-to-nav fails.  Slot
-    # in a constant all-free costmap publisher so the planner has
-    # something to plan against — correct for the sim's flat-floor
-    # MJCF where there are no collidable obstacles anyway.
-    *((StaticCostmapModule.blueprint(),) if sys.platform == "darwin" else ()),
+    # CostMapper then sits idle.  Two opt-in fallbacks:
+    #
+    #   * If ``DIMOS_SCENE_MESH_PATH`` is set, ``MeshLidarModule`` ray-
+    #     casts a static scene mesh at the robot's pose and publishes
+    #     real ``/lidar`` — CostMapper turns that into a real costmap.
+    #   * Otherwise ``StaticCostmapModule`` publishes a constant all-
+    #     free costmap so click-to-nav at least has something to plan
+    #     against (correct for the flat-floor MJCF baseline).
+    *(
+        (
+            MeshLidarModule.blueprint(
+                config=dict(
+                    scene_path=os.environ.get("DIMOS_SCENE_MESH_PATH", ""),
+                    scene_scale=float(os.environ.get("DIMOS_SCENE_MESH_SCALE", "1.0")),
+                    scene_translation=tuple(
+                        float(x)
+                        for x in os.environ.get("DIMOS_SCENE_MESH_TRANSLATION", "0,0,0").split(",")
+                    ),
+                    scene_rotation_zyx_deg=tuple(
+                        float(x)
+                        for x in os.environ.get("DIMOS_SCENE_MESH_ROTATION_ZYX_DEG", "0,0,0").split(
+                            ","
+                        )
+                    ),
+                    scene_y_up=os.environ.get("DIMOS_SCENE_MESH_Y_UP", "1") != "0",
+                ),
+            ).transports(
+                {
+                    ("pointcloud", PointCloud2): LCMTransport("/lidar", PointCloud2),
+                    ("odom", PoseStamped): LCMTransport("/odom", PoseStamped),
+                },
+            ),
+        )
+        if os.environ.get("DIMOS_SCENE_MESH_PATH")
+        else (StaticCostmapModule.blueprint(),)
+        if sys.platform == "darwin"
+        else ()
+    ),
     ReplanningAStarPlanner.blueprint(),
     # Visual perception (object detection + tracking, semantic spatial memory)
     SpatialMemory.blueprint(),

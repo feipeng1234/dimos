@@ -41,6 +41,7 @@ from dimos.msgs.geometry_msgs.PointStamped import PointStamped
 from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
 from dimos.msgs.nav_msgs.Path import Path as PathMsg
 from dimos.msgs.sensor_msgs.JointState import JointState
+from dimos.msgs.sensor_msgs.PointCloud2 import PointCloud2
 from dimos.utils.logging_config import setup_logger
 from dimos.visualization.viser.camera import CameraSpec, g1_d435_default, world_pose
 from dimos.visualization.viser.robot_meshes import (
@@ -66,6 +67,7 @@ class ViserRenderModule(Module):
     joint_state: In[JointState]
     odom: In[PoseStamped]
     path: In[PathMsg]
+    lidar: In[PointCloud2]
     clicked_point: Out[PointStamped]
 
     def __init__(
@@ -77,6 +79,11 @@ class ViserRenderModule(Module):
         alignment_yaml: str | FilePath | None = None,
         render_hz: float = 30.0,
         camera_spec: CameraSpec | None = None,
+        scene_mesh_path: str | FilePath | None = None,
+        scene_mesh_scale: float = 1.0,
+        scene_mesh_translation: tuple[float, float, float] = (0.0, 0.0, 0.0),
+        scene_mesh_rotation_zyx_deg: tuple[float, float, float] = (0.0, 0.0, 0.0),
+        scene_mesh_y_up: bool = True,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -86,6 +93,18 @@ class ViserRenderModule(Module):
         self._port = port
         self._render_dt = 1.0 / float(render_hz)
         self._camera_spec = camera_spec if camera_spec is not None else g1_d435_default()
+        self._scene_mesh_path = FilePath(scene_mesh_path) if scene_mesh_path else None
+        self._scene_mesh_scale = scene_mesh_scale
+        self._scene_mesh_translation = scene_mesh_translation
+        self._scene_mesh_rotation_zyx_deg = scene_mesh_rotation_zyx_deg
+        self._scene_mesh_y_up = scene_mesh_y_up
+
+        # viser handles for view-mode toggle
+        self._splat_handle: Any = None
+        self._scene_mesh_handle: Any = None
+        self._lidar_handle: Any = None
+        self._latest_lidar_points: np.ndarray | None = None
+        self._lidar_lock = threading.Lock()
 
         # Mutable shared state — written from In subscribers, read from
         # the render loop.  Plain dict + lock; values are lightweight.
@@ -141,13 +160,88 @@ class ViserRenderModule(Module):
         )
         logger.info(f"Viser viewer: http://localhost:{self._port}/")
 
-        self._server.scene.add_gaussian_splats(
+        self._splat_handle = self._server.scene.add_gaussian_splats(
             "/splat",
             centers=splat.centers,
             covariances=splat.covariances,
             rgbs=splat.rgbs,
             opacities=splat.opacities,
         )
+
+        # Optional collidable scene mesh (.usdz / .glb / etc.) — drawn in
+        # the same world frame as the splat and the robot.  Same file
+        # feeds ``MeshLidarModule`` for ray-cast lidar; rendering it
+        # here lets the user verify alignment visually.
+        if self._scene_mesh_path is not None and self._scene_mesh_path.exists():
+            from dimos.mapping.mesh_scene import (
+                SceneMeshAlignment,
+                load_scene_mesh,
+            )
+
+            try:
+                mesh_alignment = SceneMeshAlignment(
+                    scale=self._scene_mesh_scale,
+                    rotation_zyx_deg=self._scene_mesh_rotation_zyx_deg,
+                    translation=self._scene_mesh_translation,
+                    y_up=self._scene_mesh_y_up,
+                )
+                logger.info(f"Viser: loading scene mesh {self._scene_mesh_path}")
+                scene_mesh = load_scene_mesh(self._scene_mesh_path, alignment=mesh_alignment)
+                self._scene_mesh_handle = self._server.scene.add_mesh_simple(
+                    "/scene_mesh",
+                    vertices=np.asarray(scene_mesh.vertices),
+                    faces=np.asarray(scene_mesh.triangles),
+                    color=(180, 180, 180),
+                    opacity=0.8,
+                )
+                self._scene_mesh_handle.visible = False  # hidden under splat by default
+                logger.info(
+                    f"Viser: scene mesh added "
+                    f"({len(scene_mesh.vertices)} verts, {len(scene_mesh.triangles)} tris)"
+                )
+            except Exception as e:
+                logger.warning(f"Viser: scene mesh load failed: {e}")
+
+        # Lidar overlay placeholder.  Real points stream in from /lidar
+        # via the In subscription set up below; we update the same
+        # node's ``points`` attribute on each message.
+        self._lidar_handle = self._server.scene.add_point_cloud(
+            "/lidar",
+            points=np.zeros((1, 3), dtype=np.float32),
+            colors=np.array([[255, 80, 80]], dtype=np.uint8),
+            point_size=0.05,
+        )
+        self._lidar_handle.visible = False
+
+        # View-mode toggle in the GUI.  Switches between splat-only,
+        # mesh-only, lidar-only, or stacked combinations.
+        view_modes = ["Splat", "Mesh", "Lidar", "Splat + Lidar", "Mesh + Lidar"]
+        view_mode_dropdown = self._server.gui.add_dropdown(
+            "View mode", view_modes, initial_value="Splat"
+        )
+
+        @view_mode_dropdown.on_update
+        def _on_view_mode(_event: Any) -> None:
+            mode = view_mode_dropdown.value
+            show_splat = "Splat" in mode
+            show_mesh = "Mesh" in mode
+            show_lidar = "Lidar" in mode
+            if self._splat_handle is not None:
+                self._splat_handle.visible = show_splat
+            if self._scene_mesh_handle is not None:
+                self._scene_mesh_handle.visible = show_mesh
+            if self._lidar_handle is not None:
+                self._lidar_handle.visible = show_lidar
+
+        # Subscribe to /lidar so the user actually sees points when the
+        # mesh-backed lidar publisher is wired in.
+        try:
+            from dimos.msgs.sensor_msgs.PointCloud2 import PointCloud2  # noqa: F401
+
+            unsub = self.lidar.subscribe(self._on_lidar)
+            self.register_disposable(Disposable(unsub))
+        except Exception as e:
+            logger.warning(f"Viser: lidar subscribe failed: {e}")
 
         # One frame per body; meshes are added as children so they
         # follow when the body frame moves.
@@ -322,6 +416,26 @@ class ViserRenderModule(Module):
             )
         except Exception as e:
             logger.debug(f"Viser nav-path render failed: {e}")
+
+    def _on_lidar(self, msg: Any) -> None:
+        """Update the /lidar viser node from the latest PointCloud2 message."""
+        if self._lidar_handle is None:
+            return
+        try:
+            pcd_t = msg.pointcloud  # open3d.t.geometry.PointCloud
+            pts = pcd_t.point["positions"].numpy().astype(np.float32)
+        except Exception:
+            return
+        if pts.size == 0:
+            return
+        with self._lidar_lock:
+            self._latest_lidar_points = pts
+        try:
+            self._lidar_handle.points = pts
+            colors = np.tile(np.array([[255, 80, 80]], dtype=np.uint8), (len(pts), 1))
+            self._lidar_handle.colors = colors
+        except Exception as e:
+            logger.debug(f"Viser lidar update failed: {e}")
 
     def _on_joint_state(self, msg: JointState) -> None:
         names = list(msg.name)
