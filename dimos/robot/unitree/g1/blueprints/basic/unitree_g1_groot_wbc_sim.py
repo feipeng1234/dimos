@@ -52,20 +52,15 @@ import os
 from pathlib import Path
 import sys
 
-from dimos.agents.mcp.mcp_client import McpClient
-from dimos.agents.mcp.mcp_server import McpServer
-from dimos.agents.skills.navigation import NavigationSkillContainer
 from dimos.agents.skills.sim_g1_locomotion import G1SimLocomotion
-from dimos.agents.skills.speak_skill import SpeakSkill
 from dimos.control.components import HardwareComponent, HardwareType
 from dimos.control.coordinator import ControlCoordinator, TaskConfig
 from dimos.core.coordination.blueprints import autoconnect
-from dimos.core.global_config import global_config
 from dimos.core.stream import In
 from dimos.core.transport import LCMTransport
 from dimos.hardware.whole_body.spec import WholeBodyConfig
 from dimos.mapping.costmapper import CostMapper
-from dimos.mapping.mesh_lidar import MeshLidarModule
+from dimos.mapping.mesh_camera import MeshCameraModule
 from dimos.mapping.static_costmap import StaticCostmapModule
 from dimos.mapping.voxels import VoxelGridMapper
 from dimos.memory2.module import Recorder, RecorderConfig
@@ -81,10 +76,6 @@ from dimos.navigation.frontier_exploration.wavefront_frontier_goal_selector impo
 )
 from dimos.navigation.patrolling.module import PatrollingModule
 from dimos.navigation.replanning_a_star.module import ReplanningAStarPlanner
-from dimos.perception.experimental.temporal_memory.temporal_memory import TemporalMemory
-from dimos.perception.object_tracker import ObjectTracking
-from dimos.perception.perceive_loop_skill import PerceiveLoopSkill
-from dimos.perception.spatial_perception import SpatialMemory
 from dimos.robot.unitree.g1.blueprints.basic._groot_wbc_common import (
     ARM_DEFAULT_POSE,
     G1_GROOT_KD,
@@ -93,7 +84,6 @@ from dimos.robot.unitree.g1.blueprints.basic._groot_wbc_common import (
     g1_joints,
     g1_legs_waist,
 )
-from dimos.robot.unitree.g1.system_prompt import G1_SYSTEM_PROMPT
 from dimos.simulation.engines.mujoco_sim_module import MujocoSimModule
 from dimos.utils.data import get_data
 from dimos.utils.logging_config import setup_logger
@@ -245,10 +235,10 @@ except Exception as e:
     logger.warning(f"Splat asset unavailable: {e}; viser viewer + splat camera disabled")
     _splat_path = None
 if _splat_path is not None and _splat_path.exists():
-    # Optional collidable scene mesh (.usdz / .glb / .obj / etc.) — same
-    # mesh feeds ``MeshLidarModule`` for ray-cast lidar and gets drawn in
-    # viser overlaid on the splat.  Configure via env vars so trying out
-    # different downloaded scenes doesn't require editing the blueprint:
+    # Optional scene mesh (.usdz / .glb / .obj / etc.) — drawn in viser
+    # and used by ``MeshCameraModule`` to ray-cast the head-camera RGB
+    # feed.  Configure via env vars so trying out different downloaded
+    # scenes doesn't require editing the blueprint:
     #   DIMOS_SCENE_MESH_PATH   = path to .usdz/.glb/.obj/etc.
     #   DIMOS_SCENE_MESH_SCALE  = e.g. 0.01 if source is centimeters
     #   DIMOS_SCENE_MESH_TRANSLATION = "x,y,z" world-frame offset
@@ -264,8 +254,13 @@ if _splat_path is not None and _splat_path.exists():
     )
     _scene_mesh_y_up = os.environ.get("DIMOS_SCENE_MESH_Y_UP", "1") != "0"
 
+    # When the user provides their own scene mesh, don't show the unrelated
+    # dimos_office splat in the viewer at all — the splat would just confuse
+    # the picture.  The SplatCameraModule below still uses the splat for the
+    # head-camera feed (separate concern, still publishes ``/splat/color_image``).
+    _viser_splat_path = None if _scene_mesh_path else str(_splat_path)
     _g1_viser = ViserRenderModule.blueprint(
-        splat_path=str(_splat_path),
+        splat_path=_viser_splat_path,
         mjcf_path=_MJCF_PATH,
         alignment_yaml=str(_alignment_yaml) if _alignment_yaml.exists() else None,
         port=8082,
@@ -278,23 +273,47 @@ if _splat_path is not None and _splat_path.exists():
         {
             ("joint_state", JointState): LCMTransport("/coordinator/joint_state", JointState),
             ("odom", PoseStamped): LCMTransport("/odom", PoseStamped),
-            ("lidar", PointCloud2): LCMTransport("/lidar", PointCloud2),
         },
     )
-    _g1_splat_cam = SplatCameraModule.blueprint(
-        splat_path=str(_splat_path),
-        mjcf_path=_MJCF_PATH,
-        alignment_yaml=str(_alignment_yaml) if _alignment_yaml.exists() else None,
-        render_hz=10.0,
-    ).transports(
-        {
-            ("joint_state", JointState): LCMTransport("/coordinator/joint_state", JointState),
-            ("odom", PoseStamped): LCMTransport("/odom", PoseStamped),
-            ("color_image", Image): LCMTransport("/splat/color_image", Image),
-            ("camera_info", CameraInfo): LCMTransport("/splat/camera_info", CameraInfo),
-        },
-    )
-    _viser_modules = (_g1_viser, _g1_splat_cam)
+    # Camera publisher.  When the user provided their own scene mesh we
+    # render the head camera by ray-casting that mesh (so /splat/color_image
+    # actually shows the loaded scene); otherwise we fall back to the splat
+    # rasterizer driving dimos_office.  Set ``DIMOS_DISABLE_MESH_CAMERA=1``
+    # to force the splat path even when a mesh is provided (escape hatch
+    # while debugging — accepts any non-empty value other than "0").
+    _disable_mesh_cam = os.environ.get("DIMOS_DISABLE_MESH_CAMERA", "0") not in ("", "0")
+    if _scene_mesh_path and not _disable_mesh_cam:
+        _g1_camera = MeshCameraModule.blueprint(
+            scene_path=_scene_mesh_path,
+            mjcf_path=_MJCF_PATH,
+            scene_scale=_scene_mesh_scale,
+            scene_translation=_scene_mesh_translation,
+            scene_rotation_zyx_deg=_scene_mesh_rotation,
+            scene_y_up=_scene_mesh_y_up,
+            render_hz=10.0,
+        ).transports(
+            {
+                ("joint_state", JointState): LCMTransport("/coordinator/joint_state", JointState),
+                ("odom", PoseStamped): LCMTransport("/odom", PoseStamped),
+                ("color_image", Image): LCMTransport("/splat/color_image", Image),
+                ("camera_info", CameraInfo): LCMTransport("/splat/camera_info", CameraInfo),
+            },
+        )
+    else:
+        _g1_camera = SplatCameraModule.blueprint(
+            splat_path=str(_splat_path),
+            mjcf_path=_MJCF_PATH,
+            alignment_yaml=str(_alignment_yaml) if _alignment_yaml.exists() else None,
+            render_hz=10.0,
+        ).transports(
+            {
+                ("joint_state", JointState): LCMTransport("/coordinator/joint_state", JointState),
+                ("odom", PoseStamped): LCMTransport("/odom", PoseStamped),
+                ("color_image", Image): LCMTransport("/splat/color_image", Image),
+                ("camera_info", CameraInfo): LCMTransport("/splat/camera_info", CameraInfo),
+            },
+        )
+    _viser_modules = (_g1_viser, _g1_camera)
 
 # Mapping + planning + memory + telemetry layered on top of the base
 # sim.  The base sim publishes pointcloud → /lidar (see the engine
@@ -310,49 +329,12 @@ _g1_perception_stack = (
     CostMapper.blueprint(),
     # On macOS the depth-render-based ``/lidar`` pipeline is silent
     # (mujoco.Renderer can't build Metal pipeline state in a forkserver
-    # child — see splat_camera.py's MlxBackend for the same XPC issue).
-    # CostMapper then sits idle.  Two opt-in fallbacks:
-    #
-    #   * If ``DIMOS_SCENE_MESH_PATH`` is set, ``MeshLidarModule`` ray-
-    #     casts a static scene mesh at the robot's pose and publishes
-    #     real ``/lidar`` — CostMapper turns that into a real costmap.
-    #   * Otherwise ``StaticCostmapModule`` publishes a constant all-
-    #     free costmap so click-to-nav at least has something to plan
-    #     against (correct for the flat-floor MJCF baseline).
-    *(
-        (
-            MeshLidarModule.blueprint(
-                config=dict(
-                    scene_path=os.environ.get("DIMOS_SCENE_MESH_PATH", ""),
-                    scene_scale=float(os.environ.get("DIMOS_SCENE_MESH_SCALE", "1.0")),
-                    scene_translation=tuple(
-                        float(x)
-                        for x in os.environ.get("DIMOS_SCENE_MESH_TRANSLATION", "0,0,0").split(",")
-                    ),
-                    scene_rotation_zyx_deg=tuple(
-                        float(x)
-                        for x in os.environ.get("DIMOS_SCENE_MESH_ROTATION_ZYX_DEG", "0,0,0").split(
-                            ","
-                        )
-                    ),
-                    scene_y_up=os.environ.get("DIMOS_SCENE_MESH_Y_UP", "1") != "0",
-                ),
-            ).transports(
-                {
-                    ("pointcloud", PointCloud2): LCMTransport("/lidar", PointCloud2),
-                    ("odom", PoseStamped): LCMTransport("/odom", PoseStamped),
-                },
-            ),
-        )
-        if os.environ.get("DIMOS_SCENE_MESH_PATH")
-        else (StaticCostmapModule.blueprint(),)
-        if sys.platform == "darwin"
-        else ()
-    ),
+    # child — see splat_camera.py's MlxBackend for the same XPC issue),
+    # so ``CostMapper`` would sit idle.  Publish a constant all-free
+    # ``OccupancyGrid`` instead so click-to-nav has something to plan
+    # against — correct for the flat-floor MJCF baseline.
+    *((StaticCostmapModule.blueprint(),) if sys.platform == "darwin" else ()),
     ReplanningAStarPlanner.blueprint(),
-    # Visual perception (object detection + tracking, semantic spatial memory)
-    SpatialMemory.blueprint(),
-    ObjectTracking.blueprint(frame_id="camera_link"),
     # Episode recording (memory2)
     G1Memory.blueprint().transports(
         {
@@ -362,38 +344,19 @@ _g1_perception_stack = (
     ),
 )
 
-# Agentic stack — Go2 parity minus xArm and minus PersonFollow.
-# UnitreeG1SkillContainer is still skipped (its move()/arm-gesture/mode
-# skills need G1ConnectionSpec which our in-process engine doesn't
-# provide); G1SimLocomotion gives the agent move() via /cmd_vel instead.
-# Vision is via PerceiveLoopSkill (Qwen API), memory introspection via
-# TemporalMemory.query().  Requires OPENAI_API_KEY (LLM + TTS) and
-# ALIBABA_API_KEY (Qwen-VL for navigate_with_text + look_out_for).
+# Locomotion + nav-only stack.  The full agentic stack (McpServer,
+# McpClient, NavigationSkillContainer, PerceiveLoopSkill, plus the
+# heavy ObjectTracking and SpatialMemory perception modules) is gated
+# off by default — together they cost ~30+ s of cold-start and stall
+# RPC dispatch on macOS to the point where ``McpServer.on_system_modules``
+# can't fan out within its 120 s budget.  G1SimLocomotion gives the
+# coordinator move() via /cmd_vel; PatrollingModule + frontier explorer
+# drive autonomous waypoint goals.  Re-add the agent stack only when
+# you actually need agent skills.
 _g1_agentic_stack = (
-    McpServer.blueprint(),
-    McpClient.blueprint(system_prompt=G1_SYSTEM_PROMPT),
     G1SimLocomotion.blueprint().transports(
         {
             ("cmd_vel", Twist): LCMTransport("/cmd_vel", Twist),
-        }
-    ),
-    NavigationSkillContainer.blueprint(),
-    SpeakSkill.blueprint(),
-    PerceiveLoopSkill.blueprint().transports(
-        {
-            ("color_image", Image): LCMTransport("/splat/color_image", Image),
-        }
-    ),
-    TemporalMemory.blueprint(
-        new_memory=global_config.new_memory,
-        # CLIP filter is ~350MB on GPU; gsplat already lives there, and
-        # Qwen-VL is API-based so we don't need a local image encoder.
-        # Disable to keep VRAM headroom.
-        use_clip_filtering=False,
-    ).transports(
-        {
-            ("color_image", Image): LCMTransport("/splat/color_image", Image),
-            ("odom", PoseStamped): LCMTransport("/odom", PoseStamped),
         }
     ),
     PatrollingModule.blueprint(),

@@ -23,15 +23,17 @@ Returned form is a single concatenated ``open3d.geometry.TriangleMesh``
 in world frame, with optional scale + Y-up→Z-up + translation applied.
 
 The same mesh feeds:
-  1. ``MeshLidarModule`` — ``Open3D RaycastingScene`` ray-cast for /lidar.
-  2. ``ViserRenderModule`` — drawn in the browser as collidable geometry
-     overlaid on the splat (toggleable in the viewer's view-mode dropdown).
+  1. ``MeshCameraModule`` — ``Open3D RaycastingScene`` per-pixel ray-cast
+     to publish a real RGB head-camera feed on ``/splat/color_image``.
+  2. ``ViserRenderModule`` — drawn in the browser viewer as a colored
+     ``add_mesh_trimesh`` so the user can navigate the loaded scene.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import open3d as o3d
@@ -77,8 +79,122 @@ def _world_rotation(alignment: SceneMeshAlignment) -> np.ndarray:
     return rzyx
 
 
+def _average_per_face_vertex(
+    per_fv: np.ndarray, face_verts: np.ndarray, n_verts: int
+) -> np.ndarray:
+    """Scatter-average ``(n_face_verts, 3)`` values onto ``(n_verts, 3)`` indices."""
+    out = np.zeros((n_verts, 3), dtype=np.float32)
+    counts = np.zeros(n_verts, dtype=np.int32)
+    np.add.at(out, face_verts, per_fv)
+    np.add.at(counts, face_verts, 1)
+    counts = np.maximum(counts, 1)[:, None]
+    return out / counts
+
+
+def _color_from_displaycolor(
+    mesh: Any,
+    n_verts: int,
+    face_counts: np.ndarray,
+    face_verts: np.ndarray,
+) -> np.ndarray | None:
+    """Per-vertex RGB from ``primvars:displayColor`` if present and valued.
+
+    Handles the four standard interpolations: ``constant`` / ``vertex`` /
+    ``uniform`` / ``faceVarying``.  Returns ``None`` when the primvar
+    isn't authored with a value (Sketchfab USDZ exports typically declare
+    the primvar but leave it empty — colors live on the bound material).
+    """
+    from pxr import UsdGeom
+
+    pv = UsdGeom.PrimvarsAPI(mesh.GetPrim()).GetPrimvar("displayColor")
+    if not pv or not pv.HasValue():
+        return None
+    raw = pv.Get()
+    if raw is None:
+        return None
+    colors = np.asarray(raw, dtype=np.float32)
+    if colors.ndim != 2 or colors.shape[1] != 3 or colors.size == 0:
+        return None
+    interp = pv.GetInterpolation()
+
+    if interp == UsdGeom.Tokens.constant:
+        return np.tile(colors[0:1], (n_verts, 1))
+
+    if interp == UsdGeom.Tokens.vertex and len(colors) == n_verts:
+        return colors
+
+    if interp == UsdGeom.Tokens.uniform and len(colors) == len(face_counts):
+        per_fv = np.repeat(colors, face_counts, axis=0)
+        return _average_per_face_vertex(per_fv, face_verts, n_verts)
+
+    if interp == UsdGeom.Tokens.faceVarying and len(colors) == len(face_verts):
+        return _average_per_face_vertex(colors, face_verts, n_verts)
+
+    return None
+
+
+def _color_from_material(
+    prim: Any, material_color_cache: dict[str, np.ndarray | None]
+) -> np.ndarray | None:
+    """Per-prim RGB from the bound material's ``inputs:diffuseColor``.
+
+    Walks ``UsdShadeMaterialBindingAPI`` → surface shader → ``inputs:diffuseColor``,
+    handling ``UsdPreviewSurface`` (the format Sketchfab USDZ uses).  Texture
+    inputs aren't sampled — if ``diffuseColor`` is connected to a ``UsdUVTexture``
+    rather than authored as a literal, this returns ``None`` and the caller
+    falls back to the next strategy.
+
+    Results are cached per material path so we don't re-walk the shader graph
+    for every prim that shares a material.
+    """
+    from pxr import UsdShade
+
+    mat_api = UsdShade.MaterialBindingAPI(prim)
+    bound = mat_api.ComputeBoundMaterial()[0]
+    if not bound:
+        return None
+    mat_path = str(bound.GetPath())
+    if mat_path in material_color_cache:
+        return material_color_cache[mat_path]
+
+    color = _resolve_diffuse_color(bound)
+    material_color_cache[mat_path] = color
+    return color
+
+
+def _resolve_diffuse_color(material: Any) -> np.ndarray | None:
+    """Pull a literal ``diffuseColor`` out of a UsdShade material's surface shader."""
+    from pxr import UsdShade
+
+    surface = material.ComputeSurfaceSource("")[0]
+    if not surface:
+        return None
+    diffuse_input = surface.GetInput("diffuseColor")
+    if not diffuse_input:
+        return None
+    # If the input is connected (texture-driven), bail — we don't sample images.
+    if diffuse_input.HasConnectedSource():
+        connected = diffuse_input.GetConnectedSource()[0]
+        if connected:
+            shader = UsdShade.Shader(connected.GetPrim())
+            if shader and shader.GetIdAttr().Get() == "UsdUVTexture":
+                return None
+    val = diffuse_input.Get()
+    if val is None:
+        return None
+    arr = np.asarray(val, dtype=np.float32).reshape(-1)
+    if arr.size != 3:
+        return None
+    return arr  # (3,) RGB in [0, 1]
+
+
 def _load_usd_mesh(path: Path) -> o3d.geometry.TriangleMesh:
-    """Walk every Mesh prim in a USD stage and concatenate to one o3d mesh."""
+    """Walk every Mesh prim in a USD stage and concatenate to one o3d mesh.
+
+    Also extracts per-vertex colors from ``primvars:displayColor`` when
+    present so downstream consumers (viser) can render textured-looking
+    Sketchfab exports without having to chase materials/textures.
+    """
     try:
         from pxr import Usd, UsdGeom
     except ImportError as e:
@@ -90,7 +206,10 @@ def _load_usd_mesh(path: Path) -> o3d.geometry.TriangleMesh:
 
     all_pts: list[np.ndarray] = []
     all_tris: list[np.ndarray] = []
+    all_colors: list[np.ndarray] = []
+    any_color = False
     vtx_offset = 0
+    material_color_cache: dict[str, np.ndarray | None] = {}
 
     for prim in stage.Traverse():
         if not prim.IsA(UsdGeom.Mesh):
@@ -110,6 +229,21 @@ def _load_usd_mesh(path: Path) -> o3d.geometry.TriangleMesh:
         pts_h = np.hstack([pts, np.ones((len(pts), 1), dtype=np.float32)])
         pts_world = (m @ pts_h.T).T[:, :3].astype(np.float32)
 
+        # Per-prim color resolution.  Try in order:
+        #   1. ``primvars:displayColor`` (vertex / faceVarying / uniform / constant)
+        #   2. Bound material's ``inputs:diffuseColor`` (UsdPreviewSurface — what
+        #      Sketchfab USDZ uses, with one constant color per material).
+        #   3. Neutral grey fallback.
+        prim_colors = _color_from_displaycolor(mesh, len(pts), face_counts, face_verts)
+        if prim_colors is None:
+            mat_color = _color_from_material(prim, material_color_cache)
+            if mat_color is not None:
+                prim_colors = np.tile(mat_color[None, :], (len(pts), 1))
+        if prim_colors is not None:
+            any_color = True
+        else:
+            prim_colors = np.full((len(pts), 3), 0.7, dtype=np.float32)
+
         # USD allows quads / n-gons; fan-triangulate so o3d gets pure tris.
         tris: list[tuple[int, int, int]] = []
         cursor = 0
@@ -128,6 +262,7 @@ def _load_usd_mesh(path: Path) -> o3d.geometry.TriangleMesh:
             continue
         all_pts.append(pts_world)
         all_tris.append(np.asarray(tris, dtype=np.int32))
+        all_colors.append(prim_colors)
         vtx_offset += len(pts_world)
 
     if not all_pts:
@@ -139,6 +274,9 @@ def _load_usd_mesh(path: Path) -> o3d.geometry.TriangleMesh:
     mesh = o3d.geometry.TriangleMesh()
     mesh.vertices = o3d.utility.Vector3dVector(pts)
     mesh.triangles = o3d.utility.Vector3iVector(tris)
+    if any_color:
+        colors = np.concatenate(all_colors, axis=0).astype(np.float64)
+        mesh.vertex_colors = o3d.utility.Vector3dVector(np.clip(colors, 0.0, 1.0))
     return mesh
 
 
