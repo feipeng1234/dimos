@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import sys
 
 from dimos.agents.mcp.mcp_client import McpClient
 from dimos.agents.mcp.mcp_server import McpServer
@@ -190,7 +191,7 @@ _g1_coordinator = (
 # torso lidar instead — a separate splat camera handles RGB perception.
 _g1_engine = MujocoSimModule.blueprint(
     address=_MJCF_PATH,
-    headless=False,
+    headless=sys.platform == "darwin",
     dof=29,
     # SplatCameraModule is the canonical RGB source for this sim; suppress
     # MujocoSimModule's own RGB to keep /splat/color_image single-publisher
