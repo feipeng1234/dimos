@@ -333,9 +333,9 @@ class RerunBridgeModule(Module):
                 spawned = True
             except ImportError:
                 pass  # dimos-viewer not installed
-            except Exception:
+            except Exception as err:
                 logger.warning(
-                    "dimos-viewer found but failed to spawn, falling back to stock rerun",
+                    f"dimos-viewer found but failed to spawn {err}, falling back to stock rerun",
                     exc_info=True,
                 )
 
