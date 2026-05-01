@@ -98,9 +98,17 @@ def load_model(
     n_substeps = round(ctrl_dt / sim_dt)
     model.opt.timestep = sim_dt
 
+    # Robots have one actuator per controllable joint, so model.nu is the
+    # robot's joint count regardless of how many extra articulated bodies
+    # the surrounding scene contributes.  Without this slice, keyframe
+    # "home"'s qpos[7:] is the FULL model qpos minus the free joint, which
+    # picks up every HSSD-style scene joint and produces a 9× too-large
+    # default_angles vector.  That balloons the ONNX policy's obs and
+    # crashes the first control step with INVALID_ARGUMENT.
+    home_qpos = np.array(model.keyframe("home").qpos[7 : 7 + model.nu])
     params = {
         "policy_path": (_get_data_dir() / f"{robot}_policy.onnx").as_posix(),
-        "default_angles": np.array(model.keyframe("home").qpos[7:]),
+        "default_angles": home_qpos,
         "n_substeps": n_substeps,
         "action_scale": 0.5,
         "input_controller": input_device,

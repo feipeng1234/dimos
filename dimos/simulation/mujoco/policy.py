@@ -82,8 +82,13 @@ class Go1OnnxController(OnnxController):
         gyro = data.sensor("gyro").data
         imu_xmat = data.site_xmat[model.site("imu").id].reshape(3, 3)
         gravity = imu_xmat.T @ np.array([0, 0, -1])
-        joint_angles = data.qpos[7:] - self._default_angles
-        joint_velocities = data.qvel[6:]
+        # Slice to only the robot's own joints.  Scenes can introduce
+        # additional articulated joints (HSSD apartments have door/drawer
+        # joints, mocap bodies, etc.); without this slice the obs vector
+        # baloons and the ONNX policy hits an INVALID_ARGUMENT shape error.
+        n = len(self._default_angles)
+        joint_angles = data.qpos[7 : 7 + n] - self._default_angles
+        joint_velocities = data.qvel[6 : 6 + n]
         obs = np.hstack(
             [
                 linvel,
@@ -128,8 +133,14 @@ class G1OnnxController(OnnxController):
         gyro = data.sensor("gyro_pelvis").data
         imu_xmat = data.site_xmat[model.site("imu_in_pelvis").id].reshape(3, 3)
         gravity = imu_xmat.T @ np.array([0, 0, -1])
-        joint_angles = data.qpos[7:] - self._default_angles
-        joint_velocities = data.qvel[6:]
+        # Slice to only the G1's own joints.  Scenes can introduce
+        # additional articulated joints (HSSD apartments have door/drawer
+        # joints, mocap bodies, etc.); without this slice the obs vector
+        # baloons and the ONNX policy hits an INVALID_ARGUMENT shape
+        # error after the very first step (see commit message).
+        n = len(self._default_angles)
+        joint_angles = data.qpos[7 : 7 + n] - self._default_angles
+        joint_velocities = data.qvel[6 : 6 + n]
         phase = np.concatenate([np.cos(self._phase), np.sin(self._phase)])
         command = self._input_controller.get_command()
         command[0] = command[0] * 2
