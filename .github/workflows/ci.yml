@@ -60,7 +60,7 @@ jobs:
       - name: Run tests
         run: |
           source .venv/bin/activate
-          _DIMOS_COV=1 coverage run --append -m pytest --numprocesses=auto -m 'not (tool or self_hosted or mujoco)'
+          _DIMOS_COV=1 coverage run -m pytest --numprocesses=auto -m 'not (tool or self_hosted or mujoco)'
 
       - name: Coverage report
         if: github.event_name == 'push' && !cancelled()
