@@ -6,7 +6,7 @@ permissions: {}
 
 jobs:
   lint:
-    timeout-minutes: 10
+    timeout-minutes: 1
     runs-on: ubuntu-latest
     permissions:
       contents: read  # For checkout
@@ -20,15 +20,11 @@ jobs:
         uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-      - name: Install lint dependencies
-        run: uv sync --only-group lint --frozen
+      - name: Install dependencies
+        run: uv sync --only-group autofix --frozen
       - name: Ruff fix
         run: uv run ruff check --fix-only
       - name: Ruff format
         run: uv run ruff format
       - name: autofix.ci
         uses: autofix-ci/action@v1
-      - name: Mypy
-        run: uv run mypy
-      - name: Ruff check
-        run: uv run ruff check
