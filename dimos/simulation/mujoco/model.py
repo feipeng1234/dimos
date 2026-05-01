@@ -35,7 +35,17 @@ def _get_data_dir() -> epath.Path:
     return epath.Path(str(get_data("mujoco_sim")))
 
 
-def get_assets() -> dict[str, bytes]:
+def _get_hssd_house_dir() -> epath.Path:
+    """Path to the unpacked HSSD house archive (data/hssd_house/)."""
+    return epath.Path(str(get_data("hssd_house")))
+
+
+def get_assets(mujoco_room: str | None = None) -> dict[str, bytes]:
+    """Load mesh + texture assets for the active scene.
+
+    Pass ``mujoco_room`` to also load scene-specific assets (e.g.
+    ``"hssd_house"`` pulls in the meshes from the HSSD archive).
+    """
     data_dir = _get_data_dir()
     assets: dict[str, bytes] = {}
 
@@ -52,16 +62,28 @@ def get_assets() -> dict[str, bytes]:
     mjx_env.update_assets(assets, person_dir, "*.obj")
     mjx_env.update_assets(assets, person_dir, "*.png")
 
+    # HSSD-derived multi-room house scene (assets via SceneSmith
+    # nepfaff/scenesmith-example-scenes, House subset, scene_186).
+    # Only loaded when the scene is selected — 200+ MB of OBJ meshes
+    # would be wasted memory for office1 / scene_empty runs.
+    if mujoco_room == "hssd_house":
+        hssd_meshes = _get_hssd_house_dir() / "meshes"
+        mjx_env.update_assets(assets, hssd_meshes, "*.obj")
+        mjx_env.update_assets(assets, hssd_meshes, "*.png")
+
     return assets
 
 
 def load_model(
-    input_device: InputController, robot: str, scene_xml: str
+    input_device: InputController,
+    robot: str,
+    scene_xml: str,
+    mujoco_room: str | None = None,
 ) -> tuple[mujoco.MjModel, mujoco.MjData]:
     mujoco.set_mjcb_control(None)
 
     xml_string = get_model_xml(robot, scene_xml)
-    model = mujoco.MjModel.from_xml_string(xml_string, assets=get_assets())
+    model = mujoco.MjModel.from_xml_string(xml_string, assets=get_assets(mujoco_room))
     data = mujoco.MjData(model)
 
     mujoco.mj_resetDataKeyframe(model, data, 0)
@@ -151,6 +173,15 @@ def load_scene_xml(config: GlobalConfig) -> str:
         return generate_mujoco_scene(OccupancyGrid.from_path(path))
 
     mujoco_room = config.mujoco_room or "office1"
-    xml_file = (_get_data_dir() / f"scene_{mujoco_room}.xml").as_posix()
+
+    # The HSSD house scene lives in its own LFS archive because its
+    # meshes are 200+ MB (vs the 60 MB mujoco_sim archive).  Pull from
+    # that archive instead of the default mujoco_sim data dir.
+    if mujoco_room == "hssd_house":
+        scene_dir = _get_hssd_house_dir()
+    else:
+        scene_dir = _get_data_dir()
+
+    xml_file = (scene_dir / f"scene_{mujoco_room}.xml").as_posix()
     with open(xml_file) as f:
         return f.read()

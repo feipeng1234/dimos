@@ -90,7 +90,12 @@ def _run_simulation(config: GlobalConfig, shm: ShmReader) -> None:
         robot_name = "unitree_go1"
 
     controller = MockController(shm)
-    model, data = load_model(controller, robot=robot_name, scene_xml=load_scene_xml(config))
+    model, data = load_model(
+        controller,
+        robot=robot_name,
+        scene_xml=load_scene_xml(config),
+        mujoco_room=config.mujoco_room,
+    )
 
     if model is None or data is None:
         raise ValueError("Failed to load MuJoCo model: model or data is None")
