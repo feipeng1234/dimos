@@ -65,6 +65,7 @@ from dimos.core.stream import In
 from dimos.core.transport import LCMTransport
 from dimos.hardware.whole_body.spec import WholeBodyConfig
 from dimos.mapping.costmapper import CostMapper
+from dimos.mapping.static_costmap import StaticCostmapModule
 from dimos.mapping.voxels import VoxelGridMapper
 from dimos.memory2.module import Recorder, RecorderConfig
 from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
@@ -281,6 +282,15 @@ _g1_perception_stack = (
         }
     ),
     CostMapper.blueprint(),
+    # On macOS the depth-render-based ``/lidar`` pipeline is silent
+    # (mujoco.Renderer can't build Metal pipeline state in a forkserver
+    # child — see splat_camera.py's MlxBackend for the same XPC issue).
+    # CostMapper sits idle without lidar input, so the planner has no
+    # ``/global_costmap`` to plan against and click-to-nav fails.  Slot
+    # in a constant all-free costmap publisher so the planner has
+    # something to plan against — correct for the sim's flat-floor
+    # MJCF where there are no collidable obstacles anyway.
+    *((StaticCostmapModule.blueprint(),) if sys.platform == "darwin" else ()),
     ReplanningAStarPlanner.blueprint(),
     # Visual perception (object detection + tracking, semantic spatial memory)
     SpatialMemory.blueprint(),
