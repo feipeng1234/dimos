@@ -386,6 +386,13 @@ tests = [
     "ollama>=0.6.0",
 ]
 
+# Lint / format / type-check tooling for the dedicated `lint` CI job. Mypy
+# needs the project's runtime deps to resolve imports across the dimos
+# package, so the group inherits everything `tests` installs.
+lint = [
+    {include-group = "tests"},
+]
+
 # Full CI test group for the self-hosted runner. Inherits `tests` and adds
 # the heavy ML/perception/sim extras needed for self_hosted-marked tests (LFS,
 # GPU, ROS-dependent integration tests, simulation).
@@ -445,6 +452,7 @@ force-sort-within-sections = true
 runtime-evaluated-base-classes = ["dimos.core.module.Module"]
 
 [tool.mypy]
+files = ["dimos/"]
 python_version = "3.12"
 incremental = true
 strict = true
