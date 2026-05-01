@@ -28,10 +28,10 @@ def test_connect_no_running_system(tmp_path, monkeypatch):
         Dimos.connect()
 
 
-def test_connect_via_host_port_skill_call(running_app, temp_client):
-    assert temp_client.skills.ping() == "pong"
-    assert temp_client.skills.echo(message="hello") == "hello"
-    temp_client.stop()
+def test_connect_via_host_port_skill_call(running_app, client):
+    assert client.skills.ping() == "pong"
+    assert client.skills.echo(message="hello") == "hello"
+    client.stop()
     assert running_app.is_running
     assert running_app.skills.ping() == "pong"
 
@@ -41,19 +41,19 @@ def test_connect_attribute_access(client):
     assert module._module_closed is False
 
 
-def test_connect_restart_invalidates_cache(client_fresh):
-    source = client_fresh._source
+def test_connect_restart_invalidates_cache(client):
+    source = client._source
     m_before = source.get_rpyc_module("StressTestModule")
-    client_fresh.restart(StressTestModule, reload_source=False)
+    client.restart(StressTestModule, reload_source=False)
     m_after = source.get_rpyc_module("StressTestModule")
     assert m_before is not m_after
-    assert client_fresh.skills.ping() == "pong"
+    assert client.skills.ping() == "pong"
 
 
-def test_connect_run_by_name_adds_module(running_app_fresh, client_fresh):
-    client_fresh.run("mcp-server")
-    assert "McpServer" in client_fresh._source.list_module_names()
-    assert "McpServer" in running_app_fresh._source.list_module_names()
+def test_connect_run_by_name_adds_module(running_app, client):
+    client.run("mcp-server")
+    assert "McpServer" in client._source.list_module_names()
+    assert "McpServer" in running_app._source.list_module_names()
 
 
 def test_connect_repr_marks_remote(client):
@@ -62,9 +62,9 @@ def test_connect_repr_marks_remote(client):
     assert "StressTestModule" in rep
 
 
-def test_connect_stop_does_not_kill_remote(running_app, temp_client):
-    temp_client.stop()
-    assert not temp_client.is_running
+def test_connect_stop_does_not_kill_remote(running_app, client):
+    client.stop()
+    assert not client.is_running
     assert running_app.is_running
     assert running_app.skills.ping() == "pong"
 

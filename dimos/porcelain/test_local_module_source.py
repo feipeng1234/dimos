@@ -39,8 +39,8 @@ def test_get_rpyc_module_caches_connection(running_app):
     assert m1 is m2
 
 
-def test_invalidate_allows_reconnect(running_app_fresh):
-    source = running_app_fresh._source
+def test_invalidate_allows_reconnect(running_app):
+    source = running_app._source
     m1 = source.get_rpyc_module("StressTestModule")
     source.invalidate("StressTestModule")
     m2 = source.get_rpyc_module("StressTestModule")
@@ -52,8 +52,8 @@ def test_invalidate_unknown_name_is_noop(running_app):
     running_app._source.invalidate("NonexistentModule")
 
 
-def test_close_then_get_reconnects(running_app_fresh):
-    source = running_app_fresh._source
+def test_close_then_get_reconnects(running_app):
+    source = running_app._source
     m1 = source.get_rpyc_module("StressTestModule")
     source.close()
     m2 = source.get_rpyc_module("StressTestModule")
