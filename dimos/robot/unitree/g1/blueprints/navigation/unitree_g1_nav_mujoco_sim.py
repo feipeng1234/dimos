@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+# Copyright 2025-2026 Dimensional Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""G1 nav sim (MuJoCo) — SimplePlanner + PGO + local obstacle avoidance.
+
+MuJoCo counterpart to ``unitree_g1_nav_sim`` (Unity).  Same nav-stack
+composition, same goal-following pipeline; the only difference is the
+sim source.  Where the Unity bridge publishes ``registered_scan``,
+``odometry``, and ``terrain_map`` directly (ground truth), MuJoCo's G1
+connection only publishes raw ``lidar`` and a ``PoseStamped`` pose.  We
+bridge the two ports:
+
+- ``lidar`` is already in world frame from the MuJoCo lidar sensor
+  process (see ``mujoco_process.py``), so a remap from ``lidar`` →
+  ``registered_scan`` is sufficient — no transform needed.
+- ``PoseStamped`` is converted to ``nav_msgs/Odometry`` via
+  ``MujocoPoseToOdometryAdapter`` (twist fields zeroed; the connection
+  doesn't expose linear/angular velocity).
+- ``terrain_map`` is computed by ``TerrainAnalysis`` inside
+  ``create_nav_stack`` from the registered scan, just like onboard.
+
+Data flow:
+    Click → MovementManager → goal → SimplePlanner
+    → way_point → LocalPlanner → path → PathFollower
+    → nav_cmd_vel → MovementManager → cmd_vel → G1SimConnection (MuJoCo)
+
+    G1SimConnection.lidar (= registered_scan) → TerrainAnalysis → terrain_map
+    G1SimConnection.odom → MujocoPoseToOdometryAdapter → odometry → PGO
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from dimos.core.coordination.blueprints import autoconnect
+from dimos.core.global_config import global_config
+from dimos.navigation.nav_stack.main import create_nav_stack, nav_stack_rerun_config
+from dimos.robot.unitree.g1.blueprints.navigation._mujoco_pose_adapter import (
+    MujocoPoseToOdometryAdapter,
+)
+from dimos.robot.unitree.g1.config import G1_LOCAL_PLANNER_PRECOMPUTED_PATHS
+from dimos.robot.unitree.g1.g1_rerun import g1_static_robot
+from dimos.robot.unitree.g1.mujoco_sim import G1SimConnection
+from dimos.visualization.vis_module import vis_module
+
+
+def _rerun_blueprint() -> Any:
+    import rerun.blueprint as rrb
+
+    return rrb.Blueprint(
+        rrb.Vertical(
+            rrb.Spatial3DView(
+                origin="world",
+                name="3D",
+                eye_controls=rrb.EyeControls3D(
+                    position=(0.0, 0.0, 20.0),
+                    look_target=(0.0, 0.0, 0.0),
+                    eye_up=(0.0, 0.0, 1.0),
+                ),
+            ),
+        ),
+        collapse_panels=True,
+    )
+
+
+VEHICLE_HEIGHT = 1.24
+
+unitree_g1_nav_mujoco_sim = (
+    autoconnect(
+        G1SimConnection.blueprint(),
+        MujocoPoseToOdometryAdapter.blueprint(),
+        create_nav_stack(
+            use_simple_planner=True,
+            vehicle_height=VEHICLE_HEIGHT,
+            terrain_analysis={
+                "obstacle_height_threshold": 0.1,
+                "ground_height_threshold": 0.05,
+                "max_relative_z": 0.3,
+                "min_relative_z": -1.5,
+            },
+            local_planner={
+                "paths_dir": str(G1_LOCAL_PLANNER_PRECOMPUTED_PATHS),
+                "max_speed": 2.0,
+                "autonomy_speed": 2.0,
+                "obstacle_height_threshold": 0.1,
+                "max_relative_z": 0.3,
+                "min_relative_z": -1.5,
+                "freeze_ang": 180.0,
+                "two_way_drive": False,
+            },
+            path_follower={
+                "max_speed": 2.0,
+                "autonomy_speed": 2.0,
+                "max_acceleration": 4.0,
+                "slow_down_distance_threshold": 0.5,
+                "omni_dir_goal_threshold": 0.5,
+                "two_way_drive": False,
+            },
+        ),
+        vis_module(
+            viewer_backend=global_config.viewer,
+            rerun_config=nav_stack_rerun_config(
+                {
+                    "blueprint": _rerun_blueprint,
+                    "static": {
+                        "world/tf/robot": g1_static_robot,
+                    },
+                }
+            ),
+        ),
+    )
+    .remappings(
+        [
+            # MuJoCo's lidar is already in world frame, so it's the
+            # `registered_scan` the nav stack expects.
+            (G1SimConnection, "lidar", "registered_scan"),
+        ]
+    )
+    .global_config(n_workers=8, robot_model="unitree_g1", simulation=True)
+)
+
+
+__all__ = ["unitree_g1_nav_mujoco_sim"]
