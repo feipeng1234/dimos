@@ -51,7 +51,7 @@ def test_get_osm_map(mock_openstreetmap_org: None) -> None:
     assert map_image.position == position
     assert map_image.n_tiles == 4
 
-    expected_image = cv2.imread(str(_fixture_dir / "full.png"))
+    expected_image = cv2.imread(str(get_data("osm_map_test") / "full.png"))
     expected_image_rgb = cv2.cvtColor(expected_image, cv2.COLOR_BGR2RGB)
     assert np.array_equal(map_image.image.data, expected_image_rgb), "Map is not the same."
 

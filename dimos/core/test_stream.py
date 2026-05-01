@@ -170,6 +170,7 @@ class SpyLCMTransport(LCMTransport):
 
 @pytest.mark.self_hosted
 @pytest.mark.skipif_macos_bug
+@pytest.mark.parametrize("subscriber_class", [ClassicSubscriber, RXPYSubscriber])
 def test_subscription(dimos, subscriber_class) -> None:
     robot = dimos.deploy(MockRobotClient)
 
