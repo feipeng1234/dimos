@@ -12,20 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Live episode-status feedback during teleop recording.
+"""Single point of teleop-input → EpisodeStatus translation.
 
-Watches the buttons stream and runs the same start/save/discard state
-machine that `DataPrep.extract_episodes` runs offline — but here it runs
-live so the operator can see counters update in real time. Pure observability:
-this module does NOT write anything. The recording itself is RecordReplay's
-job; episode boundary extraction still happens post-hoc inside DataPrep.
-
-Why a separate live state-machine instead of just consuming DataPrep's offline
-output? Because the operator wants feedback *during* the session ("episodes
-saved: 12") to know when to stop, retry a bad demo, etc.
-
-Agent surface: `get_status()` returns the latest counters; `reset_counters()`
-zeroes them between recording sessions without restarting the blueprint.
+Watches buttons / keyboard, runs the start/save/discard state machine,
+publishes EpisodeStatus on every transition. RecordReplay captures that
+stream into session.db; DataPrep reads only the recorded EpisodeStatus
+events offline — never raw buttons or keypresses.
 """
 
 from __future__ import annotations
@@ -39,36 +31,53 @@ from dimos.core.module import Module, ModuleConfig
 from dimos.core.stream import In, Out
 from dimos.teleop.quest.quest_types import Buttons
 
+# Friendly names → Quest Buttons attribute names. Override by supplying an
+# attribute name directly in `button_map`.
+BUTTON_ALIASES: dict[str, str] = {
+    "A": "right_primary",
+    "B": "right_secondary",
+    "X": "left_primary",
+    "Y": "left_secondary",
+    "LT": "left_trigger",
+    "RT": "right_trigger",
+    "LG": "left_grip",
+    "RG": "right_grip",
+    "MENU_L": "left_menu",
+    "MENU_R": "right_menu",
+}
+
 
 class EpisodeStatus(BaseModel):
-    """Live counters published every state transition."""
-
     state: Literal["idle", "recording"]
     episodes_saved: int
     episodes_discarded: int
-    current_episode_start_ts: float | None  # None when state == "idle"
+    current_episode_start_ts: float | None
     last_event: Literal["start", "save", "discard", "init"] = "init"
+    task_label: str | None = None
+
+
+class KeyPress(BaseModel):
+    """Single keypress event from a keyboard input source."""
+
+    key: str
+    ts: float
 
 
 class EpisodeMonitorModuleConfig(ModuleConfig):
-    """Match the same fields used by `EpisodeConfig` in the dataset spec
-    so the live monitor and the offline extractor agree on what each button
-    means. Friendly names ("A", "B", "X") resolve via BUTTON_ALIASES.
-    """
-
-    button_stream: str = "buttons"
-    start: str = "A"
-    save: str = "B"
-    discard: str = "X"
+    button_map: dict[Literal["start", "save", "discard"], str] = {
+        "start": "A",
+        "save": "B",
+        "discard": "X",
+    }
+    keyboard_map: dict[Literal["start", "save", "discard"], str] = {}
+    default_task_label: str | None = None
 
 
 class EpisodeMonitorModule(Module):
-    """Live operator feedback for teleop recording sessions."""
-
     config: EpisodeMonitorModuleConfig
 
     buttons: In[Buttons]
-
+    keyboard: In[KeyPress]
     status: Out[EpisodeStatus]
 
     def __init__(self, **kwargs: Any) -> None:
@@ -77,40 +86,38 @@ class EpisodeMonitorModule(Module):
         self._saved: int = 0
         self._discarded: int = 0
         self._current_start_ts: float | None = None
-        # Previous bit-state of each watched button, for rising-edge detection.
-        self._prev_bits: dict[str, bool] = {}
+        self._prev_bits: dict[str, bool] = {}  # rising-edge detection for buttons
 
     @rpc
     def start(self) -> None:
-        """Subscribe to `buttons` and emit an initial idle status."""
         raise NotImplementedError
 
     @rpc
     def stop(self) -> None:
-        """Unsubscribe and call super().stop()."""
         raise NotImplementedError
 
     @rpc
     def reset_counters(self) -> EpisodeStatus:
-        """Zero the saved/discarded counters and force state back to idle.
-        Returns the new status."""
         raise NotImplementedError
 
     @rpc
     def get_status(self) -> EpisodeStatus:
-        """Return the current EpisodeStatus snapshot."""
         raise NotImplementedError
 
-    # ── internals ────────────────────────────────────────────────────────────
-
     def _on_buttons(self, msg: Buttons) -> None:
-        """Detect rising edges on start/save/discard buttons; advance state
-        machine; publish EpisodeStatus on every transition.
+        """Rising-edge detect against `config.button_map`; advance state machine."""
+        raise NotImplementedError
 
-        State machine — must mirror DataPrep.extract_episodes in BUTTONS mode:
-            IDLE       --start press--> RECORDING (begin)
-            RECORDING  --save press---> IDLE      (saved += 1)
-            RECORDING  --discard ----->  IDLE      (discarded += 1)
-            RECORDING  --start press--> RECORDING (auto-commit prev, begin new)
+    def _on_keyboard(self, msg: KeyPress) -> None:
+        """Match `msg.key` against `config.keyboard_map`; advance state machine."""
+        raise NotImplementedError
+
+    def _transition(self, event: Literal["start", "save", "discard"], ts: float) -> None:
+        """Apply the state-machine transition and publish EpisodeStatus.
+
+        IDLE      --start-->     RECORDING
+        RECORDING --save-->      IDLE        (commit, saved += 1)
+        RECORDING --discard-->   IDLE        (drop, discarded += 1)
+        RECORDING --start-->     RECORDING   (auto-commit prev, begin new)
         """
         raise NotImplementedError

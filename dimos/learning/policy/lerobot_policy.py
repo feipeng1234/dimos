@@ -12,15 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""LeRobot policy wrapper.
-
-Wraps any `lerobot.PreTrainedPolicy` (ACT, Diffusion, pi0, pi0.5) behind the
-`Policy` protocol. This is the only Policy implementation in v1 — both
-training entry points produce checkpoints loadable by this class.
-
-Heavy deps (`lerobot`, `torch`) are imported lazily inside `load()` so simply
-importing this module does not require a CUDA install.
-"""
+"""LeRobot ACT policy wrapper. Lazy-imports lerobot/torch in load()."""
 
 from __future__ import annotations
 
@@ -33,15 +25,10 @@ from dimos.learning.policy.base import Policy
 
 
 class LeRobotPolicy:
-    """Adapter for lerobot's PreTrainedPolicy → DimOS Policy protocol."""
-
-    # Type-erased to keep this file import-light. Concrete type:
-    #   _model: lerobot.policies.pretrained.PreTrainedPolicy
-    _model: Any
+    _model: Any  # lerobot.policies.pretrained.PreTrainedPolicy
     _stats: dict[str, Any]
     _chunk_size: int
     _joint_names: list[str]
-    _expects_language: bool
     _device: str
 
     def __init__(
@@ -50,24 +37,13 @@ class LeRobotPolicy:
         stats: dict[str, Any],
         chunk_size: int,
         joint_names: list[str],
-        expects_language: bool,
         device: str,
     ) -> None:
-        """Direct constructor — prefer `LeRobotPolicy.load(path)` in user code."""
         raise NotImplementedError
 
     @classmethod
     def load(cls, path: str | Path, device: str = "cuda") -> LeRobotPolicy:
-        """Load a lerobot checkpoint directory.
-
-        Expected layout under `path`:
-            config.json / model.safetensors  - the lerobot checkpoint
-            meta/stats.json                  - normalization stats
-            dimos_meta.json                  - DimOS sidecar (spec + provenance)
-
-        Auto-detects the policy class (act / diffusion / pi0 / pi0_5) from
-        the lerobot config and sets `expects_language` accordingly.
-        """
+        """Load checkpoint dir: model.safetensors + meta/stats.json + dimos_meta.json."""
         raise NotImplementedError
 
     @property
@@ -78,26 +54,10 @@ class LeRobotPolicy:
     def joint_names(self) -> list[str]:
         return self._joint_names
 
-    @property
-    def expects_language(self) -> bool:
-        return self._expects_language
-
     def predict_chunk(self, obs: dict[str, np.ndarray]) -> np.ndarray:
-        """Run one forward pass; return (chunk_size, action_dim).
-
-        Steps:
-          1. Normalize obs via `self._stats` (image: /255 + per-channel norm;
-             vector: (x - mean) / std).
-          2. Convert to torch tensors on `self._device`, add batch dim.
-          3. Call `self._model.select_action_chunk(obs)` (or equivalent).
-          4. Move back to numpy, drop batch dim.
-          5. Unnormalize actions via `self._stats`.
-
-        Matches the pipeline used inside lerobot's training loop, so live
-        inference sees the same numerics as training-time evaluation.
-        """
+        """Normalize obs → forward pass → unnormalize → (chunk_size, action_dim)."""
         raise NotImplementedError
 
 
-# Sanity check: make the protocol relationship explicit at import time.
+# Protocol conformance check at import time.
 _: type[Policy] = LeRobotPolicy

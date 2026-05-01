@@ -12,16 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Trainer configs for v1.
-
-Two pydantic configs, one per training entry point:
-  - BCConfig    -> consumed by train_bc      (ACT, optionally Diffusion)
-  - VLAConfig   -> consumed by finetune_vla  (pi0, pi0.5)
-
-Both are translated into a `lerobot` training config inside the trainer;
-fields here are the small, opinionated subset DimOS users actually need to
-tune. Anything not exposed falls back to the lerobot default.
-"""
+"""ACT training config (v1). Fields are the opinionated subset DimOS exposes;
+unset = lerobot default. Translated to Hydra-style argv inside `train_bc`."""
 
 from __future__ import annotations
 
@@ -31,15 +23,13 @@ from pydantic import BaseModel
 
 
 class BCConfig(BaseModel):
-    """Behavior-cloning trainer config (v1: ACT, with Diffusion as a flag)."""
-
-    policy_type: Literal["act", "diffusion"] = "act"
+    policy_type: Literal["act"] = "act"
 
     # Action chunking
-    chunk_size: int = 50  # number of future actions predicted per inference call
-    n_obs_steps: int = 1  # observation history length passed to the policy
+    chunk_size: int = 50  # future actions per inference call
+    n_obs_steps: int = 1  # obs history length
 
-    # ACT model arch (ignored for Diffusion)
+    # ACT model arch
     hidden_dim: int = 512
     n_layers: int = 4
     n_heads: int = 8
@@ -60,35 +50,5 @@ class BCConfig(BaseModel):
     # Eval / checkpointing
     save_every: int = 10_000
     eval_every: int = 5_000
-    seed: int = 0
-    device: str = "cuda"
-
-
-class VLAConfig(BaseModel):
-    """VLA finetune config (v1: pi0, pi0.5)."""
-
-    policy_type: Literal["pi0", "pi0_5"] = "pi0_5"
-
-    # Pretrained checkpoint — HF hub id or local path
-    pretrained_path: str
-
-    # Finetune mode
-    finetune_mode: Literal["full", "lora"] = "lora"
-    lora_rank: int = 16
-    freeze_vision: bool = True
-    freeze_language: bool = True
-
-    # Action chunking — pi0/pi0.5 default
-    chunk_size: int = 50
-
-    # Optim
-    steps: int = 30_000
-    batch_size: int = 4
-    lr: float = 5e-5
-    weight_decay: float = 1e-4
-
-    # Eval / checkpointing
-    save_every: int = 5_000
-    eval_every: int = 2_500
     seed: int = 0
     device: str = "cuda"

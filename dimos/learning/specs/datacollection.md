@@ -1,11 +1,7 @@
 # Stage 1 — Data
 
-Two phases:
-
-1. **Recording** — live; operator drives the robot. `RecordReplay` writes streams to `session.db`.
-2. **DataPrep** — offline; convert `session.db` → `dataset/`.
-
-One `dataset.yaml` drives both, parsed once into a `DatasetConfig`.
+1. **Recording** — live; `RecordReplay` writes streams to `session.db`.
+2. **DataPrep** — offline; `session.db` → `dataset/` (LeRobot v2).
 
 ---
 
@@ -15,12 +11,13 @@ One `dataset.yaml` drives both, parsed once into a `DatasetConfig`.
 
 ```python
 # dimos/learning/collection/blueprint.py
-spec = DatasetConfig.from_file("datasets/pick_red.yaml")
-
 learning_collect_quest_xarm7 = autoconnect(
     teleop_quest_xarm7,
     RealSenseCamera.blueprint(enable_pointcloud=False),
-    EpisodeMonitorModule.blueprint(spec=spec),
+    EpisodeMonitorModule.blueprint(
+        button_map={"start": "A", "save": "B", "discard": "X"},
+        default_task_label="pick_red_cube",
+    ),
 ).transports({
     ("buttons",     Buttons):       LCMTransport("/teleop/buttons",          Buttons),
     ("color_image", Image):         LCMTransport("/camera/color_image",      Image),
@@ -28,108 +25,12 @@ learning_collect_quest_xarm7 = autoconnect(
 })
 ```
 
-`RecordReplay` (`--record-path`) captures every transport above, including `episode_status`.
-
----
-
-### Dataset spec — YAML
-
-```yaml
-# datasets/pick_red.yaml
-source: session.db
-
-episodes:
-  extractor: episode_status
-  status_stream: episode_status
-  default_task_label: pick_red_cube
-  button_map:    {start: A,     save: B, discard: X}
-  keyboard_map:  {start: space, save: s, discard: d}
-
-observation:
-  cam:
-    stream: camera_color_image
-    field: image
-  joint_pos:
-    stream: coordinator_joint_state
-    field: position
-
-action:
-  joint_target:
-    stream: coordinator_joint_command
-    field: position
-
-sync:
-  anchor: cam
-  rate_hz: 30
-  tolerance_ms: 50
-  strategy: nearest
-
-output:
-  format: lerobot
-  path: datasets/pick_red/
-  metadata: {fps: 30, robot: xarm7}
-```
-
----
-
-### Dataset spec — pydantic classes
-
-```python
-# dimos/learning/config.py
-from dimos.protocol.service.spec import BaseConfig    # extra="forbid"
-
-
-class DatasetConfig(BaseConfig):
-    source:      str
-    episodes:    EpisodeConfig
-    observation: dict[str, StreamField]
-    action:      dict[str, StreamField]
-    sync:        SyncConfig
-    output:      OutputConfig
-
-    @classmethod
-    def from_file(cls, path: str | Path) -> DatasetConfig: ...
-
-
-class EpisodeConfig(BaseConfig):
-    extractor:     Literal["episode_status", "ranges", "whole_session"] = "episode_status"
-    status_stream: str = "episode_status"
-    ranges:        list[tuple[float, float]] | None = None
-    default_task_label: str | None = None
-    button_map:    dict[Literal["start", "save", "discard"], str] = {"start": "A", "save": "B", "discard": "X"}
-    keyboard_map:  dict[Literal["start", "save", "discard"], str] = {}
-
-
-class StreamField(BaseConfig):
-    stream: str
-    field:  str | None = None
-
-
-class SyncConfig(BaseConfig):
-    anchor:       str
-    rate_hz:      float
-    tolerance_ms: float
-    strategy:     Literal["nearest", "interp"] = "nearest"
-
-
-class OutputConfig(BaseConfig):
-    format:   Literal["lerobot", "hdf5", "rlds"] = "lerobot"
-    path:     Path
-    metadata: dict[str, Any] = {}
-```
-
-| Module | Reads |
-|---|---|
-| `EpisodeMonitorModule` | `spec.episodes.button_map` / `keyboard_map` / `default_task_label` |
-| `DataPrepModule`       | full spec |
-| `ChunkPolicyModule`    | `spec.observation`, `spec.sync` |
-
----
+`RecordReplay` (`--record-path`) captures every transport above into `session.db`.
 
 ### EpisodeMonitorModule
 
-Translates teleop input (buttons, keyboard, future inputs) into a canonical
-`EpisodeStatus` stream. `DataPrep` reads only that stream — never raw inputs.
+Translates teleop input (buttons, keyboard) into the canonical
+`EpisodeStatus` stream. DataPrep reads only this stream — never raw inputs.
 
 ```python
 # dimos/learning/collection/episode_monitor.py
@@ -144,7 +45,9 @@ class EpisodeStatus(BaseModel):
 
 
 class EpisodeMonitorModuleConfig(ModuleConfig):
-    spec: DatasetConfig
+    button_map:   dict[Literal["start", "save", "discard"], str] = {"start": "A", "save": "B", "discard": "X"}
+    keyboard_map: dict[Literal["start", "save", "discard"], str] = {}
+    default_task_label: str | None = None
 
 
 class EpisodeMonitorModule(Module):
@@ -173,31 +76,35 @@ RECORDING --start-->     RECORDING   (auto-commit prev)
 session end mid-episode: always discard
 ```
 
----
-
 ### Run
 
 ```bash
-dimos run learning-collect-quest-xarm7 \
-  --spec-path   datasets/pick_red.yaml \
-  --record-path data/pick_red.db
+dimos run learning-collect-quest-xarm7 --record-path data/sessions/pick_red.db
 ```
 
 ---
 
 ## Phase B — DataPrep
 
-Reads `session.db`, slices on `episode_status`, syncs streams, writes
-`dataset/`. Heavy deps run in a subprocess.
-
 ### Blueprint
 
 ```python
 # dimos/learning/dataprep/blueprint.py
-spec = DatasetConfig.from_file("datasets/pick_red.yaml")
-
 learning_dataprep = autoconnect(
-    DataPrepModule.blueprint(spec=spec, auto_run=True),
+    DataPrepModule.blueprint(
+        source="data/sessions/pick_red.db",
+        episodes=EpisodeExtractor(),
+        observation={
+            "cam":       StreamField(stream="camera_color_image",      field="image"),
+            "joint_pos": StreamField(stream="coordinator_joint_state", field="position"),
+        },
+        action={
+            "joint_target": StreamField(stream="coordinator_joint_command", field="position"),
+        },
+        sync=SyncConfig(anchor="cam", rate_hz=30, tolerance_ms=50),
+        output=OutputConfig(format="lerobot", path=Path("data/datasets/pick_red/")),
+        auto_run=True,
+    ),
 ).transports({})
 ```
 
@@ -205,30 +112,62 @@ learning_dataprep = autoconnect(
 
 ```python
 # dimos/learning/dataprep_module.py
+from dimos.protocol.service.spec import BaseConfig
+
+
+class EpisodeExtractor(BaseConfig):
+    extractor:     Literal["episode_status", "ranges", "whole_session"] = "episode_status"
+    status_stream: str = "episode_status"
+    ranges:        list[tuple[float, float]] | None = None
+
+
+class StreamField(BaseConfig):
+    stream: str
+    field:  str | None = None
+
+
+class SyncConfig(BaseConfig):
+    anchor:       str
+    rate_hz:      float
+    tolerance_ms: float
+    strategy:     Literal["nearest", "interp"] = "nearest"
+
+
+class OutputConfig(BaseConfig):
+    format:   Literal["lerobot", "hdf5", "rlds"] = "lerobot"
+    path:     Path
+    metadata: dict[str, Any] = {}
+
 
 class DataPrepModuleConfig(ModuleConfig):
-    spec:       DatasetConfig
-    output_dir: str | None = None
-    auto_run:   bool       = False
+    source:      str
+    episodes:    EpisodeExtractor
+    observation: dict[str, StreamField]
+    action:      dict[str, StreamField]
+    sync:        SyncConfig
+    output:      OutputConfig
+    auto_run:    bool = False
 
 
 class DataPrepModule(Module):
     config: DataPrepModuleConfig
 
     @rpc
-    def build(self, output_dir: str | None = None) -> None: ...
-    @rpc
-    def cancel(self) -> bool: ...
+    def build(self) -> None: ...
     @rpc
     def get_status(self) -> dict[str, Any]: ...
     @rpc
     def inspect(self) -> dict[str, Any]: ...
 ```
 
+`build()` iterates samples, hands them to the format writer, and snapshots
+`config.model_dump()` into `<output.path>/dimos_meta.json`. Stats are
+written into `meta/stats.json` by `DataPrep.compute_stats`.
+
 ### Run
 
 ```bash
-dimos run learning-dataprep --spec-path datasets/pick_red.yaml
+dimos run learning-dataprep
 ```
 
 ---
@@ -236,12 +175,14 @@ dimos run learning-dataprep --spec-path datasets/pick_red.yaml
 ## End-to-end
 
 ```bash
-SPEC=datasets/pick_red.yaml
-
-dimos run learning-collect-quest-xarm7 --spec-path $SPEC --record-path data/pick_red.db
-dimos run learning-dataprep            --spec-path $SPEC
+dimos run learning-collect-quest-xarm7 --record-path data/sessions/pick_red.db
+dimos run learning-dataprep
 ```
 
 ```
-session.db ─► dataset/ + meta/stats.json
+data/sessions/pick_red.db ─► data/datasets/pick_red/
+                                  ├── data/    (parquet)
+                                  ├── videos/  (MP4)
+                                  └── meta/    (info.json, episodes.jsonl,
+                                                stats.json, dimos_meta.json)
 ```

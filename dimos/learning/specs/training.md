@@ -1,9 +1,10 @@
 # Stage 2 — Training
 
-Offline. Reads `dataset/`, writes `checkpoint/` + `dimos_meta.json`.
+ACT only (BC). Reads `data/datasets/<name>/`, writes `data/runs/<name>/`.
 
-`TrainerModule` is an RPC façade over a training subprocess. Metrics →
-TensorBoard. Lifecycle → `get_status()`.
+`TrainerModule` runs `train_bc(...)` on a daemon thread inside its own
+worker. Lazy imports keep `lerobot` / `torch` / CUDA out of the worker
+until `train()` is called. Metrics → TensorBoard. No `cancel()` in v1.
 
 ---
 
@@ -12,18 +13,23 @@ TensorBoard. Lifecycle → `get_status()`.
 ```python
 # dimos/learning/training/blueprint.py
 learning_train = autoconnect(
-    TrainerModule.blueprint(auto_run=True),
+    TrainerModule.blueprint(
+        dataset_path="data/datasets/pick_red/",
+        output_dir="data/runs/act_pick_red",
+        auto_run=True,
+    ),
 ).transports({})
 ```
 
 ## Module
 
 ```python
+# dimos/learning/training/trainer_module.py
+
 class TrainerModuleConfig(ModuleConfig):
     dataset_path:     str = ""
     output_dir:       str = ""
-    config_kind:      Literal["bc", "vla"] = "bc"
-    config_path:      str | None = None
+    config_path:      str | None = None     # optional BCConfig YAML override
     auto_run:         bool = False
     tensorboard_port: int = 6006
 
@@ -36,25 +42,37 @@ class TrainerModule(Module):
         self,
         dataset_path:     str | None = None,
         output_dir:       str | None = None,
-        config_kind:      Literal["bc", "vla"] | None = None,
         config_overrides: dict[str, Any] | None = None,
     ) -> None: ...
-    @rpc
-    def cancel(self) -> bool: ...
     @rpc
     def get_status(self) -> dict[str, Any]: ...
 ```
 
+## Training entry point
+
+```python
+# dimos/learning/training/train.py
+
+def train_bc(
+    dataset_path:     str | Path,
+    cfg:              BCConfig,
+    output_dir:       str | Path,
+    config_overrides: dict[str, Any] | None = None,
+) -> Path:
+    """Lazy-import lerobot, build Hydra-style argv from BCConfig, call
+    lerobot's training entry point, append `dimos_meta.json` to output_dir,
+    return the checkpoint path."""
+```
+
+`BCConfig` (ACT hyperparams) lives in `training/configs.py`.
+`train_val_split()` lives next to `train_bc` in `training/train.py`.
+
 ## Run
 
 ```bash
-dimos run learning-train \
-  --dataset-path dataset/ \
-  --output-dir   runs/act_pick_red \
-  --config-kind  bc
-
-tensorboard --logdir runs/act_pick_red
+dimos run learning-train
+tensorboard --logdir data/runs/act_pick_red
 ```
 
-Artifact: `checkpoint/` = `*.safetensors` + `dimos_meta.json` (spec snapshot,
-`joint_names`, `chunk_size`, `policy_type`, `expects_language`).
+Artifact: `data/runs/act_pick_red/` = `*.safetensors` + `dimos_meta.json`
+(dataset snapshot + `joint_names`, `chunk_size`, `policy_type`).

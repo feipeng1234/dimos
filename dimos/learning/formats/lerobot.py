@@ -14,12 +14,13 @@
 
 """LeRobot v2 dataset writer.
 
-Produces a directory layout compatible with HuggingFace LeRobot:
+Layout:
     <output.path>/
-        meta/info.json          # schema, fps, total episodes/frames
-        meta/episodes.jsonl     # per-episode metadata (length, task)
-        data/chunk-000/episode_000000.parquet   # tabular obs+action
-        videos/chunk-000/<image_key>/episode_000000.mp4   # encoded image streams
+        meta/info.json          schema, fps, total episodes/frames
+        meta/episodes.jsonl     per-episode metadata
+        meta/stats.json         per-feature stats (from DataPrep.compute_stats)
+        data/chunk-000/episode_*.parquet
+        videos/chunk-000/<image_key>/episode_*.mp4
 """
 
 from __future__ import annotations
@@ -27,9 +28,10 @@ from __future__ import annotations
 from collections.abc import Iterator
 from pathlib import Path
 
-from dimos.learning.spec import OutputConfig, Sample
+from dimos.learning.dataprep import OutputConfig, Sample
 
 
 def write(samples: Iterator[Sample], output: OutputConfig) -> Path:
-    """Write samples in LeRobot v2 layout. Returns the dataset root path."""
+    """Drain samples, write parquet+MP4, call DataPrep.compute_stats,
+    serialize stats to meta/stats.json. Return the dataset root path."""
     raise NotImplementedError

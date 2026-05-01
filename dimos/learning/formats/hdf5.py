@@ -12,24 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""HDF5 dataset writer.
-
-Produces a single .hdf5 file with one group per episode:
-    /data/episode_000000/
-        observation/<key>   # one dataset per observation key (T, ...)
-        action/<key>        # one dataset per action key      (T, ...)
-        ts                  # timestamps                       (T,)
-    /metadata               # JSON-encoded spec + per-episode tags
-"""
+"""HDF5 dataset writer. Single .hdf5 with one group per episode + stats group."""
 
 from __future__ import annotations
 
 from collections.abc import Iterator
 from pathlib import Path
 
-from dimos.learning.spec import OutputConfig, Sample
+from dimos.learning.dataprep import OutputConfig, Sample
 
 
 def write(samples: Iterator[Sample], output: OutputConfig) -> Path:
-    """Write samples to a single HDF5 file. Returns the file path."""
+    """Write samples to a single HDF5 file (stats as group attrs).
+    Returns the file path."""
     raise NotImplementedError

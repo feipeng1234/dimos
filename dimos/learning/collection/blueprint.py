@@ -12,16 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Collection blueprints for the DimOS Learning Framework.
-
-Each blueprint composes a teleop session + a camera + the
-EpisodeMonitorModule (for live operator feedback). RecordReplay is NOT a
-Module — it intercepts at the transport layer and is enabled via the CLI
-flag `--record-path session.db`.
-
-Usage:
-    dimos run learning-collect-quest-xarm7 --record-path data/pick_red.db
-"""
+"""Recording blueprints. RecordReplay is enabled via `--record-path`."""
 
 from __future__ import annotations
 
@@ -41,64 +32,40 @@ from dimos.teleop.quest.blueprints import (
 )
 from dimos.teleop.quest.quest_types import Buttons
 
-# ── XArm7 + Quest ────────────────────────────────────────────────────────────
+_DEFAULT_BUTTON_MAP = {"start": "A", "save": "B", "discard": "X"}
+_TRANSPORTS = {
+    ("buttons", Buttons): LCMTransport("/teleop/buttons", Buttons),
+    ("color_image", Image): LCMTransport("/camera/color_image", Image),
+    ("status", EpisodeStatus): LCMTransport("/learning/episode_status", EpisodeStatus),
+}
+
 
 learning_collect_quest_xarm7 = autoconnect(
     teleop_quest_xarm7,
     RealSenseCamera.blueprint(enable_pointcloud=False),
-    EpisodeMonitorModule.blueprint(),
-).transports(
-    {
-        ("buttons", Buttons): LCMTransport("/teleop/buttons", Buttons),
-        ("color_image", Image): LCMTransport("/camera/color_image", Image),
-        ("status", EpisodeStatus): LCMTransport("/learning/episode_status", EpisodeStatus),
-    }
-)
+    EpisodeMonitorModule.blueprint(button_map=_DEFAULT_BUTTON_MAP),
+).transports(_TRANSPORTS)
 
-
-# ── Piper + Quest ────────────────────────────────────────────────────────────
 
 learning_collect_quest_piper = autoconnect(
     teleop_quest_piper,
     RealSenseCamera.blueprint(enable_pointcloud=False),
-    EpisodeMonitorModule.blueprint(),
-).transports(
-    {
-        ("buttons", Buttons): LCMTransport("/teleop/buttons", Buttons),
-        ("color_image", Image): LCMTransport("/camera/color_image", Image),
-        ("status", EpisodeStatus): LCMTransport("/learning/episode_status", EpisodeStatus),
-    }
-)
+    EpisodeMonitorModule.blueprint(button_map=_DEFAULT_BUTTON_MAP),
+).transports(_TRANSPORTS)
 
-
-# ── XArm6 + Quest ────────────────────────────────────────────────────────────
 
 learning_collect_quest_xarm6 = autoconnect(
     teleop_quest_xarm6,
     RealSenseCamera.blueprint(enable_pointcloud=False),
-    EpisodeMonitorModule.blueprint(),
-).transports(
-    {
-        ("buttons", Buttons): LCMTransport("/teleop/buttons", Buttons),
-        ("color_image", Image): LCMTransport("/camera/color_image", Image),
-        ("status", EpisodeStatus): LCMTransport("/learning/episode_status", EpisodeStatus),
-    }
-)
+    EpisodeMonitorModule.blueprint(button_map=_DEFAULT_BUTTON_MAP),
+).transports(_TRANSPORTS)
 
-
-# ── Dual arm (XArm6 + Piper) + Quest ─────────────────────────────────────────
 
 learning_collect_quest_dual = autoconnect(
     teleop_quest_dual,
     RealSenseCamera.blueprint(enable_pointcloud=False),
-    EpisodeMonitorModule.blueprint(),
-).transports(
-    {
-        ("buttons", Buttons): LCMTransport("/teleop/buttons", Buttons),
-        ("color_image", Image): LCMTransport("/camera/color_image", Image),
-        ("status", EpisodeStatus): LCMTransport("/learning/episode_status", EpisodeStatus),
-    }
-)
+    EpisodeMonitorModule.blueprint(button_map=_DEFAULT_BUTTON_MAP),
+).transports(_TRANSPORTS)
 
 
 __all__ = [

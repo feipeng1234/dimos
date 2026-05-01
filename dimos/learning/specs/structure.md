@@ -1,141 +1,126 @@
 # Folder Structure
 
-The four spec docs in this directory are the source of truth. The code
-tree below is the implementation layout — each file maps to a section in
-one of the three stage docs.
+Per-producer types: each Module owns its config + emitted message types
+in its own file. No shared `config.py`, no umbrella class, no shared YAML.
 
 ```
 dimos/learning/
 │
-├── specs/                          # ← spec docs (you are here)
-│   ├── structure.md                # this file — folder layout
-│   ├── datacollection.md           # Stage 1 — recording + dataprep + inspect
-│   ├── training.md                 # Stage 2 — TrainerModule
-│   └── inference.md                # Stage 3 — ChunkPolicyModule + ActionReplayer
+├── specs/
+│   ├── structure.md
+│   ├── datacollection.md           # Stage 1
+│   ├── training.md                 # Stage 2
+│   └── inference.md                # Stage 3
 │
-├── __init__.py
-├── config.py                       # DatasetConfig + sub-configs (pydantic BaseConfig)
-├── dataset.example.yaml            # annotated example spec
+├── dataprep.py                     # types + pure helpers (no Module)
+│                                   #   - Episode, Sample
+│                                   #   - StreamField, SyncConfig, OutputConfig, EpisodeExtractor
+│                                   #   - resolve_field, compute_stats,
+│                                   #     extract_episodes, iter_episode_samples
+├── dataprep_module.py              # DataPrepModule(Config) only
 │
-├── dataprep.py                     # DataPrep façade + resolve_field staticmethod
-│                                   #   `python -m dimos.learning.dataprep build|inspect`
-├── dataprep_module.py              # DataPrepModule (wraps the subprocess for blueprint UX)
+├── collection/
+│   ├── episode_monitor.py          # EpisodeStatus + EpisodeMonitorModule(Config)
+│   └── blueprint.py                # learning_collect_quest_<robot>
 │
-├── collection/                     # ── Stage 1 / Phase A: live recording ──
-│   ├── __init__.py
-│   ├── episode_monitor.py          # EpisodeStatus, EpisodeMonitorModule(Config)
-│   └── blueprint.py                # learning_collect_quest_{xarm7,xarm6,piper,dual}
-│
-├── formats/                        # ── dataset writers (DataPrep._get_writer dispatches) ──
-│   ├── __init__.py
+├── formats/                        # dataset writers; each calls DataPrep.compute_stats
 │   ├── lerobot.py                  # LeRobot v2 (parquet + MP4 + meta/stats.json)
-│   ├── hdf5.py                     # flat HDF5
-│   └── rlds.py                     # RLDS / TFDS
+│   ├── hdf5.py
+│   └── rlds.py
 │
-├── training/                       # ── Stage 2: offline training ──
-│   ├── __init__.py
-│   ├── trainer_module.py           # TrainProgress, TrainDone, TrainerModule(Config)
-│   ├── train.py                    # subprocess CLI
-│                                   #   `python -m dimos.learning.training.train {bc|vla}`
-│   ├── configs.py                  # bc / vla training configs
-│   ├── split.py                    # train/val episode-level split
-│   ├── stats.py                    # meta/stats.json computation (norm/unnorm)
+├── training/
+│   ├── trainer_module.py           # TrainerModule(Config); runs train_bc on a thread
+│   ├── train.py                    # train_bc + train_val_split (lazy lerobot/torch)
+│   ├── configs.py                  # BCConfig
 │   └── blueprint.py                # learning_train
 │
-├── policy/                         # ── policy backends (live + checkpoint loading) ──
-│   ├── __init__.py
-│   ├── base.py                     # ActionChunk pydantic + Policy Protocol
-│   └── lerobot_policy.py           # LeRobotPolicy.load → reads dimos_meta.json + stats.json
+├── policy/
+│   ├── base.py                     # ActionChunk + Policy Protocol
+│   └── lerobot_policy.py           # LeRobotPolicy.load
 │
-└── inference/                      # ── Stage 3: live policy serving ──
-    ├── __init__.py
-    ├── chunk_policy_module.py      # ChunkPolicyModule(Config); slow Module @ 1–30 Hz
-    ├── obs_builder.py              # ObsBuilder; calls DataPrep.resolve_field
-    ├── action_replayer.py          # ActionReplayer (BaseControlTask, NOT a Module)
-    └── blueprint.py                # learning_infer_{xarm7,xarm6,piper}
-                                    #   + learning_infer_vla_{xarm7,...}
+└── inference/
+    ├── chunk_policy_module.py      # ChunkPolicyModule(Config); ~30 Hz
+    │                               #   (obs construction is a private method;
+    │                               #    uses DataPrep.resolve_field)
+    └── blueprint.py                # learning_infer_<robot>
 ```
 
----
+`ActionReplayer` is a `ControlTask`, not a learning Module — it lives
+with the other coordinator tasks:
 
-## Where each artifact is produced / consumed
-
-| Artifact                | Producer                                          | Consumer                                      |
-|---|---|---|
-| `dataset.yaml`          | human (operator)                                  | `DataPrep`, `ObsBuilder`                       |
-| `session.db`            | `RecordReplay` (transport hook, `--record-path`)  | `DataPrep`                                     |
-| `dataset/` + stats      | `dataprep build` → `formats/<fmt>.py`             | `lerobot.LeRobotDataset`, `train.py`           |
-| `checkpoint/` + meta    | `train.py`                                        | `LeRobotPolicy.load`, `ChunkPolicyModule`      |
-| `ActionChunk` (live)    | `ChunkPolicyModule` (Module, LCM)                 | `ActionReplayer` (BaseControlTask)             |
-| `JointCommandOutput`    | `ActionReplayer` (in 100 Hz tick loop)            | `ControlCoordinator` → hardware                |
-
----
-
-## `DatasetConfig` as the single source of truth
-
-`DatasetConfig` (loaded once from `dataset.yaml`) drives module configs
-across stages — same instance, no drift between train and serve.
-
-```python
-# Top-level, in each blueprint factory:
-spec = DatasetConfig.from_file(spec_path)
-
-# Passed as a typed field on each module's config:
-EpisodeMonitorModule.blueprint(spec=spec)         # Stage 1: spec.episodes
-DataPrepModule.blueprint(spec=spec)               # Stage 1: full spec
-ChunkPolicyModule.blueprint(spec=spec, ...)       # Stage 3: spec.observation, spec.sync
+```
+dimos/control/
+├── coordinator.py                  # adds action_chunk: In[ActionChunk]
+│                                   #      _on_action_chunk → ActionReplayer
+└── tasks/
+    ├── teleop_task.py
+    ├── ...
+    └── action_replayer_task.py     # NEW; imports ActionChunk from learning/policy/base.py
 ```
 
-| Stage | Module | How it gets the spec |
+Dependency: `control → learning.policy` (one-way).
+
+---
+
+## Per-producer typed contracts
+
+| Class | Lives in | Used by |
 |---|---|---|
-| 1A    | `EpisodeMonitorModule` | passed in via blueprint (`spec=spec`); reads `spec.episodes` for button maps |
-| 1B    | `DataPrepModule`       | passed in via blueprint; reads full spec. **DataPrep snapshots the spec into `dataset/dataset.yaml`** so downstream stages don't need the YAML. |
-| 2     | `TrainerModule`        | reads `dataset/dataset.yaml` + LeRobot `info.json`; copies spec snapshot into `checkpoint/dimos_meta.json` |
-| 3     | `ChunkPolicyModule`    | reads `<policy_path>/dimos_meta.json` at `start()`; constructs `ObsBuilder` from the embedded spec. **No `--spec-path` flag needed at inference.** |
-
-The operator only ever passes `--spec-path` for Recording and DataPrep
-(stages where the spec is the input). After DataPrep, the spec rides
-with the data.
-
-Same `resolve_field` is invoked from `DataPrep.iter_episode_samples`
-(Stage 1B) and `ObsBuilder.build` (Stage 3). One source of truth →
-no train/serve skew.
+| `EpisodeStatus`, `EpisodeMonitorModuleConfig` | `learning/collection/episode_monitor.py` | `EpisodeMonitorModule`; `DataPrep` |
+| `EpisodeExtractor`, `StreamField`, `SyncConfig`, `OutputConfig`, `Episode`, `Sample` | `learning/dataprep.py` | `DataPrepModule`, `ChunkPolicyModule`, format writers |
+| `DataPrepModuleConfig` | `learning/dataprep_module.py` | `DataPrepModule` |
+| `BCConfig` | `learning/training/configs.py` | `train_bc` |
+| `TrainerModuleConfig` | `learning/training/trainer_module.py` | `TrainerModule` |
+| `ActionChunk`, `Policy` Protocol | `learning/policy/base.py` | `ChunkPolicyModule`, `ActionReplayer`, `ControlCoordinator` |
+| `ChunkPolicyModuleConfig` | `learning/inference/chunk_policy_module.py` | `ChunkPolicyModule` |
+| `ActionReplayerConfig` | `control/tasks/action_replayer_task.py` | `ActionReplayer` |
 
 ---
 
-## What's deliberately not in this tree
+## Artifact flow
 
-- **`RecordReplay`** — transport-layer hook (in `dimos/core/`), not a
-  `learning/` Module. Enabled by `--record-path` at the CLI; unaware of
-  what's recording.
-- **`coordinator_action_replayer_<robot>`** — per-robot coordinator
-  blueprints that register the `ActionReplayer` task. These live next
-  to the rest of the per-robot wiring (likely
-  `dimos/robot/<robot>/blueprints.py`), not under `learning/`.
-- **A second `ControlCoordinator`** — the existing one is reused. We add
-  one task type (`ActionReplayer`), not a parallel control stack.
-- **New transports** — v1 is LCM-only on the wire.
-- **New LCM message types** — `ActionChunk` is local-only pydantic in v1.
-  Promote to a generated LCM type in v2 only if cross-language consumers
-  need it.
+All generated artifacts live under `data/` (gitignored at repo root):
+
+```
+data/
+├── sessions/<name>.db              ← RecordReplay
+├── datasets/<name>/                ← DataPrepModule.build()
+│   ├── data/        (parquet)
+│   ├── videos/      (MP4)
+│   └── meta/
+│       ├── info.json
+│       ├── episodes.jsonl
+│       ├── stats.json              (DataPrep.compute_stats)
+│       └── dimos_meta.json         (DataPrepModuleConfig.model_dump())
+└── runs/<name>/                    ← train_bc
+    ├── *.safetensors
+    └── dimos_meta.json             (dataset snapshot + policy fields)
+```
+
+`dimos_meta.json` rides with the data: DataPrep writes it; training
+copies it forward + adds policy fields; inference reads it at `start()`.
+Operator never passes a spec path.
 
 ---
 
-## Module / non-Module split (one rule)
+## Configuration
 
-A class becomes a **Module** when it:
-- has long-lived state worth `start()/stop()` lifecycle, **and**
-- needs typed I/O ports across process boundaries.
+All module config is set as kwargs in the blueprint. No CLI flags on
+our modules. Framework CLI surface is `GlobalConfig` only (env vars,
+`.env`, things like `--record-path`).
 
-Otherwise it stays a plain class or a `BaseControlTask`:
+---
+
+## Module / non-Module split
+
+A class becomes a **Module** when it has long-lived state with
+`start()/stop()` lifecycle **and** typed I/O ports.
 
 | Class | Type | Why |
 |---|---|---|
-| `EpisodeMonitorModule` | Module | Long-lived; subscribes to buttons; publishes status |
-| `DataPrepModule`       | Module | Wraps subprocess; agent-callable via `@skill` |
-| `TrainerModule`        | Module | Wraps subprocess; long-running; agent-callable |
-| `ChunkPolicyModule`    | Module | Long-lived inference thread; latched In ports |
-| `DataPrep`             | plain class | Stateless façade over static helpers; no ports |
-| `ObsBuilder`           | plain class | Pure function over latched messages |
-| `ActionReplayer`       | `BaseControlTask` | Must run in coordinator's 100 Hz thread, not via transport |
-| `RecordReplay`         | transport hook | Captures every stream uniformly; not a Module |
+| `EpisodeMonitorModule` | Module | Long-lived; subscribes to inputs; publishes status |
+| `DataPrepModule`       | Module | Long-running build job |
+| `TrainerModule`        | Module | Runs training on a daemon thread |
+| `ChunkPolicyModule`    | Module | Long-lived inference thread |
+| `ActionReplayer`       | `BaseControlTask` | Runs in coordinator's 100 Hz thread |
+| `RecordReplay`         | transport hook | Captures every stream uniformly |

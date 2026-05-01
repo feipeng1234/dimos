@@ -12,23 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""RLDS / TFDS dataset writer.
-
-Produces a TFDS-on-disk layout (TFRecord shards + dataset_info.json) following
-the RLDS Episode/Step protocol used by Open X-Embodiment, RT-X, etc.
-
-Each TF Example encodes one Episode as a sequence of Steps with:
-    observation/<key>, action/<key>, reward, discount, is_first, is_last, is_terminal
-"""
+"""RLDS / TFDS dataset writer. TFRecord shards + dataset_info.json
+following the RLDS Episode/Step protocol."""
 
 from __future__ import annotations
 
 from collections.abc import Iterator
 from pathlib import Path
 
-from dimos.learning.spec import OutputConfig, Sample
+from dimos.learning.dataprep import OutputConfig, Sample
 
 
 def write(samples: Iterator[Sample], output: OutputConfig) -> Path:
-    """Write samples as TFDS/RLDS shards. Returns the dataset directory path."""
+    """Write samples as TFDS/RLDS shards (stats in features metadata).
+    Returns the dataset directory path."""
     raise NotImplementedError
