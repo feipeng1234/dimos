@@ -38,18 +38,10 @@ jobs:
 
       - name: Build C++ extensions
         run: |
-          source .venv/bin/activate
           uv pip install pybind11
           python setup.py build_ext --inplace
-
-      - name: Remove pydrake stubs
-        run: |
-          find .venv/lib/*/site-packages/pydrake -name '*.pyi' -delete 2>/dev/null || true
-
       - name: Run tests
-        run: |
-          source .venv/bin/activate
-          _DIMOS_COV=1 coverage run -m pytest --numprocesses=auto -m 'not (tool or self_hosted or mujoco)'
+        run: _DIMOS_COV=1 coverage run -m pytest --numprocesses=auto -m 'not (tool or self_hosted or mujoco)'
 
       - name: Coverage report
         if: github.event_name == 'push' && !cancelled()
