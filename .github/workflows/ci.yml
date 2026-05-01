@@ -47,7 +47,7 @@ jobs:
           uv run pytest --no-cov -vvvvv --lf && exit 1
         shell: bash
       - name: Turn coverage into xml
-        run: python -m coverage xml
+        run: uv run python -m coverage xml
       - name: Upload coverage
         uses: codecov/codecov-action@v6
         with:
@@ -63,7 +63,13 @@ jobs:
           use-oidc: true
 
   self-hosted-tests:
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    # Skip on draft PRs and on PRs from forks — the latter would expose the
+    # self-hosted runner to untrusted code from external contributors.
+    if: |
+      github.event_name == 'push' || (
+        github.event.pull_request.draft == false &&
+        github.event.pull_request.head.repo.full_name == github.repository
+      )
     timeout-minutes: 60
     runs-on: [self-hosted, Linux]
     permissions:
