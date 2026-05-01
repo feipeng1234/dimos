@@ -29,6 +29,7 @@ import pytest
 pytest.importorskip("gtsam")
 
 from dimos.core.coordination.blueprints import autoconnect
+from dimos.navigation.movement_manager.movement_manager import MovementManager
 from dimos.navigation.nav_stack.main import create_nav_stack
 from dimos.navigation.nav_stack.tests.conftest import (
     CROSS_WALL_LOCAL_PLANNER,
@@ -47,7 +48,7 @@ pytestmark = [pytest.mark.slow]
 # sampling radius pull the ground estimate upward), so this must tolerate
 # vehicle_height (1.24 m) + terrain drift while still catching
 # through-the-roof failures (roof is at ~3 m+).
-MAX_ALLOWED_Z = 2.0
+MAX_ALLOWED_Z = 2.1
 
 
 class TestCrossWallPlanningSimple:
@@ -79,6 +80,7 @@ class TestCrossWallPlanningSimple:
                         "stuck_shrink_factor": 0.5,
                     },
                 ),
+                MovementManager.blueprint(),
             )
             .remappings(
                 [

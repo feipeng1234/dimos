@@ -42,6 +42,7 @@ from typing import Any
 
 from dimos.core.coordination.blueprints import autoconnect
 from dimos.core.global_config import global_config
+from dimos.navigation.movement_manager.movement_manager import MovementManager
 from dimos.navigation.nav_stack.main import create_nav_stack, nav_stack_rerun_config
 from dimos.robot.unitree.g1.config import G1_LOCAL_PLANNER_PRECOMPUTED_PATHS, G1_VEHICLE_HEIGHT
 from dimos.robot.unitree.g1.g1_rerun import g1_static_robot
@@ -76,7 +77,7 @@ unitree_g1_nav_sim = (
             vehicle_height=G1_VEHICLE_HEIGHT,
         ),
         create_nav_stack(
-            use_simple_planner=True,
+            use_simple_planner=False,
             vehicle_height=G1_VEHICLE_HEIGHT,
             terrain_analysis={
                 "obstacle_height_threshold": 0.1,
@@ -103,6 +104,7 @@ unitree_g1_nav_sim = (
                 "two_way_drive": False,
             },
         ),
+        MovementManager.blueprint(),
         vis_module(
             viewer_backend=global_config.viewer,
             rerun_config=nav_stack_rerun_config(
@@ -123,6 +125,8 @@ unitree_g1_nav_sim = (
         [
             # Unity needs the extended (persistent) terrain map for Z-height, not the local one
             (UnityBridgeModule, "terrain_map", "terrain_map_ext"),
+            # Planner owns way_point — disconnect MovementManager's click relay
+            (MovementManager, "way_point", "_mgr_way_point_unused"),
         ]
     )
     .global_config(n_workers=8, robot_model="unitree_g1", simulation=True)

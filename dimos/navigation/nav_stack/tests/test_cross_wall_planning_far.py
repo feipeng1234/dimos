@@ -28,6 +28,7 @@ pytest.importorskip("gtsam")
 
 from dimos.core.coordination.blueprints import autoconnect
 from dimos.core.global_config import global_config
+from dimos.navigation.movement_manager.movement_manager import MovementManager
 from dimos.navigation.nav_stack.main import create_nav_stack, nav_stack_rerun_config
 from dimos.navigation.nav_stack.tests.conftest import (
     CROSS_WALL_LOCAL_PLANNER,
@@ -41,6 +42,11 @@ from dimos.simulation.unity.module import UnityBridgeModule
 from dimos.visualization.vis_module import vis_module
 
 pytestmark = [pytest.mark.slow]
+
+# Z-ceiling guard: if the robot's z exceeds this, it went through the
+# ceiling/roof — the planner is "cheating" by driving over walls.
+# Same threshold as the SimplePlanner test.
+MAX_ALLOWED_Z = 2.1
 
 
 class TestCrossWallPlanning:
@@ -61,7 +67,9 @@ class TestCrossWallPlanning:
                         "is_static_env": True,
                         "converge_dist": 1.5,
                     },
+                    record=True,
                 ),
+                MovementManager.blueprint(),
                 vis_module(
                     viewer_backend=global_config.viewer,
                     rerun_config=nav_stack_rerun_config(
@@ -86,4 +94,4 @@ class TestCrossWallPlanning:
             .global_config(n_workers=8, robot_model="unitree_g1", simulation=True)
         )
 
-        run_cross_wall_test(blueprint, label="far")
+        run_cross_wall_test(blueprint, label="far", max_z=MAX_ALLOWED_Z)

@@ -46,6 +46,7 @@ from typing import Any
 
 from dimos.core.coordination.blueprints import autoconnect
 from dimos.core.global_config import global_config
+from dimos.navigation.movement_manager.movement_manager import MovementManager
 from dimos.navigation.nav_stack.main import create_nav_stack, nav_stack_rerun_config
 from dimos.robot.unitree.g1.blueprints.navigation._mujoco_pose_adapter import (
     MujocoPoseToOdometryAdapter,
@@ -107,6 +108,7 @@ unitree_g1_nav_mujoco_sim = (
                 "two_way_drive": False,
             },
         ),
+        MovementManager.blueprint(),
         vis_module(
             viewer_backend=global_config.viewer,
             rerun_config=nav_stack_rerun_config(
@@ -124,6 +126,8 @@ unitree_g1_nav_mujoco_sim = (
             # MuJoCo's lidar is already in world frame, so it's the
             # `registered_scan` the nav stack expects.
             (G1SimConnection, "lidar", "registered_scan"),
+            # Planner owns way_point — disconnect MovementManager's click relay.
+            (MovementManager, "way_point", "_mgr_way_point_unused"),
         ]
     )
     .global_config(
