@@ -52,7 +52,7 @@ from dimos.robot.unitree.g1.blueprints.navigation._mujoco_pose_adapter import (
     MujocoPoseToOdometryAdapter,
 )
 from dimos.robot.unitree.g1.config import G1_LOCAL_PLANNER_PRECOMPUTED_PATHS, G1_VEHICLE_HEIGHT
-from dimos.robot.unitree.g1.g1_rerun import g1_static_robot
+from dimos.robot.unitree.g1.g1_rerun import g1_mujoco_sensor_tf_override, g1_static_robot
 from dimos.robot.unitree.g1.mujoco_sim import G1SimConnection
 from dimos.visualization.vis_module import vis_module
 
@@ -114,6 +114,11 @@ unitree_g1_nav_mujoco_sim = (
             rerun_config=nav_stack_rerun_config(
                 {
                     "blueprint": _rerun_blueprint,
+                    # Update tf#/sensor each tick from the live odometry so
+                    # the static robot wireframe (parent_frame=tf#/sensor)
+                    # tracks the robot in the scene instead of staying at
+                    # the world origin (z=0).
+                    "visual_override": {"world/odometry": g1_mujoco_sensor_tf_override},
                     "static": {
                         "world/tf/robot": g1_static_robot,
                     },

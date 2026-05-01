@@ -61,3 +61,39 @@ def g1_odometry_tf_override(odom: Any) -> Any:
     return [
         ("tf#/sensor", tf),
     ]
+
+
+# Camera offset relative to base_link for the G1 mujoco sim (matches the
+# transform G1SimConnection._publish_tf publishes for camera_link).
+_G1_MUJOCO_SENSOR_Z_OFFSET = 0.6
+
+
+def g1_mujoco_sensor_tf_override(odom: Any) -> Any:
+    """Publish ``tf#/sensor`` at the G1's real sensor position in mujoco.
+
+    Counterpart to ``g1_odometry_tf_override`` for the onboard stack.
+    The mujoco sim's odometry is the robot's actual world pose (qpos
+    of the floating-base joint), so ``odom.z`` is the body height —
+    not zero like the onboard convention.  We add the camera mount
+    offset to match where ``camera_link`` actually lives, so the
+    wireframe rendered against ``tf#/sensor`` lines up with the
+    physical robot in the scene.
+    """
+    import rerun as rr
+
+    tf = rr.Transform3D(
+        translation=[odom.x, odom.y, odom.z + _G1_MUJOCO_SENSOR_Z_OFFSET],
+        rotation=rr.Quaternion(
+            xyzw=[
+                odom.orientation.x,
+                odom.orientation.y,
+                odom.orientation.z,
+                odom.orientation.w,
+            ]
+        ),
+        parent_frame="tf#/map",
+        child_frame="tf#/sensor",
+    )
+    return [
+        ("tf#/sensor", tf),
+    ]
