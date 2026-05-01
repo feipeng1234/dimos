@@ -1498,6 +1498,11 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/0d/4a/331fe2caf6799d591109bb9c08083080f6de90a823695d412a935622abb2/coverage-7.13.4-py3-none-any.whl", hash = "sha256:1af1641e57cf7ba1bd67d677c9abdbcd6cc2ab7da3bca7fa1e2b7e50e65f2ad0", size = 211242, upload-time = "2026-02-09T12:59:02.032Z" },
 ]
 
+[package.optional-dependencies]
+toml = [
+    { name = "tomli", marker = "python_full_version <= '3.11' or (extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
+]
+
 [[package]]
 name = "cryptography"
 version = "46.0.5"
@@ -2004,6 +2009,7 @@ tests = [
     { name = "pygame" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
     { name = "pytest-env" },
     { name = "pytest-mock" },
     { name = "pytest-timeout" },
@@ -2067,6 +2073,7 @@ tests-self-hosted = [
     { name = "pygame" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
     { name = "pytest-env" },
     { name = "pytest-mock" },
     { name = "pytest-timeout" },
@@ -2267,6 +2274,7 @@ tests = [
     { name = "pygame", specifier = ">=2.6.1" },
     { name = "pytest", specifier = "==8.3.5" },
     { name = "pytest-asyncio", specifier = "==0.26.0" },
+    { name = "pytest-cov", specifier = ">=5.0" },
     { name = "pytest-env", specifier = "==1.1.5" },
     { name = "pytest-mock", specifier = "==3.15.0" },
     { name = "pytest-timeout", specifier = "==2.4.0" },
@@ -2329,6 +2337,7 @@ tests-self-hosted = [
     { name = "pygame", specifier = ">=2.6.1" },
     { name = "pytest", specifier = "==8.3.5" },
     { name = "pytest-asyncio", specifier = "==0.26.0" },
+    { name = "pytest-cov", specifier = ">=5.0" },
     { name = "pytest-env", specifier = "==1.1.5" },
     { name = "pytest-mock", specifier = "==3.15.0" },
     { name = "pytest-timeout", specifier = "==2.4.0" },
@@ -8317,6 +8326,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/8e/c4/453c52c659521066969523e87d85d54139bbd17b78f09532fb8eb8cdb58e/pytest_asyncio-0.26.0.tar.gz", hash = "sha256:c4df2a697648241ff39e7f0e4a73050b03f123f760673956cf0d72a4990e312f", size = 54156, upload-time = "2025-03-25T06:22:28.883Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/20/7f/338843f449ace853647ace35870874f69a764d251872ed1b4de9f234822c/pytest_asyncio-0.26.0-py3-none-any.whl", hash = "sha256:7b51ed894f4fbea1340262bdae5135797ebbe21d8638978e35d31c6d19f72fb0", size = 19694, upload-time = "2025-03-25T06:22:27.807Z" },
+]
+
+[[package]]
+name = "pytest-cov"
+version = "7.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "coverage", extra = ["toml"] },
+    { name = "pluggy" },
+    { name = "pytest" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b1/51/a849f96e117386044471c8ec2bd6cfebacda285da9525c9106aeb28da671/pytest_cov-7.1.0.tar.gz", hash = "sha256:30674f2b5f6351aa09702a9c8c364f6a01c27aae0c1366ae8016160d1efc56b2", size = 55592, upload-time = "2026-03-21T20:11:16.284Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9d/7a/d968e294073affff457b041c2be9868a40c1c71f4a35fcc1e45e5493067b/pytest_cov-7.1.0-py3-none-any.whl", hash = "sha256:a0461110b7865f9a271aa1b51e516c9a95de9d696734a2f71e3e78f46e1d4678", size = 22876, upload-time = "2026-03-21T20:11:14.438Z" },
 ]
 
 [[package]]

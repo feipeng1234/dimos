@@ -83,8 +83,7 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "skipif_no_ros: skip when ROS dependencies are not present")
     config.addinivalue_line("markers", "skipif_macos_bug: skip known-buggy tests on macOS")
 
-    # Propagate coverage collection to subprocesses.
-    if os.environ.get("_DIMOS_COV"):
+    if config.pluginmanager.hasplugin("_cov"):
         os.environ["COVERAGE_PROCESS_START"] = str(config.rootpath / "pyproject.toml")
 
 

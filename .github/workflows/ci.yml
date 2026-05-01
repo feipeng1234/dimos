@@ -36,7 +36,7 @@ jobs:
       - name: Remove git LFS to avoid accidental large downloads
         run: sudo rm -f /usr/bin/git-lfs
       - name: Run tests
-        run: _DIMOS_COV=1 coverage run -m pytest --numprocesses=auto -m 'not (tool or self_hosted or mujoco)'
+        run: uv run pytest --numprocesses=auto --cov=dimos/ -m 'not (tool or self_hosted or mujoco)'
 
       - name: Coverage report
         if: github.event_name == 'push' && !cancelled()
