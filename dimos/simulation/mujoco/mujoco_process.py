@@ -264,6 +264,12 @@ def _run_simulation(config: GlobalConfig, shm: ShmReader) -> None:
 
 
 if __name__ == "__main__":
+    # Print early so the parent's [mujoco]-log pump immediately shows
+    # this subprocess is alive — useful when debugging "sim crashes
+    # silently" reports.  flush=True because we don't yet know if
+    # PYTHONUNBUFFERED is honored on the launcher (mjpython on macOS).
+    print(f"mujoco_process: starting (pid={os.getpid()}, sys={sys.platform})", flush=True)
+
     global_config = pickle.loads(base64.b64decode(sys.argv[1]))
     shm_names = json.loads(sys.argv[2])
 
@@ -272,12 +278,27 @@ if __name__ == "__main__":
     def signal_handler(_signum: int, _frame: Any) -> None:
         # Signal the main loop to exit gracefully so the viewer context
         # manager can close the window and clean up resources.
+        print(f"mujoco_process: signal {_signum} received, requesting stop", flush=True)
         shm.signal_stop()
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
     try:
+        print("mujoco_process: entering _run_simulation", flush=True)
         _run_simulation(global_config, shm)
+    except BaseException as e:
+        # Surface any uncaught exception (incl. KeyboardInterrupt and
+        # SystemExit which BaseException catches) so the parent sees
+        # *why* the subprocess died instead of just an exit code.
+        import traceback
+
+        print(
+            f"mujoco_process: ERROR in _run_simulation: {type(e).__name__}: {e}",
+            flush=True,
+        )
+        traceback.print_exc()
+        raise
     finally:
+        print("mujoco_process: cleanup", flush=True)
         shm.cleanup()

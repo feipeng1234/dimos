@@ -135,6 +135,10 @@ class MujocoConnection:
             # point DYLD_LIBRARY_PATH at the real libpython directory.
             executable = sys.executable if sys.platform != "darwin" else "mjpython"
             env = os.environ.copy()
+            # Force unbuffered Python stdout/stderr in the subprocess so
+            # log lines appear in the dimos logger as they're produced
+            # rather than only at process exit.
+            env["PYTHONUNBUFFERED"] = "1"
             if sys.platform == "darwin":
                 # on some systems mujoco looks in the wrong place for shared libraries. So we force it look in the right place
                 libdir = Path(sysconfig.get_config_var("LIBDIR") or "")
@@ -142,11 +146,16 @@ class MujocoConnection:
                     existing = env.get("DYLD_LIBRARY_PATH", "")
                     env["DYLD_LIBRARY_PATH"] = f"{libdir}:{existing}" if existing else str(libdir)
 
+            logger.info(f"Spawning mujoco subprocess: {executable} {LAUNCHER_PATH}")
             self.process = subprocess.Popen(
-                [executable, str(LAUNCHER_PATH), config_pickle, shm_names_json],
+                [executable, "-u", str(LAUNCHER_PATH), config_pickle, shm_names_json],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 env=env,
+            )
+            logger.info(
+                f"mujoco subprocess started, pid={self.process.pid}; "
+                "tailing stdout/stderr into [mujoco] log lines"
             )
 
         except Exception as e:
@@ -201,7 +210,13 @@ class MujocoConnection:
         """Mirror mujoco subprocess stdout+stderr into the dimos logger."""
         proc = self.process
         if proc is None or proc.stdout is None:
+            logger.warning(
+                "mujoco-stderr-pump: process or stdout missing at start; "
+                "subprocess output will not be captured"
+            )
             return
+        logger.info("mujoco-stderr-pump: started, reading subprocess stdout")
+        line_count = 0
         try:
             for raw in iter(proc.stdout.readline, b""):
                 if not raw:
@@ -209,15 +224,17 @@ class MujocoConnection:
                 line = raw.decode(errors="replace").rstrip()
                 if not line:
                     continue
+                line_count += 1
                 lowered = line.lower()
                 if "warning" in lowered or "error" in lowered or "fatal" in lowered:
                     logger.warning(f"[mujoco] {line}")
                 else:
                     logger.info(f"[mujoco] {line}")
-            # Stream closed.  If the subprocess died non-zero before the
-            # parent asked it to, surface that — otherwise the dimos
-            # process keeps running and looks frozen.
+            # Stream closed.
             rc = proc.poll()
+            logger.info(
+                f"mujoco-stderr-pump: stream closed after {line_count} lines, exit_code={rc}"
+            )
             if rc is not None and rc != 0 and not self._is_cleaned_up:
                 logger.error(f"[mujoco] subprocess exited unexpectedly with code {rc}")
         except Exception as exc:
