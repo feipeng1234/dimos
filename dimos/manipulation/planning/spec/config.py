@@ -58,6 +58,18 @@ class RobotModelConfig(ModuleConfig):
     joint_names: list[str]
     end_effector_link: str
     base_link: str = "base_link"
+    # When True (default), the base_link is welded to the world at base_pose.
+    # When False, the base is left as a 6-DOF floating body (Drake auto-adds
+    # the floating joint at Finalize).  Use False for legged robots whose
+    # base pose comes from /odom and shifts during planning — set the live
+    # pose via WorldSpec.set_floating_base_pose() before each plan.
+    weld_base: bool = True
+    # Offset (x, y, z in meters, in the end-effector body's local frame)
+    # from end_effector_link's origin to the actual TCP / grasp center.
+    # If non-zero, IK and FK target this offset point rather than the link
+    # origin — useful when the URDF's wrist link sits behind the palm /
+    # gripper tip.  Default (0,0,0) preserves prior behaviour.
+    grasp_offset_xyz: tuple[float, float, float] = (0.0, 0.0, 0.0)
     package_paths: dict[str, Path] = Field(default_factory=dict)
     joint_limits_lower: list[float] | None = None
     joint_limits_upper: list[float] | None = None

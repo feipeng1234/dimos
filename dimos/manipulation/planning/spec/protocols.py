@@ -59,8 +59,17 @@ class WorldSpec(Protocol):
     """
 
     # Robot Management
-    def add_robot(self, config: RobotModelConfig) -> WorldRobotID:
-        """Add a robot to the world. Returns unique robot ID."""
+    def add_robot(
+        self,
+        config: RobotModelConfig,
+        share_model_with: WorldRobotID | None = None,
+    ) -> WorldRobotID:
+        """Add a robot to the world. Returns unique robot ID.
+
+        When ``share_model_with`` is provided, the new robot reuses an
+        already-loaded model instance (e.g. dual arms on one humanoid URDF)
+        instead of triggering a second URDF parse + base-weld.
+        """
         ...
 
     def get_robot_ids(self) -> list[WorldRobotID]:

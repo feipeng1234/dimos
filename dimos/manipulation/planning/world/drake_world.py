@@ -87,8 +87,20 @@ class _RobotData:
     config: RobotModelConfig
     model_instance: Any  # ModelInstanceIndex
     joint_indices: list[int]  # Indices into plant's position vector
-    ee_frame: Any  # BodyFrame for end-effector
-    base_frame: Any  # BodyFrame for base
+    # Indices into plant's velocity vector — diverges from joint_indices
+    # whenever the plant has a quaternion (e.g. floating base): a 6-DOF
+    # free joint has 7 positions but 6 velocities, so every revolute
+    # joint after it is offset by 1 between the two.  Used by Jacobian
+    # extraction (CalcJacobianSpatialVelocity returns shape
+    # ``(6, num_velocities)``).
+    velocity_indices: list[int] = field(default_factory=list)
+    ee_frame: Any = None  # BodyFrame for end-effector
+    base_frame: Any = None  # BodyFrame for base
+    # Grasp center expressed in the EE body frame.  Snapshotted from
+    # config.grasp_offset_xyz at registration so per-iteration code (IK,
+    # FK) doesn't have to re-read it.  Zero vector means "use body
+    # origin" (no offset).
+    grasp_offset_in_body: Any = None  # np.ndarray, shape (3,)
     preview_model_instance: Any = None  # ModelInstanceIndex for preview (yellow) robot
     preview_joint_indices: list[int] = field(default_factory=list)
 
@@ -193,10 +205,25 @@ class DrakeWorld(WorldSpec):
         # Obstacle source for dynamic obstacles
         self._obstacle_source_id: Any = None
 
-    def add_robot(self, config: RobotModelConfig) -> WorldRobotID:
+        # Throttle floating-base republishes to ~10 Hz so high-rate /odom
+        # callbacks don't saturate the meshcat websocket.
+        self._last_floating_base_publish: float = 0.0
+
+    def add_robot(
+        self,
+        config: RobotModelConfig,
+        share_model_with: WorldRobotID | None = None,
+    ) -> WorldRobotID:
         """Add a robot to the world. Returns robot_id.
 
-        Same model_path + base_pose reuses the model instance (e.g. two arms in one URDF).
+        When ``share_model_with`` is given, the new robot is registered as a
+        view onto an already-loaded model instance — same physical body, just
+        a different ``end_effector_link`` and joint subset.  This is how dual
+        arms on a single URDF are handled: load the URDF once for the left
+        arm, then add the right arm with ``share_model_with=left_id``.
+        Without sharing, registering both arms separately would call
+        ``Parser.AddModels(g1.urdf)`` twice and create two complete G1s
+        welded at the same world origin → COLLISION_AT_START on every plan.
         """
         if self._finalized:
             raise RuntimeError("Cannot add robot after world is finalized")
@@ -205,21 +232,40 @@ class DrakeWorld(WorldSpec):
             self._robot_counter += 1
             robot_id = f"robot_{self._robot_counter}"
 
-            model_instance = self._load_model(config)
-            self._weld_base_if_needed(config, model_instance)
+            if share_model_with is not None:
+                if share_model_with not in self._robots:
+                    raise KeyError(
+                        f"share_model_with='{share_model_with}' not found "
+                        f"(known: {list(self._robots.keys())})"
+                    )
+                shared = self._robots[share_model_with]
+                model_instance = shared.model_instance
+                preview_model_instance = shared.preview_model_instance
+                logger.info(
+                    f"Robot '{config.name}' shares model_instance with "
+                    f"'{share_model_with}' (no second URDF load)"
+                )
+            else:
+                model_instance = self._load_model(config)
+                self._weld_base_if_needed(config, model_instance)
+
+                preview_model_instance = None
+                if self._enable_viz:
+                    preview_model_instance = self._load_model(config)
+                    self._weld_base_if_needed(config, preview_model_instance)
 
             self._validate_joints(config, model_instance)
 
-            ee_frame = self._plant.GetBodyByName(
-                config.end_effector_link, model_instance
-            ).body_frame()
+            ee_body = self._plant.GetBodyByName(config.end_effector_link, model_instance)
+            ee_frame = ee_body.body_frame()
             base_frame = self._plant.GetBodyByName(config.base_link, model_instance).body_frame()
 
-            # Preview (yellow ghost) — always a separate instance per robot
-            preview_model_instance = None
-            if self._enable_viz:
-                preview_model_instance = self._load_model(config)
-                self._weld_base_if_needed(config, preview_model_instance)
+            grasp_offset = np.array(config.grasp_offset_xyz, dtype=np.float64)
+            if np.any(grasp_offset != 0.0):
+                logger.info(
+                    f"EE for '{config.name}' uses grasp offset {tuple(grasp_offset)} "
+                    f"in {config.end_effector_link} frame"
+                )
 
             self._robots[robot_id] = _RobotData(
                 robot_id=robot_id,
@@ -228,6 +274,7 @@ class DrakeWorld(WorldSpec):
                 joint_indices=[],
                 ee_frame=ee_frame,
                 base_frame=base_frame,
+                grasp_offset_in_body=grasp_offset,
                 preview_model_instance=preview_model_instance,
             )
 
@@ -270,7 +317,12 @@ class DrakeWorld(WorldSpec):
         return model_instances[0]
 
     def _weld_base_if_needed(self, config: RobotModelConfig, model_instance: Any) -> None:
-        """Weld robot base to world if not already welded in URDF."""
+        """Weld robot base to world if not already welded in URDF.
+
+        If ``config.weld_base`` is False, the base is left unwelded and Drake
+        will assign a 6-DOF floating joint at Finalize().  Use
+        ``set_floating_base_pose()`` to update its pose at runtime.
+        """
         base_body = self._plant.GetBodyByName(config.base_link, model_instance)
 
         # Check if any joint already connects world to base_link
@@ -285,6 +337,12 @@ class DrakeWorld(WorldSpec):
                     f"world→{config.base_link}, skipping weld"
                 )
                 return
+
+        if not config.weld_base:
+            logger.info(
+                f"weld_base=False for '{config.name}', leaving {config.base_link} as floating body"
+            )
+            return
 
         # Weld base to world
         base_transform = self._pose_to_rigid_transform(config.base_pose)
@@ -611,13 +669,20 @@ class DrakeWorld(WorldSpec):
             # Compute joint indices for each robot (live + preview)
             for robot_id, robot_data in self._robots.items():
                 joint_indices: list[int] = []
+                velocity_indices: list[int] = []
                 for joint_name in robot_data.config.joint_names:
                     joint = self._plant.GetJointByName(joint_name, robot_data.model_instance)
-                    start_idx = joint.position_start()
-                    num_positions = joint.num_positions()
-                    joint_indices.extend(range(start_idx, start_idx + num_positions))
+                    pos_start = joint.position_start()
+                    pos_count = joint.num_positions()
+                    joint_indices.extend(range(pos_start, pos_start + pos_count))
+                    vel_start = joint.velocity_start()
+                    vel_count = joint.num_velocities()
+                    velocity_indices.extend(range(vel_start, vel_start + vel_count))
                 robot_data.joint_indices = joint_indices
-                logger.debug(f"Robot '{robot_id}' joint indices: {joint_indices}")
+                robot_data.velocity_indices = velocity_indices
+                logger.debug(
+                    f"Robot '{robot_id}' joint pos_idx={joint_indices} vel_idx={velocity_indices}"
+                )
 
                 # Compute preview joint indices
                 if robot_data.preview_model_instance is not None:
@@ -689,16 +754,32 @@ class DrakeWorld(WorldSpec):
         return self._finalized
 
     def _setup_collision_filters(self) -> None:
-        """Filter collisions between adjacent links and user-specified pairs."""
-        for robot_data in self._robots.values():
-            # Filter parent-child pairs (adjacent links always "collide")
+        """Filter collisions between adjacent links and user-specified pairs.
+
+        Three layers:
+          1. Adjacent (parent-child) links — always "collide" geometrically
+             at the joint, never useful to detect.
+          2. User-specified pairs (``collision_exclusion_pairs``) — for
+             URDF mesh artifacts (e.g. shoulder mesh overlapping torso).
+          3. Sibling-arm bodies for robots that share a model_instance
+             (dual-arm setups).  When planning for arm A we don't care
+             about arm B's bodies — disable A↔B body collisions
+             outright.  Each arm still detects collisions against the
+             shared structural bodies (torso/legs/waist) and obstacles.
+        """
+        # Map model_instance → list of (robot_id, set_of_arm_body_indices).
+        # Used in step 3 to compute sibling-arm exclusions per shared model.
+        per_model_arms: dict[Any, list[tuple[str, set[int]]]] = {}
+
+        for robot_id, robot_data in self._robots.items():
+            # 1. parent-child adjacency
             for joint_idx in self._plant.GetJointIndices(robot_data.model_instance):
                 joint = self._plant.get_joint(joint_idx)
                 parent, child = joint.parent_body(), joint.child_body()
                 if parent.index() != self._plant.world_body().index():
                     self._exclude_body_pair(parent, child)
 
-            # Filter user-specified pairs (e.g., parallel linkage grippers)
+            # 2. user-specified pairs
             for name1, name2 in robot_data.config.collision_exclusion_pairs:
                 try:
                     body1 = self._plant.GetBodyByName(name1, robot_data.model_instance)
@@ -706,6 +787,44 @@ class DrakeWorld(WorldSpec):
                     self._exclude_body_pair(body1, body2)
                 except RuntimeError:
                     logger.warning(f"Collision exclusion: link not found: {name1} or {name2}")
+
+            # Compute this arm's body chain: end_effector_link + child body
+            # of every joint in joint_names.  We deliberately omit the
+            # base_link — it's typically the floating pelvis or torso,
+            # shared with sibling arms / WBC stack.
+            arm_bodies: list[Any] = []  # list of Body objects, not BodyIndex
+            try:
+                ee_body = self._plant.GetBodyByName(
+                    robot_data.config.end_effector_link, robot_data.model_instance
+                )
+                arm_bodies.append(ee_body)
+            except RuntimeError:
+                pass
+            for joint_name in robot_data.config.joint_names:
+                try:
+                    joint = self._plant.GetJointByName(joint_name, robot_data.model_instance)
+                    arm_bodies.append(joint.child_body())
+                except RuntimeError:
+                    continue
+            per_model_arms.setdefault(robot_data.model_instance, []).append((robot_id, arm_bodies))
+
+        # 3. Sibling-arm exclusions
+        for arms in per_model_arms.values():
+            if len(arms) < 2:
+                continue
+            for i in range(len(arms)):
+                for j in range(i + 1, len(arms)):
+                    id_a, bodies_a = arms[i]
+                    id_b, bodies_b = arms[j]
+                    n_excluded = 0
+                    for body_a in bodies_a:
+                        for body_b in bodies_b:
+                            self._exclude_body_pair(body_a, body_b)
+                            n_excluded += 1
+                    logger.info(
+                        f"Sibling-arm collision exclusion: {id_a} ({len(bodies_a)} bodies) "
+                        f"↔ {id_b} ({len(bodies_b)} bodies) — {n_excluded} pairs filtered"
+                    )
 
         logger.info("Collision filters applied")
 
@@ -819,6 +938,51 @@ class DrakeWorld(WorldSpec):
         positions = [float(full_positions[idx]) for idx in robot_data.joint_indices]
         return JointState(name=robot_data.config.joint_names, position=positions)
 
+    def set_floating_base_pose(self, robot_id: WorldRobotID, pose: PoseStamped) -> None:
+        """Set the pose of a robot's floating base in the world.
+
+        For robots configured with ``weld_base=False`` (e.g. legged robots
+        whose pelvis pose comes from /odom), call this before each plan to
+        keep Drake's view of the base aligned with reality.
+
+        Updates three places: (1) plant defaults, so every fresh
+        ``scratch_context()`` (used by IK/RRT) starts with the base at
+        the right place; (2) the live plant context, so meshcat renders
+        the URDF at the live pelvis pose; (3) republishes visualization.
+        """
+        if not self._finalized:
+            raise RuntimeError("World must be finalized first")
+        if robot_id not in self._robots:
+            raise KeyError(f"Robot '{robot_id}' not found")
+
+        robot_data = self._robots[robot_id]
+        base_body = self._plant.GetBodyByName(
+            robot_data.config.base_link, robot_data.model_instance
+        )
+        if not base_body.is_floating():
+            return  # weld_base=True; nothing to update
+
+        rt = self._pose_to_rigid_transform(pose)
+
+        with self._lock:
+            self._plant.SetDefaultFreeBodyPose(base_body, rt)
+            if self._plant_context is not None:
+                self._plant.SetFreeBodyPose(self._plant_context, base_body, rt)
+
+            # Mirror onto the preview ghost so its base tracks the live robot.
+            if robot_data.preview_model_instance is not None:
+                preview_base = self._plant.GetBodyByName(
+                    robot_data.config.base_link, robot_data.preview_model_instance
+                )
+                if preview_base.is_floating():
+                    self._plant.SetDefaultFreeBodyPose(preview_base, rt)
+                    if self._plant_context is not None:
+                        self._plant.SetFreeBodyPose(self._plant_context, preview_base, rt)
+        # Visualization is NOT republished here — at 50 Hz odom that
+        # used to schedule a blocking meshcat publish that wedged the
+        # planning thread.  Meshcat will catch up on the next call to
+        # publish_visualization() (e.g. inside the planning path).
+
     # Collision Checking (context-based)
 
     def is_collision_free(self, ctx: Context, robot_id: WorldRobotID) -> bool:
@@ -833,6 +997,31 @@ class DrakeWorld(WorldSpec):
         query_object = self._scene_graph.get_query_output_port().Eval(scene_graph_ctx)
 
         return not query_object.HasCollisions()
+
+    def get_colliding_pairs(self, ctx: Context) -> list[tuple[str, str]]:
+        """Return human-readable names of every body pair currently in penetration.
+
+        Used to diagnose ``COLLISION_AT_START`` — without it the planner
+        only reports a status code, which doesn't say which bodies are
+        actually overlapping.  Result is empty when there are no
+        penetrations.
+        """
+        if not self._finalized:
+            return []
+        scene_graph_ctx = self._diagram.GetSubsystemContext(self._scene_graph, ctx)
+        query = self._scene_graph.get_query_output_port().Eval(scene_graph_ctx)
+        inspector = self._scene_graph.model_inspector()
+        pairs: list[tuple[str, str]] = []
+        for pp in query.ComputePointPairPenetration():
+            try:
+                f1 = inspector.GetFrameId(pp.id_A)
+                f2 = inspector.GetFrameId(pp.id_B)
+                n1 = inspector.GetName(f1)
+                n2 = inspector.GetName(f2)
+            except Exception:
+                n1, n2 = str(pp.id_A), str(pp.id_B)
+            pairs.append((n1, n2))
+        return pairs
 
     def get_min_distance(self, ctx: Context, robot_id: WorldRobotID) -> float:
         """Get minimum signed distance (positive = clearance, negative = penetration)."""
@@ -910,11 +1099,20 @@ class DrakeWorld(WorldSpec):
         plant_ctx = self._diagram.GetSubsystemContext(self._plant, ctx)
 
         ee_body = robot_data.ee_frame.body()
-        X_WE = self._plant.EvalBodyPoseInWorld(plant_ctx, ee_body)
+        X_WB = self._plant.EvalBodyPoseInWorld(plant_ctx, ee_body)
+        # Apply grasp_offset_in_body so callers see the grasp-center pose,
+        # not the wrist link pose.  Same translation as the Jacobian's
+        # `point on body` parameter — keeps IK's "current pose" and
+        # "Jacobian motion" consistent.
+        offset = robot_data.grasp_offset_in_body
+        if offset is not None and np.any(offset != 0.0):
+            X_BE = RigidTransform(offset)
+            X_WE = X_WB @ X_BE
+        else:
+            X_WE = X_WB
 
-        # Extract position and quaternion from Drake transform
         pos = X_WE.translation()
-        quat = X_WE.rotation().ToQuaternion()  # Drake returns [w, x, y, z]
+        quat = X_WE.rotation().ToQuaternion()
 
         return PoseStamped(
             frame_id="world",
@@ -959,21 +1157,36 @@ class DrakeWorld(WorldSpec):
         robot_data = self._robots[robot_id]
         plant_ctx = self._diagram.GetSubsystemContext(self._plant, ctx)
 
-        # Compute full Jacobian
+        # Point on the EE body whose spatial velocity we differentiate.
+        # Defaults to body origin; if the robot has a grasp_offset_xyz
+        # configured, we shift to the grasp center so IK targets that
+        # point (and matches what get_ee_pose returns).
+        offset = robot_data.grasp_offset_in_body
+        point_on_body = (
+            offset if offset is not None and np.any(offset != 0.0) else np.array([0.0, 0.0, 0.0])
+        )
+
+        # kV (not kQDot): J is shape (6, num_velocities) and indexed by
+        # ``joint.velocity_start()``.  kQDot returns shape
+        # (6, num_positions) indexed by position_start, which is off-by-one
+        # for revolute joints downstream of a quaternion floating base
+        # (7 positions but 6 velocities for the base) — using it with
+        # velocity_indices grabbed the wrong columns and IK descended a
+        # bogus gradient.
         J_full = self._plant.CalcJacobianSpatialVelocity(
             plant_ctx,
-            JacobianWrtVariable.kQDot,
+            JacobianWrtVariable.kV,
             robot_data.ee_frame,
-            np.array([0.0, 0.0, 0.0]),  # type: ignore[arg-type]  # Point on end-effector
+            point_on_body,
             self._plant.world_frame(),
             self._plant.world_frame(),
         )
 
-        # Extract columns for this robot's joints
-        n_joints = len(robot_data.joint_indices)
+        vel_indices = robot_data.velocity_indices or robot_data.joint_indices
+        n_joints = len(vel_indices)
         J_robot = np.zeros((6, n_joints))
 
-        for i, joint_idx in enumerate(robot_data.joint_indices):
+        for i, joint_idx in enumerate(vel_indices):
             J_robot[:, i] = J_full[:, joint_idx]
 
         # Reorder rows: Drake uses [angular, linear], we want [linear, angular]

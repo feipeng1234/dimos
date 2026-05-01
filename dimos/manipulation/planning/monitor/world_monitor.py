@@ -69,10 +69,19 @@ class WorldMonitor:
 
     # Robot Management
 
-    def add_robot(self, config: RobotModelConfig) -> WorldRobotID:
-        """Add a robot. Returns robot_id."""
+    def add_robot(
+        self,
+        config: RobotModelConfig,
+        share_model_with: WorldRobotID | None = None,
+    ) -> WorldRobotID:
+        """Add a robot. Returns robot_id.
+
+        ``share_model_with`` (optional) lets you register a second view onto
+        an already-loaded model — used for dual-arm setups where both arms
+        live in the same URDF.
+        """
         with self._lock:
-            robot_id = self._world.add_robot(config)
+            robot_id = self._world.add_robot(config, share_model_with=share_model_with)
             self._robot_joints[robot_id] = config.joint_names
             logger.info(f"Added robot '{config.name}' as '{robot_id}'")
             return robot_id

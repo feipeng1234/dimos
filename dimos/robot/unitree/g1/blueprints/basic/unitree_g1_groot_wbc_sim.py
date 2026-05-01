@@ -84,7 +84,7 @@ from dimos.perception.object_scene_registration import ObjectSceneRegistrationMo
 from dimos.perception.object_tracker import ObjectTracking
 from dimos.perception.perceive_loop_skill import PerceiveLoopSkill
 from dimos.perception.spatial_perception import SpatialMemory
-from dimos.robot.catalog.g1 import g1_left_arm
+from dimos.robot.catalog.g1 import g1_left_arm, g1_right_arm
 from dimos.robot.unitree.g1.blueprints.basic._groot_wbc_common import (
     G1_GROOT_KD,
     G1_GROOT_KP,
@@ -127,13 +127,13 @@ _MJCF_PATH = "data/mujoco_sim/g1_gear_wbc.xml"
 # trajectories; the coordinator's "trajectory" task on the same
 # joint subset executes them.
 #
-# Left arm only (TODO: dual-arm).  Registering both arms makes Drake
-# parser.AddModels(g1.urdf) twice — two full G1s welded at the same
-# world origin — which causes COLLISION_AT_START failures on every
-# plan because the duplicated bodies overlap.  Real fix is a shared
-# model_instance in ManipulationModule.add_robot (or per-arm subset
-# URDFs); single-arm here keeps planning clean.
+# Both arms registered.  Drake's "load g1.urdf twice → two complete G1s
+# welded at world origin → COLLISION_AT_START" trap is sidestepped by
+# ManipulationModule._initialize_planning, which dedupes by model_path
+# and registers the second arm via DrakeWorld.add_robot(share_model_with=…)
+# — one URDF parse, two views (left_wrist_yaw vs right_wrist_yaw).
 _g1_left_arm_cfg = g1_left_arm()
+_g1_right_arm_cfg = g1_right_arm()
 
 _g1_coordinator = (
     ControlCoordinator.blueprint(
@@ -170,11 +170,12 @@ _g1_coordinator = (
                 auto_dry_run=False,
                 default_ramp_seconds=0.0,
             ),
-            # Left arm: trajectory follower driven by ManipulationModule.
-            # When idle the arm dangles under the WBC's kp/kd damping;
-            # when a trajectory is loaded the task wins arbitration on
-            # those 7 joints.  Right arm has no controller — hangs limp.
+            # Per-arm trajectory followers driven by ManipulationModule.
+            # When idle the arms dangle under the WBC's kp/kd damping; when
+            # a trajectory is loaded for one of them the task wins
+            # arbitration on those 7 joints.
             _g1_left_arm_cfg.task_config,
+            _g1_right_arm_cfg.task_config,
         ],
     )
     .transports(
@@ -345,13 +346,29 @@ _g1_agentic_stack = (
     # joint_state for live state sync.  Meshcat viz off in this
     # composed sim (we already have viser as the live 3D view).
     G1ManipulationModule.blueprint(
-        robots=[_g1_left_arm_cfg.robot_model_config],
+        robots=[
+            _g1_left_arm_cfg.robot_model_config,
+            _g1_right_arm_cfg.robot_model_config,
+        ],
         planning_timeout=10.0,
+        # Drake's nonlinear-program-based IK (SNOPT under the hood) —
+        # robust to seed quality and supports `solve_pointing` (an
+        # angle-between-vectors constraint) which `point_at` uses to
+        # leave the wrist roll about the pointing axis free.  Eval
+        # showed JacobianIK with strict look-at could only reach
+        # ~25% of random pointing directions; this expands that.
+        kinematics_name="drake_optimization",
         # Meshcat viewer for what Drake actually sees: URDF model in
         # the planner's frame, planned trajectories, world-monitored
         # obstacles. Logged at startup as
         # "Visualization started: http://localhost:7000/".
         enable_viz=True,
+        # Easy-mode handle: the reach_for_sim_object skill loads this
+        # MJCF separately and reads body world poses straight from it,
+        # bypassing perception.  Useful for isolating manipulation
+        # bugs from perception bugs (YOLO-E labels, RGBD back-proj
+        # accuracy, frame transforms).
+        sim_mjcf_path=_MJCF_PATH,
     ).transports(
         {
             ("joint_state", JointState): LCMTransport("/coordinator/joint_state", JointState),
@@ -360,15 +377,14 @@ _g1_agentic_stack = (
     ),
     # Detect-and-pick: YOLO-E 2D detection on the splat-rendered RGB,
     # back-projected into 3D via the aligned MuJoCo depth + intrinsics.
-    # Exposes detect()/select() skills the agent uses to register
-    # graspable objects with the manipulation pipeline.
     # target_frame="world" matches what MujocoSimModule publishes TF
     # for (frame_id="world", child=head_color_color_optical_frame);
     # the default "map" doesn't connect to anything in this stack.
-    # prompt_mode=PROMPT loads yoloe-11l-seg.pt (text-prompted model)
-    # so the agent can call detect(["red cube"]).  The default LRPC
-    # loads yoloe-11l-seg-pf.pt which is a fixed-class prompt-FREE
-    # model and rejects set_classes() with an AssertionError.
+    # PROMPT mode loads the open-vocab YOLO-E (yoloe-11l-seg.pt) so
+    # the agent's `detect(["red cube"])` sets the classes for the live
+    # detection loop — `scan_objects` then sees whatever was last
+    # detect()'d.  LRPC mode (prompt-free) needs no set_prompts() but
+    # gives garbage labels for non-COCO objects like our cube.
     ObjectSceneRegistrationModule.blueprint(
         target_frame="world",
         prompt_mode=YoloePromptMode.PROMPT,

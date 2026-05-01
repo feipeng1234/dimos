@@ -114,6 +114,7 @@ class ManipulationModule(Module):
 
         # State machine
         self._state = ManipulationState.IDLE
+        self._state_set_at = 0.0
         self._lock = threading.Lock()
         self._error_message = ""
 
@@ -164,8 +165,18 @@ class ManipulationModule(Module):
 
         self._world_monitor = WorldMonitor(enable_viz=self.config.enable_viz)
 
+        # Dedupe by model_path: when multiple configs point at the same URDF
+        # (e.g. left + right arm of one humanoid), load it ONCE and register
+        # the second config as a view onto the same model_instance.  Loading
+        # twice would weld two complete robots at the same world origin and
+        # COLLISION_AT_START every plan attempt.
+        seen_models: dict[str, WorldRobotID] = {}
         for robot_config in self.config.robots:
-            robot_id = self._world_monitor.add_robot(robot_config)
+            model_key = str(robot_config.model_path.resolve())
+            share_with = seen_models.get(model_key)
+            robot_id = self._world_monitor.add_robot(robot_config, share_model_with=share_with)
+            if share_with is None:
+                seen_models[model_key] = robot_id
             traj_gen = JointTrajectoryGenerator(
                 num_joints=len(robot_config.joint_names),
                 max_velocity=robot_config.max_velocity,
@@ -349,6 +360,7 @@ class ManipulationModule(Module):
         if self._state != ManipulationState.EXECUTING:
             return False
         self._state = ManipulationState.IDLE
+        self._state_set_at = time.time()
         logger.info("Motion cancelled")
         return True
 
@@ -363,6 +375,7 @@ class ManipulationModule(Module):
         if self._state == ManipulationState.EXECUTING:
             return "Error: Cannot reset while executing — cancel the motion first"
         self._state = ManipulationState.IDLE
+        self._state_set_at = time.time()
         self._error_message = ""
         return "Reset to IDLE — ready for new commands"
 
@@ -418,16 +431,32 @@ class ManipulationModule(Module):
         if (robot := self._get_robot(robot_name)) is None:
             return None
         with self._lock:
-            if self._state not in (ManipulationState.IDLE, ManipulationState.COMPLETED):
-                logger.warning(f"Cannot plan: state is {self._state.name}")
-                return None
+            if self._state == ManipulationState.FAULT:
+                # FAULT just means the previous attempt errored (IK couldn't
+                # converge, RRT collided, etc.). It must NOT block subsequent
+                # requests — otherwise one bad target locks out every tool the
+                # agent has, including go_home / go_init recovery moves.
+                logger.info(f"Recovering from FAULT (last error: {self._error_message!r})")
+                self._error_message = ""
+            elif self._state not in (ManipulationState.IDLE, ManipulationState.COMPLETED):
+                # PLANNING / EXECUTING is "operation in progress" — guard
+                # against concurrent requests but recover after a stale
+                # window so an RPC-timed-out solve doesn't brick us forever.
+                stale_after = max(self.config.planning_timeout * 2.0, 30.0)
+                age = time.time() - self._state_set_at
+                if age < stale_after:
+                    logger.warning(f"Cannot plan: state is {self._state.name} (age={age:.1f}s)")
+                    return None
+                logger.warning(f"Stale {self._state.name} state for {age:.1f}s; resetting to IDLE")
             self._state = ManipulationState.PLANNING
+            self._state_set_at = time.time()
         return robot[0], robot[1]
 
     def _fail(self, msg: str) -> bool:
         """Set FAULT state with error message."""
         logger.warning(msg)
         self._state = ManipulationState.FAULT
+        self._state_set_at = time.time()
         self._error_message = msg
         return False
 
@@ -466,17 +495,104 @@ class ManipulationModule(Module):
             orientation=pose.orientation,
         )
 
-        ik = self._kinematics.solve(
-            world=self._world_monitor.world,
-            robot_id=robot_id,
-            target_pose=target_pose,
-            seed=current,
-            check_collision=True,
+        logger.info(
+            f"IK solve start: target=({pose.position.x:.3f}, {pose.position.y:.3f}, "
+            f"{pose.position.z:.3f}) seed=[{', '.join(f'{j:.3f}' for j in current.position)}]"
+        )
+        ik_start = time.time()
+        try:
+            ik = self._kinematics.solve(
+                world=self._world_monitor.world,
+                robot_id=robot_id,
+                target_pose=target_pose,
+                seed=current,
+                check_collision=True,
+            )
+        except Exception as exc:
+            logger.exception("IK solver raised")
+            return self._fail(f"IK exception: {exc!r}")
+        ik_elapsed = time.time() - ik_start
+        logger.info(
+            f"IK solve done: status={ik.status.name} success={ik.is_success()} "
+            f"pos_err={ik.position_error:.4f}m ori_err={ik.orientation_error:.4f}rad "
+            f"elapsed={ik_elapsed:.2f}s"
         )
         if not ik.is_success() or ik.joint_state is None:
             return self._fail(f"IK failed: {ik.status.name}")
 
-        logger.info(f"IK solved, error: {ik.position_error:.4f}m")
+        return self._plan_path_only(robot_name, robot_id, ik.joint_state)
+
+    @rpc
+    def plan_to_pointing(
+        self,
+        ee_x: float,
+        ee_y: float,
+        ee_z: float,
+        dir_x: float,
+        dir_y: float,
+        dir_z: float,
+        robot_name: RobotName | None = None,
+        position_tolerance: float = 0.02,
+        angle_tolerance: float = 0.2,
+    ) -> bool:
+        """Plan motion so the EE forward axis points along (dir_x, dir_y, dir_z).
+
+        Uses ``KinematicsSpec.solve_pointing`` if the configured solver
+        supports it (DrakeOptimizationIK does), else returns False.
+        Loose by design: the rotation about the pointing axis is free,
+        which is what "point at" means semantically. Use ``plan_to_pose``
+        when you need a specific orientation.
+        """
+        if self._kinematics is None or (r := self._begin_planning(robot_name)) is None:
+            return False
+        robot_name, robot_id = r
+        assert self._world_monitor
+
+        solve_pointing = getattr(self._kinematics, "solve_pointing", None)
+        if not callable(solve_pointing):
+            logger.error(
+                "plan_to_pointing requires a kinematics solver that supports "
+                "solve_pointing (e.g. DrakeOptimizationIK)"
+            )
+            return self._fail("solve_pointing not supported by current IK")
+
+        current = self._world_monitor.get_current_joint_state(robot_id)
+        if current is None:
+            return self._fail("No joint state")
+
+        import numpy as np
+
+        ee_position = np.array([ee_x, ee_y, ee_z])
+        direction = np.array([dir_x, dir_y, dir_z])
+        logger.info(
+            f"solve_pointing start: ee=({ee_x:.3f},{ee_y:.3f},{ee_z:.3f}) "
+            f"dir=({dir_x:+.3f},{dir_y:+.3f},{dir_z:+.3f}) "
+            f"pos_tol={position_tolerance:.3f}m angle_tol={angle_tolerance:.3f}rad"
+        )
+        ik_start = time.time()
+        try:
+            ik = solve_pointing(
+                world=self._world_monitor.world,
+                robot_id=robot_id,
+                ee_position=ee_position,
+                direction_world=direction,
+                seed=current,
+                position_tolerance=position_tolerance,
+                angle_tolerance=angle_tolerance,
+                check_collision=True,
+            )
+        except Exception as exc:
+            logger.exception("solve_pointing raised")
+            return self._fail(f"solve_pointing exception: {exc!r}")
+        ik_elapsed = time.time() - ik_start
+        logger.info(
+            f"solve_pointing done: status={ik.status.name} success={ik.is_success()} "
+            f"pos_err={ik.position_error:.4f}m ang_err={ik.orientation_error:.4f}rad "
+            f"elapsed={ik_elapsed:.2f}s"
+        )
+        if not ik.is_success() or ik.joint_state is None:
+            return self._fail(f"solve_pointing failed: {ik.status.name}")
+
         return self._plan_path_only(robot_name, robot_id, ik.joint_state)
 
     @rpc
@@ -511,17 +627,51 @@ class ManipulationModule(Module):
                 position=list(goal.position[:planner_dof]),
             )
 
-        result = self._planner.plan_joint_path(
-            world=self._world_monitor.world,
-            robot_id=robot_id,
-            start=start,
-            goal=goal,
-            timeout=self.config.planning_timeout,
+        logger.info(
+            f"RRT start: budget={self.config.planning_timeout:.1f}s "
+            f"start=[{', '.join(f'{j:.3f}' for j in start.position)}] "
+            f"goal=[{', '.join(f'{j:.3f}' for j in goal.position)}]"
+        )
+        rrt_start = time.time()
+        try:
+            result = self._planner.plan_joint_path(
+                world=self._world_monitor.world,
+                robot_id=robot_id,
+                start=start,
+                goal=goal,
+                timeout=self.config.planning_timeout,
+            )
+        except Exception as exc:
+            logger.exception("RRT raised")
+            return self._fail(f"RRT exception: {exc!r}")
+        rrt_elapsed = time.time() - rrt_start
+        logger.info(
+            f"RRT done: status={result.status.name} success={result.is_success()} "
+            f"waypoints={len(result.path) if result.is_success() else 0} elapsed={rrt_elapsed:.2f}s"
         )
         if not result.is_success():
+            # On collision failures, dump which body pairs are touching so
+            # we can see which links to filter / unstuck.  Cheap; only
+            # runs on the failure path.
+            world = self._world_monitor.world
+            if (
+                "COLLISION" in result.status.name
+                and hasattr(world, "get_colliding_pairs")
+                and hasattr(world, "scratch_context")
+            ):
+                try:
+                    with world.scratch_context() as ctx:
+                        world.set_joint_state(ctx, robot_id, start)
+                        pairs = world.get_colliding_pairs(ctx)
+                    if pairs:
+                        logger.warning(
+                            f"Colliding body pairs at RRT start ({len(pairs)}): "
+                            + ", ".join(f"{a} ↔ {b}" for a, b in pairs[:20])
+                        )
+                except Exception as e:
+                    logger.debug(f"colliding-pair dump failed: {e}")
             return self._fail(f"Planning failed: {result.status.name}")
 
-        logger.info(f"Path: {len(result.path)} waypoints")
         self._planned_paths[robot_name] = result.path
 
         _, _, traj_gen = self._robots[robot_name]
@@ -531,6 +681,7 @@ class ManipulationModule(Module):
         logger.info(f"Trajectory: {traj.duration:.3f}s")
 
         self._state = ManipulationState.COMPLETED
+        self._state_set_at = time.time()
         return True
 
     @rpc
@@ -765,12 +916,14 @@ class ManipulationModule(Module):
         )
 
         self._state = ManipulationState.EXECUTING
+        self._state_set_at = time.time()
         result = client.task_invoke(
             config.coordinator_task_name, "execute", {"trajectory": translated}
         )
         if result:
             logger.info("Trajectory accepted")
             self._state = ManipulationState.COMPLETED
+            self._state_set_at = time.time()
             return True
         else:
             return self._fail("Coordinator rejected trajectory")
@@ -1113,6 +1266,178 @@ class ManipulationModule(Module):
             return err
 
         return f"Reached target pose ({x:.3f}, {y:.3f}, {z:.3f})"
+
+    @skill
+    def point_at(
+        self,
+        x: float,
+        y: float,
+        z: float,
+        reach: float = 0.45,
+        robot_name: str | None = None,
+    ) -> str:
+        """Aim the arm so the end-effector points toward a world-frame point.
+
+        Useful for indicating an object even when it's out of arm reach:
+        the arm extends along the line from the shoulder/base toward
+        ``(x, y, z)``, with the EE's forward axis (the grasp_offset
+        direction) aligned with that line. For nearby objects, the
+        EE moves to within ``reach`` meters of the target; for far
+        objects, the arm just gestures in the right direction.
+
+        Args:
+            x: Target X position in meters (world frame).
+            y: Target Y position in meters (world frame).
+            z: Target Z position in meters (world frame).
+            reach: How far from the shoulder anchor to extend the EE.
+                Defaults to a comfortable arm extension.
+            robot_name: Robot to move (only needed for multi-arm setups).
+        """
+        import numpy as np
+
+        robot = self._get_robot(robot_name)
+        if robot is None or self._world_monitor is None:
+            return "Error: Robot not found or planning not initialized"
+        rname, robot_id, config, _ = robot
+        world = self._world_monitor.world
+
+        # Anchor: prefer the shoulder link (parent body of the first
+        # arm joint) when available; fall back to the configured base_link.
+        anchor_link = config.base_link
+        try:
+            joint = world.plant.GetJointByName(
+                config.joint_names[0],
+                world._robots[robot_id].model_instance,
+            )
+            parent_name = joint.parent_body().name()
+            if parent_name and parent_name != "world":
+                anchor_link = parent_name
+        except Exception:
+            pass
+
+        with world.scratch_context() as ctx:
+            anchor_mat = world.get_link_pose(ctx, robot_id, anchor_link)
+        anchor = anchor_mat[:3, 3]
+        target = np.array([x, y, z], dtype=np.float64)
+
+        delta = target - anchor
+        dist = float(np.linalg.norm(delta))
+        if dist < 1e-6:
+            return f"Error: target ({x:.3f}, {y:.3f}, {z:.3f}) is at the shoulder anchor"
+        direction = delta / dist
+        ext = min(reach, dist)
+        ee_pos = anchor + ext * direction
+
+        # Look-at orientation: align the EE's "forward" axis (the
+        # grasp_offset direction in body frame) with `direction` (world).
+        # Keep the EE's +z roughly aligned with world up so the gesture
+        # looks natural.
+        offset = np.asarray(config.grasp_offset_xyz, dtype=np.float64)
+        if np.linalg.norm(offset) < 1e-6:
+            np.array([1.0, 0.0, 0.0])
+        else:
+            offset / np.linalg.norm(offset)
+
+        # Compute world rotation R such that R @ forward_body = direction.
+        # Use a look-at construction: choose a "right" axis perpendicular
+        # to direction using world up as a reference.
+        world_up = np.array([0.0, 0.0, 1.0])
+        if abs(float(np.dot(direction, world_up))) > 0.99:
+            # pointing nearly straight up/down — use world +x as up reference
+            world_up = np.array([1.0, 0.0, 0.0])
+        right_world = np.cross(world_up, direction)
+        right_world /= np.linalg.norm(right_world)
+        up_world = np.cross(direction, right_world)
+
+        # R_target maps body axes (forward_body, right_body, up_body) to
+        # (direction, right_world, up_world).  Assume body axes are
+        # canonical: forward=+x_body, right=+y_body, up=+z_body. This
+        # ignores the small lateral component of grasp_offset; good enough
+        # for "point at" gestures.
+        R_target = np.column_stack([direction, right_world, up_world])
+
+        # Convert R to quaternion (xyzw).
+        # Shepperd's method for numerical robustness.
+        m = R_target
+        trace = m[0, 0] + m[1, 1] + m[2, 2]
+        if trace > 0:
+            s = 0.5 / float(np.sqrt(trace + 1.0))
+            qw = 0.25 / s
+            qx = (m[2, 1] - m[1, 2]) * s
+            qy = (m[0, 2] - m[2, 0]) * s
+            qz = (m[1, 0] - m[0, 1]) * s
+        elif m[0, 0] > m[1, 1] and m[0, 0] > m[2, 2]:
+            s = 2.0 * float(np.sqrt(1.0 + m[0, 0] - m[1, 1] - m[2, 2]))
+            qw = (m[2, 1] - m[1, 2]) / s
+            qx = 0.25 * s
+            qy = (m[0, 1] + m[1, 0]) / s
+            qz = (m[0, 2] + m[2, 0]) / s
+        elif m[1, 1] > m[2, 2]:
+            s = 2.0 * float(np.sqrt(1.0 + m[1, 1] - m[0, 0] - m[2, 2]))
+            qw = (m[0, 2] - m[2, 0]) / s
+            qx = (m[0, 1] + m[1, 0]) / s
+            qy = 0.25 * s
+            qz = (m[1, 2] + m[2, 1]) / s
+        else:
+            s = 2.0 * float(np.sqrt(1.0 + m[2, 2] - m[0, 0] - m[1, 1]))
+            qw = (m[1, 0] - m[0, 1]) / s
+            qx = (m[0, 2] + m[2, 0]) / s
+            qy = (m[1, 2] + m[2, 1]) / s
+            qz = 0.25 * s
+
+        ee_position = Vector3(float(ee_pos[0]), float(ee_pos[1]), float(ee_pos[2]))
+        lookat_quat = Quaternion(float(qx), float(qy), float(qz), float(qw))
+
+        logger.info(
+            f"point_at: target=({x:.3f}, {y:.3f}, {z:.3f}) anchor='{anchor_link}'@"
+            f"({anchor[0]:.3f},{anchor[1]:.3f},{anchor[2]:.3f}) "
+            f"ee_target=({ee_pos[0]:.3f},{ee_pos[1]:.3f},{ee_pos[2]:.3f}) "
+            f"dist={dist:.3f}m extend={ext:.3f}m"
+        )
+
+        # Preferred path: solve_pointing — Drake IK with an
+        # AngleBetweenVectorsConstraint, leaving the wrist's roll about
+        # the pointing axis free.  Vastly larger feasible set than any
+        # full-pose IK since "point at" only really constrains 5 DOF.
+        if callable(getattr(self._kinematics, "solve_pointing", None)):
+            ok = self.plan_to_pointing(
+                ee_x=float(ee_pos[0]),
+                ee_y=float(ee_pos[1]),
+                ee_z=float(ee_pos[2]),
+                dir_x=float(direction[0]),
+                dir_y=float(direction[1]),
+                dir_z=float(direction[2]),
+                robot_name=rname,
+            )
+            if ok:
+                err = self._preview_execute_wait(robot_name)
+                if err:
+                    return err
+                return f"Pointing at ({x:.3f}, {y:.3f}, {z:.3f}) (soft-pointing)"
+            logger.info("point_at: solve_pointing failed; falling back to look-at IK")
+
+        # Fallback: strict look-at orientation, then preserve-current.
+        # Keeps point_at working when the configured solver doesn't
+        # support solve_pointing.
+        attempts = [("look-at", lookat_quat)]
+        current_ee = self.get_ee_pose(rname)
+        if current_ee is not None:
+            attempts.append(("preserve-orient", current_ee.orientation))
+
+        for label, quat in attempts:
+            target_pose = Pose(ee_position, quat)
+            if self.plan_to_pose(target_pose, rname):
+                logger.info(f"point_at: planned with '{label}' orientation")
+                err = self._preview_execute_wait(robot_name)
+                if err:
+                    return err
+                return f"Pointing at ({x:.3f}, {y:.3f}, {z:.3f}) ({label})"
+            logger.info(f"point_at: '{label}' orientation failed IK; trying next")
+
+        return (
+            f"Error: Planning failed — could not aim arm at "
+            f"({x:.3f}, {y:.3f}, {z:.3f}). The position may be unreachable."
+        )
 
     @skill
     def move_to_joints(

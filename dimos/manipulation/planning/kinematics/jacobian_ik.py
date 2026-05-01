@@ -223,8 +223,13 @@ class JacobianIK:
         max_iterations = max_iterations or self._max_iterations
         lower_limits, upper_limits = world.get_joint_limits(robot_id)
 
-        for iteration in range(max_iterations):
-            with world.scratch_context() as ctx:
+        # Hold one scratch context for the whole solve.  Drake's
+        # ``CreateDefaultContext`` runs ~100 ms on a 35-DOF G1 plant;
+        # creating a fresh one every iteration burns 20 s for a
+        # 200-iter solve.  set_joint_state already mutates this context,
+        # so reusing it gives identical math at ~5 ms/iter.
+        with world.scratch_context() as ctx:
+            for iteration in range(max_iterations):
                 # Set current position (convert to JointState for API)
                 current_state = JointState(name=joint_names, position=current_joints.tolist())
                 world.set_joint_state(ctx, robot_id, current_state)
@@ -251,30 +256,26 @@ class JacobianIK:
                 # Get Jacobian
                 J = world.get_jacobian(ctx, robot_id)
 
-            # Adaptive damping near singularities
-            if check_singularity(J, threshold=self._singularity_threshold):
-                # Increase damping near singularity instead of failing
-                effective_damping = self._damping * 10.0
-            else:
-                effective_damping = self._damping
+                # Adaptive damping near singularities
+                if check_singularity(J, threshold=self._singularity_threshold):
+                    effective_damping = self._damping * 10.0
+                else:
+                    effective_damping = self._damping
 
-            # Compute joint velocities
-            J_pinv = damped_pseudoinverse(J, effective_damping)
-            q_dot = J_pinv @ twist
+                # Compute joint velocities
+                J_pinv = damped_pseudoinverse(J, effective_damping)
+                q_dot = J_pinv @ twist
 
-            # Clamp maximum joint change per iteration (like reference implementations)
-            max_delta = 0.1  # radians per iteration
-            max_change = np.max(np.abs(q_dot))
-            if max_change > max_delta:
-                q_dot = q_dot * (max_delta / max_change)
+                # Clamp maximum joint change per iteration
+                max_delta = 0.1  # radians per iteration
+                max_change = np.max(np.abs(q_dot))
+                if max_change > max_delta:
+                    q_dot = q_dot * (max_delta / max_change)
 
-            current_joints = current_joints + q_dot
+                current_joints = current_joints + q_dot
+                current_joints = np.clip(current_joints, lower_limits, upper_limits)
 
-            # Clip to limits
-            current_joints = np.clip(current_joints, lower_limits, upper_limits)
-
-        # Compute final error
-        with world.scratch_context() as ctx:
+            # Compute final error
             final_state = JointState(name=joint_names, position=current_joints.tolist())
             world.set_joint_state(ctx, robot_id, final_state)
             final_pose = pose_to_matrix(world.get_ee_pose(ctx, robot_id))

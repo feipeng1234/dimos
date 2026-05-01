@@ -89,6 +89,8 @@ def _g1_arm(
     pairs: list[tuple[str, str]],
     end_effector_link: str,
     *,
+    grasp_offset_xyz: tuple[float, float, float],
+    side: str,
     task_priority: int = 20,
 ) -> G1ArmCatalogEntry:
     urdf_joints = [u for u, _ in pairs]
@@ -100,10 +102,14 @@ def _g1_arm(
         model_path=_G1_URDF,
         joint_names=urdf_joints,
         end_effector_link=end_effector_link,
-        # Pelvis = the floating base.  /odom publishes pelvis pose
-        # directly, so a world→pelvis transform is just the inverse
-        # odom — no need to chain through the waist's URDF transforms.
+        grasp_offset_xyz=grasp_offset_xyz,
+        # Pelvis is the floating base.  weld_base=False leaves it as a
+        # 6-DOF free body in Drake; G1ManipulationModule pushes the live
+        # /odom pose into the plant before each plan, so Drake's world
+        # frame stays aligned with MuJoCo's world frame.  No frame
+        # transforms are needed at the IK / obstacle / EE-pose layers.
         base_link="pelvis",
+        weld_base=False,
         package_paths={"unitree_g1": _G1_PACKAGE_DIR},
         joint_name_mapping=coord_to_urdf,
         coordinator_task_name=f"traj_{name}",
@@ -111,9 +117,7 @@ def _g1_arm(
         # collision pipeline rejects (MakeConvexHull only takes .obj /
         # .vtk / .gltf).  auto-convert at parse time.
         auto_convert_meshes=True,
-        # Stationary base; relative to the robot's torso. If the WBC
-        # walks the robot, IK targets need to be re-expressed from
-        # world to torso first — out of scope for this first pass.
+        # Required by the schema even though weld_base=False ignores it.
         base_pose=PoseStamped(
             position=Vector3(0.0, 0.0, 0.0),
             orientation=Quaternion(0.0, 0.0, 0.0, 1.0),
@@ -122,6 +126,16 @@ def _g1_arm(
         max_acceleration=2.5,
         # Home pose: zero everywhere (matches ARM_DEFAULT_POSE).
         home_joints=[0.0] * len(urdf_joints),
+        # The G1 URDF's shoulder_yaw_link mesh extends back into the
+        # torso area; at zero joint position the meshes overlap by a
+        # few mm and Drake reports a constant penetration that blocks
+        # every plan with COLLISION_AT_START. These pairs are NOT real
+        # — they're URDF mesh artifacts of the structural connection
+        # between torso and shoulder.
+        collision_exclusion_pairs=[
+            ("torso_link", f"{side}_shoulder_yaw_link"),
+            ("torso_link", f"{side}_shoulder_roll_link"),
+        ],
     )
 
     task = TaskConfig(
@@ -134,14 +148,36 @@ def _g1_arm(
     return G1ArmCatalogEntry(name=name, robot_model_config=rmc, task_config=task)
 
 
+# Calibrated grasp-center offsets from each wrist_yaw_link's origin.
+# Cribbed from Matrix's hand_frames.py (palm_offset + grasp_center_offset),
+# which were measured against the same Unitree G1 mesh.  The wrist_yaw link
+# itself sits ~13 cm behind the palm grasp point, so without these offsets
+# IK loses 13 cm of effective reach and aims at the wrist instead of where
+# the fingers actually close.
+_LEFT_GRASP_CENTER_FROM_WRIST_YAW = (0.12, -0.05, 0.0)
+_RIGHT_GRASP_CENTER_FROM_WRIST_YAW = (0.12, 0.05, 0.0)
+
+
 def g1_left_arm(name: str = "left_arm") -> G1ArmCatalogEntry:
     """Default name "left_arm" rather than "g1_left_arm" because LLMs reach
     for the natural English name first when the user says "the left arm"."""
-    return _g1_arm(name, _LEFT_ARM_JOINT_PAIRS, "left_wrist_yaw_link")
+    return _g1_arm(
+        name,
+        _LEFT_ARM_JOINT_PAIRS,
+        "left_wrist_yaw_link",
+        grasp_offset_xyz=_LEFT_GRASP_CENTER_FROM_WRIST_YAW,
+        side="left",
+    )
 
 
 def g1_right_arm(name: str = "right_arm") -> G1ArmCatalogEntry:
-    return _g1_arm(name, _RIGHT_ARM_JOINT_PAIRS, "right_wrist_yaw_link")
+    return _g1_arm(
+        name,
+        _RIGHT_ARM_JOINT_PAIRS,
+        "right_wrist_yaw_link",
+        grasp_offset_xyz=_RIGHT_GRASP_CENTER_FROM_WRIST_YAW,
+        side="right",
+    )
 
 
 __all__ = ["G1ArmCatalogEntry", "g1_left_arm", "g1_right_arm"]

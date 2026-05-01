@@ -12,26 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""G1-aware ManipulationModule that does world↔pelvis frame translation.
+"""G1-aware ManipulationModule that keeps Drake's pelvis aligned with /odom.
 
-Drake's IK is built around a stationary base — the URDF's ``base_link``
-gets welded at ``base_pose`` (identity for us) and the planner solves
-in that local frame.  G1's pelvis lives at whatever world position the
-floating base settles at, not at the origin, so target poses the agent
-expresses in MuJoCo-world coordinates need to be transformed into
-pelvis-local coordinates before they reach the IK.
-
-This subclass keeps the parent's @skill surface but pre-rotates the
-incoming target by the inverse of the live ``/odom`` pose, and rotates
-the EE pose Drake returns back into world frame for the agent.
-
-Caveats still standing:
-- Waist joints (yaw/roll/pitch) are owned by GR00T WBC and not
-  reflected in Drake's model — Drake assumes waist=0.  Small error
-  while standing still, larger if the WBC actively tilts the torso.
-- Orientation overrides on ``move_to_pose`` are still passed through
-  in pelvis-yaw frame; the user/agent should reason in
-  pelvis-yaw-aligned coordinates if they specify roll/pitch/yaw.
+The G1 catalog uses ``weld_base=False`` so Drake treats the pelvis as a
+6-DOF floating body.  Before each Cartesian plan we push the latest
+``/odom`` pose into Drake via ``WorldSpec.set_floating_base_pose`` —
+that way Drake's world frame matches MuJoCo's world frame and the
+parent ``move_to_pose`` / ``pick`` / ``refresh_obstacles`` paths can use
+world coordinates throughout (no per-skill frame conversions).
 """
 
 from __future__ import annotations
@@ -39,27 +27,26 @@ from __future__ import annotations
 import threading
 from typing import Any
 
-import numpy as np
 from reactivex.disposable import Disposable
 
 from dimos.agents.annotation import skill
 from dimos.core.core import rpc
 from dimos.core.stream import In
-from dimos.manipulation.manipulation_module import ManipulationModule
+from dimos.manipulation.pick_and_place_module import PickAndPlaceModule
 from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
 from dimos.utils.logging_config import setup_logger
 
 logger = setup_logger()
 
 
-class G1ManipulationModule(ManipulationModule):
-    """ManipulationModule that uses /odom to put IK targets in world frame.
+class G1ManipulationModule(PickAndPlaceModule):
+    """PickAndPlaceModule that syncs Drake's floating-base pelvis to /odom.
 
-    Inherits every ``@skill`` method from ManipulationModule.  Only
-    ``move_to_pose`` and ``get_robot_state`` are overridden because
-    they're the ones that touch Cartesian space; ``move_to_joints``,
-    ``go_home`` etc. work on raw joint values and don't care about
-    the base frame.
+    All Cartesian skills inherited from PickAndPlaceModule (move_to_pose,
+    pick, place, drop_on, refresh_obstacles, look, scan_objects, …) work
+    unmodified — they all consume world-frame coordinates and Drake's
+    plant has the pelvis welded at the live /odom pose for the duration
+    of each plan.
     """
 
     odom: In[PoseStamped]
@@ -67,10 +54,16 @@ class G1ManipulationModule(ManipulationModule):
     _latest_odom: PoseStamped | None
     _odom_lock: threading.Lock
 
-    def __init__(self, **kwargs: Any) -> None:
+    def __init__(self, *, sim_mjcf_path: str | None = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._latest_odom = None
         self._odom_lock = threading.Lock()
+        # Easy-mode "ground truth" object lookup: when set, lets the
+        # reach_for_sim_object skill pull body world poses straight from
+        # the MJCF instead of going through perception.  Lazy-loaded.
+        self._sim_mjcf_path = sim_mjcf_path
+        self._sim_model: Any = None
+        self._sim_data: Any = None
 
     @rpc
     def start(self) -> None:
@@ -84,156 +77,125 @@ class G1ManipulationModule(ManipulationModule):
     def _on_odom(self, msg: PoseStamped) -> None:
         with self._odom_lock:
             self._latest_odom = msg
+        # Sync pelvis into Drake on every odom tick so get_ee_pose
+        # (used by go_init's safe-waypoint and any external query)
+        # sees a live pose.  The set_floating_base_pose itself is
+        # cheap; what was killing IK was the meshcat publish it
+        # used to trigger — that's now gone (visualization will
+        # update on the next plan).
+        self._sync_floating_base()
 
-    # ------------------------------------------------------------------
-    # Frame conversions
-    # ------------------------------------------------------------------
-    def _world_to_pelvis(self, x: float, y: float, z: float) -> tuple[float, float, float]:
-        """Translate a world-frame point into pelvis-local coordinates."""
+    def _begin_planning(self, robot_name: Any = None) -> Any:
+        self._sync_floating_base()
+        return super()._begin_planning(robot_name)
+
+    def _sync_floating_base(self) -> None:
+        if self._world_monitor is None:
+            return
         with self._odom_lock:
             odom = self._latest_odom
         if odom is None:
-            return (x, y, z)
-        R = _quat_to_rotation(
-            odom.orientation.w,
-            odom.orientation.x,
-            odom.orientation.y,
-            odom.orientation.z,
-        )
-        t = np.array([odom.position.x, odom.position.y, odom.position.z])
-        p = np.array([x, y, z])
-        p_local = R.T @ (p - t)
-        return float(p_local[0]), float(p_local[1]), float(p_local[2])
-
-    def _pelvis_to_world(self, x: float, y: float, z: float) -> tuple[float, float, float]:
-        """Translate a pelvis-local point into world coordinates."""
-        with self._odom_lock:
-            odom = self._latest_odom
-        if odom is None:
-            return (x, y, z)
-        R = _quat_to_rotation(
-            odom.orientation.w,
-            odom.orientation.x,
-            odom.orientation.y,
-            odom.orientation.z,
-        )
-        t = np.array([odom.position.x, odom.position.y, odom.position.z])
-        p = np.array([x, y, z])
-        p_world = R @ p + t
-        return float(p_world[0]), float(p_world[1]), float(p_world[2])
+            return
+        world = self._world_monitor.world
+        setter = getattr(world, "set_floating_base_pose", None)
+        if setter is None:
+            return
+        for robot_name, (robot_id, _, _) in self._robots.items():
+            try:
+                setter(robot_id, odom)
+            except Exception as e:
+                logger.debug(f"set_floating_base_pose failed for {robot_name}: {e}")
 
     # ------------------------------------------------------------------
-    # Skill overrides
+    # Easy mode: bypass perception, use MJCF ground-truth body positions
     # ------------------------------------------------------------------
+    def _ensure_sim_model(self) -> bool:
+        """Lazy-load the MJCF model used for ground-truth lookups."""
+        if self._sim_model is not None:
+            return True
+        if not self._sim_mjcf_path:
+            return False
+        try:
+            import mujoco
+        except ImportError:
+            logger.warning("mujoco not installed; reach_for_sim_object disabled")
+            return False
+        try:
+            # The G1 MJCF references mesh STL/OBJs by bare filename
+            # (Menagerie convention).  MujocoSimModule injects the
+            # bytes via dimos.simulation.mujoco.model.get_assets — do
+            # the same here so from_xml_string can find them without
+            # depending on the working directory.
+            from dimos.simulation.mujoco.model import get_assets
+
+            assets = get_assets()
+            with open(self._sim_mjcf_path) as f:
+                xml_str = f.read()
+            self._sim_model = mujoco.MjModel.from_xml_string(xml_str, assets=assets)
+            self._sim_data = mujoco.MjData(self._sim_model)
+            mujoco.mj_forward(self._sim_model, self._sim_data)
+            logger.info(f"Sim ground-truth model loaded from {self._sim_mjcf_path}")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to load sim model: {e}")
+            return False
+
     @skill
-    def move_to_pose(
+    def point_at_sim_object(
         self,
-        x: float,
-        y: float,
-        z: float,
-        roll: float | None = None,
-        pitch: float | None = None,
-        yaw: float | None = None,
+        body_name: str = "manip_cube",
         robot_name: str | None = None,
     ) -> str:
-        """Move the robot end-effector to a target pose **in world frame**.
+        """Easy-mode: point the arm at a sim object using its MJCF ground-truth pose.
 
-        Coordinates are in the MuJoCo world frame (meters), not robot-local.
-        For G1: the robot's pelvis is the floating base; this skill takes
-        the live /odom and transforms (x, y, z) into pelvis-local before
-        invoking IK.
-
-        roll/pitch/yaw, if given, are interpreted in the pelvis's
-        yaw-aligned frame for now (the planner doesn't know about the
-        floating-base rotation otherwise).
+        Same MJCF-bypass-perception approach as ``reach_for_sim_object``,
+        but uses the (out-of-reach-tolerant) ``point_at`` skill instead
+        of trying to grasp.  Useful for verifying the arm-aiming pipeline
+        when the object is too far for the arm to reach.
 
         Args:
-            x: Target X position in world frame (meters).
-            y: Target Y position in world frame (meters).
-            z: Target Z position in world frame (meters).
-            roll: Optional target roll in pelvis yaw-frame (radians).
-            pitch: Optional target pitch in pelvis yaw-frame (radians).
-            yaw: Optional target yaw in pelvis yaw-frame (radians).
-            robot_name: Robot to move (only needed for multi-arm setups).
+            body_name: MJCF body to point at (default 'manip_cube').
+            robot_name: Robot to use (only needed for multi-arm setups).
         """
-        x_l, y_l, z_l = self._world_to_pelvis(x, y, z)
+        if not self._ensure_sim_model():
+            return "Easy mode unavailable: sim_mjcf_path not configured."
+        import mujoco
 
-        # Auto-pick which arm to use when the agent doesn't specify.
-        # Pelvis-local +Y is the robot's left side; left-arm shoulder is
-        # roughly at +Y so targets there are in its natural workspace,
-        # right-arm targets at -Y.  Mirror to whichever side fits.
-        if not robot_name:
-            available = list(self._robots.keys())
-            if len(available) == 1:
-                robot_name = available[0]
-            elif "left_arm" in available and "right_arm" in available:
-                robot_name = "left_arm" if y_l >= 0 else "right_arm"
-            elif available:
-                robot_name = available[0]
-
-        logger.info(
-            f"G1Manipulation move_to_pose: world=({x:.3f}, {y:.3f}, {z:.3f}) -> "
-            f"pelvis=({x_l:.3f}, {y_l:.3f}, {z_l:.3f}) on {robot_name}"
-        )
-        return super().move_to_pose(  # type: ignore[no-any-return]
-            x=x_l, y=y_l, z=z_l, roll=roll, pitch=pitch, yaw=yaw, robot_name=robot_name
-        )
+        body_id = mujoco.mj_name2id(self._sim_model, mujoco.mjtObj.mjOBJ_BODY, body_name)
+        if body_id < 0:
+            return f"Body '{body_name}' not found in MJCF."
+        pos = self._sim_data.xpos[body_id]
+        x, y, z = float(pos[0]), float(pos[1]), float(pos[2])
+        logger.info(f"point_at_sim_object('{body_name}') → world ({x:.3f}, {y:.3f}, {z:.3f})")
+        return self.point_at(x=x, y=y, z=z, robot_name=robot_name)
 
     @skill
-    def get_robot_state(self, robot_name: str | None = None) -> str:
-        """Get current robot state with EE pose **in world frame**.
+    def reach_for_sim_object(
+        self,
+        body_name: str = "manip_cube",
+        robot_name: str | None = None,
+    ) -> str:
+        """Easy-mode: reach for a sim object using its MJCF ground-truth pose.
 
-        If ``robot_name`` is omitted, reports all configured arms.
+        Bypasses the perception pipeline (YOLO-E detection, RGBD
+        back-projection, frame transforms) and instead reads the
+        target body's world pose directly from the MuJoCo model.  Use
+        this to isolate manipulation issues from perception issues —
+        if this works but ``move_to_pose`` after ``detect`` doesn't,
+        the bug is in perception.
 
-        Joint positions are absolute (no transform).  EE pose is
-        translated from pelvis-local (Drake's frame) to world via the
-        live /odom.
+        Args:
+            body_name: MJCF body to reach for (default 'manip_cube').
+            robot_name: Robot to use (only needed for multi-arm setups).
         """
-        if not robot_name:
-            names = list(self._robots.keys())
-            if not names:
-                return "No robots configured."
-            sections = [f"=== {n} ===\n{self._describe_one(n)}" for n in names]
-            sections.append(f"\nState: {self.get_state()}")
-            return "\n\n".join(sections)
-        return self._describe_one(robot_name) + f"\n\nState: {self.get_state()}"
+        if not self._ensure_sim_model():
+            return "Easy mode unavailable: sim_mjcf_path not configured."
+        import mujoco
 
-    def _describe_one(self, robot_name: str) -> str:
-        lines: list[str] = []
-        joints = self.get_current_joints(robot_name)
-        if joints is not None:
-            lines.append(f"Joints: [{', '.join(f'{j:.3f}' for j in joints)}]")
-        else:
-            lines.append("Joints: unavailable (no state received)")
-
-        ee_pose = self.get_ee_pose(robot_name)
-        if ee_pose is not None:
-            wx, wy, wz = self._pelvis_to_world(
-                ee_pose.position.x, ee_pose.position.y, ee_pose.position.z
-            )
-            lines.append(f"EE pose (world): ({wx:.4f}, {wy:.4f}, {wz:.4f})")
-            lines.append(
-                f"  pelvis-local: ({ee_pose.position.x:.4f}, "
-                f"{ee_pose.position.y:.4f}, {ee_pose.position.z:.4f})"
-            )
-        else:
-            lines.append("EE pose: unavailable")
-
-        gripper_pos = self.get_gripper(robot_name)
-        if gripper_pos is not None:
-            lines.append(f"Gripper: {gripper_pos:.3f}m")
-        else:
-            lines.append("Gripper: not configured")
-        return "\n".join(lines)
-
-
-def _quat_to_rotation(w: float, x: float, y: float, z: float) -> np.ndarray:
-    """Quaternion (w, x, y, z) → 3x3 rotation matrix."""
-    return np.array(
-        [
-            [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
-            [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
-            [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
-        ],
-        dtype=np.float64,
-    )
+        body_id = mujoco.mj_name2id(self._sim_model, mujoco.mjtObj.mjOBJ_BODY, body_name)
+        if body_id < 0:
+            return f"Body '{body_name}' not found in MJCF."
+        pos = self._sim_data.xpos[body_id]
+        x, y, z = float(pos[0]), float(pos[1]), float(pos[2])
+        logger.info(f"reach_for_sim_object('{body_name}') → world ({x:.3f}, {y:.3f}, {z:.3f})")
+        return self.move_to_pose(x=x, y=y, z=z, robot_name=robot_name)
