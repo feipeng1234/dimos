@@ -129,9 +129,9 @@ def test_dir_lists_modules(running_app):
     assert "stop" in d
 
 
-def test_restart_no_reload(running_app):
-    running_app.restart(StressTestModule, reload_source=False)
-    result = running_app.skills.ping()
+def test_restart_no_reload(running_app_fresh):
+    running_app_fresh.restart(StressTestModule, reload_source=False)
+    result = running_app_fresh.skills.ping()
     assert result == "pong"
 
 
@@ -140,25 +140,25 @@ def test_skills_accessible(running_app):
     assert "ping" in dir(skills)
 
 
-def test_connected_run_by_name_adds_module(running_app, client):
-    client.run("mcp-server")
-    assert "McpServer" in client._source.list_module_names()
-    assert "McpServer" in running_app._source.list_module_names()
+def test_connected_run_by_name_adds_module(running_app_fresh, client_fresh):
+    client_fresh.run("mcp-server")
+    assert "McpServer" in client_fresh._source.list_module_names()
+    assert "McpServer" in running_app_fresh._source.list_module_names()
 
 
-def test_connected_run_by_class_adds_module(client):
-    client.run(McpServer)
-    assert "McpServer" in client._source.list_module_names()
+def test_connected_run_by_class_adds_module(client_fresh):
+    client_fresh.run(McpServer)
+    assert "McpServer" in client_fresh._source.list_module_names()
 
 
-def test_connected_run_by_blueprint_object(client):
-    client.run(McpServer.blueprint())
-    assert "McpServer" in client._source.list_module_names()
+def test_connected_run_by_blueprint_object(client_fresh):
+    client_fresh.run(McpServer.blueprint())
+    assert "McpServer" in client_fresh._source.list_module_names()
 
 
-def test_connected_restart_no_reload(client):
-    client.restart(StressTestModule, reload_source=False)
-    assert client.skills.ping() == "pong"
+def test_connected_restart_no_reload(client_fresh):
+    client_fresh.restart(StressTestModule, reload_source=False)
+    assert client_fresh.skills.ping() == "pong"
 
 
 def test_connected_repr(client):

@@ -39,7 +39,8 @@ SELF_HOSTED_BLUEPRINTS = frozenset(
     }
 )
 
-UBUNTU_BLUEPRINTS = frozenset(all_blueprints) - SELF_HOSTED_BLUEPRINTS
+UBUNTU_BLUEPRINTS = sorted(set(all_blueprints) - SELF_HOSTED_BLUEPRINTS)
+SELF_HOSTED_BLUEPRINTS = sorted(SELF_HOSTED_BLUEPRINTS)
 
 
 def _check_blueprint(blueprint_name: str) -> None:

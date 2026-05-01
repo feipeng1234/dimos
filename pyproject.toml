@@ -309,6 +309,7 @@ tests = [
     "pytest-mock==3.15.0",
     "pytest-env==1.1.5",
     "pytest-timeout==2.4.0",
+    "pytest-xdist>=3.5.0",
     "coverage>=7.0",
     "requests-mock==1.12.1",
 
@@ -379,6 +380,10 @@ tests = [
     "tensorboard==2.20.0",
     "xacro",
     "pygame>=2.6.1",
+    "lap>=0.5.12",
+    "langchain-chroma>=1,<2",
+    "langchain-openai>=1,<2",
+    "ollama>=0.6.0",
 ]
 
 # Full CI test group for the self-hosted runner. Inherits `tests` and adds
@@ -397,6 +402,7 @@ conflicts = [
     [{ extra = "unitree" }, { extra = "unitree-dds" }],
     [{ extra = "dds" }, { extra = "unitree-dds" }],
 ]
+default-groups = ["tests"]
 
 [tool.ruff]
 line-length = 100
@@ -507,7 +513,7 @@ env = [
   "GOOGLE_MAPS_API_KEY=AIzafake_google_key",
   "PYTHONWARNINGS=ignore:cupyx.jit.rawkernel is experimental:FutureWarning",
 ]
-addopts = "-v -r a -p no:warnings -p no:launch_testing -p no:launch_ros --import-mode=importlib --color=yes -m 'not (tool or self_hosted or mujoco)'"
+addopts = "--dist=loadfile -v -r a -p no:warnings -p no:launch_testing -p no:launch_ros --import-mode=importlib --color=yes -m 'not (tool or self_hosted or mujoco)'"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 
