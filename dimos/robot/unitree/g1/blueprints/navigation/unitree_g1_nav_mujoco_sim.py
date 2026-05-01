@@ -81,7 +81,7 @@ unitree_g1_nav_mujoco_sim = (
         G1SimConnection.blueprint(),
         MujocoPoseToOdometryAdapter.blueprint(),
         create_nav_stack(
-            use_simple_planner=True,
+            use_simple_planner=False,
             vehicle_height=G1_VEHICLE_HEIGHT,
             terrain_analysis={
                 "obstacle_height_threshold": 0.1,
@@ -134,7 +134,13 @@ unitree_g1_nav_mujoco_sim = (
         n_workers=8,
         robot_model="unitree_g1",
         simulation=True,
-        mujoco_room="office1",
+        # Multi-room HSSD-derived house scene (bedroom + bathroom).
+        # See data/.lfs/hssd_house.tar.gz.  Override at the CLI with
+        # --mujoco-room office1 to fall back to the original single-room
+        # office, or --mujoco-room scene_empty for a featureless plane.
+        mujoco_room="hssd_house",
+        # Spawn near bedroom centre — well clear of furniture in scene_186.
+        mujoco_start_pos="2.5, 2.0",
     )
 )
 
