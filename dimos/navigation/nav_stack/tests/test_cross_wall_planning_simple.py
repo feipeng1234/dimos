@@ -36,6 +36,7 @@ from dimos.navigation.nav_stack.tests.conftest import (
     CROSS_WALL_TERRAIN_ANALYSIS,
     run_cross_wall_test,
 )
+from dimos.robot.unitree.g1.config import G1_VEHICLE_HEIGHT
 from dimos.simulation.unity.module import UnityBridgeModule
 
 pytestmark = [pytest.mark.slow]
@@ -58,7 +59,7 @@ class TestCrossWallPlanningSimple:
                 UnityBridgeModule.blueprint(
                     unity_binary="",
                     unity_scene="home_building_1",
-                    vehicle_height=1.24,
+                    vehicle_height=G1_VEHICLE_HEIGHT,
                 ),
                 create_nav_stack(
                     use_simple_planner=True,

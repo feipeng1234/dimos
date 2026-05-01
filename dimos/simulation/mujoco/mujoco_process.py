@@ -16,6 +16,7 @@
 
 import base64
 import json
+import os
 import pickle
 import signal
 import sys
@@ -45,6 +46,18 @@ from dimos.simulation.mujoco.shared_memory import ShmReader
 from dimos.utils.logging_config import setup_logger
 
 logger = setup_logger()
+
+
+def _auto_detect_headless() -> bool:
+    """Best-effort guess at whether a GUI viewer can run.
+
+    Linux without ``$DISPLAY`` (or ``$WAYLAND_DISPLAY``) → headless.
+    macOS we assume Cocoa is available; users in genuinely headless
+    macOS contexts should set ``mujoco_headless=True`` explicitly.
+    """
+    if sys.platform.startswith("linux"):
+        return not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+    return False
 
 
 class MockController:
@@ -221,27 +234,28 @@ def _run_simulation(config: GlobalConfig, shm: ShmReader) -> None:
         if time_until_next_step > 0:
             time.sleep(time_until_next_step)
 
-    if config.mujoco_headless:
-        # Offscreen mode: no GUI viewer, useful for CI / headless macOS / nodisplay Linux.
-        try:
+    headless = (
+        config.mujoco_headless if config.mujoco_headless is not None else _auto_detect_headless()
+    )
+    try:
+        if headless:
+            # Offscreen mode: no GUI viewer.  Required for CI, headless
+            # macOS, and any Linux box without a display.
             while not shm.should_stop():
                 _step_once(m_viewer=None)
-        finally:
-            person_position_controller.stop()
-    else:
-        with viewer.launch_passive(
-            model, data, show_left_ui=False, show_right_ui=False
-        ) as m_viewer:
-            m_viewer.cam.lookat = config.mujoco_camera_position_float[0:3]
-            m_viewer.cam.distance = config.mujoco_camera_position_float[3]
-            m_viewer.cam.azimuth = config.mujoco_camera_position_float[4]
-            m_viewer.cam.elevation = config.mujoco_camera_position_float[5]
+        else:
+            with viewer.launch_passive(
+                model, data, show_left_ui=False, show_right_ui=False
+            ) as m_viewer:
+                m_viewer.cam.lookat = config.mujoco_camera_position_float[0:3]
+                m_viewer.cam.distance = config.mujoco_camera_position_float[3]
+                m_viewer.cam.azimuth = config.mujoco_camera_position_float[4]
+                m_viewer.cam.elevation = config.mujoco_camera_position_float[5]
 
-            try:
                 while m_viewer.is_running() and not shm.should_stop():
                     _step_once(m_viewer=m_viewer)
-            finally:
-                person_position_controller.stop()
+    finally:
+        person_position_controller.stop()
 
 
 if __name__ == "__main__":

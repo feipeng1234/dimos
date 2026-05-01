@@ -50,7 +50,7 @@ from dimos.navigation.nav_stack.main import create_nav_stack, nav_stack_rerun_co
 from dimos.robot.unitree.g1.blueprints.navigation._mujoco_pose_adapter import (
     MujocoPoseToOdometryAdapter,
 )
-from dimos.robot.unitree.g1.config import G1_LOCAL_PLANNER_PRECOMPUTED_PATHS
+from dimos.robot.unitree.g1.config import G1_LOCAL_PLANNER_PRECOMPUTED_PATHS, G1_VEHICLE_HEIGHT
 from dimos.robot.unitree.g1.g1_rerun import g1_static_robot
 from dimos.robot.unitree.g1.mujoco_sim import G1SimConnection
 from dimos.visualization.vis_module import vis_module
@@ -75,15 +75,13 @@ def _rerun_blueprint() -> Any:
     )
 
 
-VEHICLE_HEIGHT = 1.24
-
 unitree_g1_nav_mujoco_sim = (
     autoconnect(
         G1SimConnection.blueprint(),
         MujocoPoseToOdometryAdapter.blueprint(),
         create_nav_stack(
             use_simple_planner=True,
-            vehicle_height=VEHICLE_HEIGHT,
+            vehicle_height=G1_VEHICLE_HEIGHT,
             terrain_analysis={
                 "obstacle_height_threshold": 0.1,
                 "ground_height_threshold": 0.05,
@@ -128,7 +126,12 @@ unitree_g1_nav_mujoco_sim = (
             (G1SimConnection, "lidar", "registered_scan"),
         ]
     )
-    .global_config(n_workers=8, robot_model="unitree_g1", simulation=True)
+    .global_config(
+        n_workers=8,
+        robot_model="unitree_g1",
+        simulation=True,
+        mujoco_room="office1",
+    )
 )
 
 

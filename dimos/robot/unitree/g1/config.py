@@ -30,6 +30,11 @@ from dimos.utils.data import LfsPath
 # probably only needs to be regenerated on robots that are notably different than the g1 (the go2 in rage mode probably needs different local planning paths)
 G1_LOCAL_PLANNER_PRECOMPUTED_PATHS = LfsPath("unitree_g1_local_planner_precomputed_paths")
 
+# Standing height of the G1 used for nav-stack terrain config + the unity
+# bridge's vehicle_height. Centralised here so the value isn't duplicated
+# across blueprints/tests.
+G1_VEHICLE_HEIGHT = 1.24
+
 G1 = RobotConfig(
     name="unitree_g1",
     model_path=Path(__file__).parent / "g1.urdf",

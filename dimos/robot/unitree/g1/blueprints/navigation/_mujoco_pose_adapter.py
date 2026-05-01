@@ -49,12 +49,17 @@ from dimos.navigation.nav_stack.frames import FRAME_BODY, FRAME_ODOM
 
 
 class MujocoPoseToOdometryAdapterConfig(ModuleConfig):
-    odom_frame_id: str = FRAME_ODOM
-    body_frame_id: str = FRAME_BODY
+    pass
 
 
 class MujocoPoseToOdometryAdapter(Module):
-    """Convert mujoco PoseStamped → nav_stack-conventioned Odometry + TF."""
+    """Convert mujoco PoseStamped → nav_stack-conventioned Odometry + TF.
+
+    Frame names are intentionally hardcoded to ``FRAME_ODOM`` / ``FRAME_BODY``
+    rather than being config knobs: nav_stack consumers (SimplePlanner,
+    FarPlanner, MovementManager, TerrainAnalysis) hardcode-search for those
+    exact frame strings, so any other choice would silently break TF lookups.
+    """
 
     config: MujocoPoseToOdometryAdapterConfig
 
@@ -71,11 +76,14 @@ class MujocoPoseToOdometryAdapter(Module):
         super().stop()
 
     def _on_pose(self, msg: PoseStamped) -> None:
+        # Twist fields stay zero — the mujoco G1 connection doesn't expose
+        # linear/angular velocity.  Downstream PathFollower / LocalPlanner
+        # treat absence of twist as zero, which is correct here.
         self.odometry.publish(
             Odometry(
                 ts=msg.ts,
-                frame_id=self.config.odom_frame_id,
-                child_frame_id=self.config.body_frame_id,
+                frame_id=FRAME_ODOM,
+                child_frame_id=FRAME_BODY,
                 pose=Pose(position=msg.position, orientation=msg.orientation),
             )
         )
@@ -84,8 +92,8 @@ class MujocoPoseToOdometryAdapter(Module):
             Transform(
                 translation=msg.position,
                 rotation=msg.orientation,
-                frame_id=self.config.odom_frame_id,
-                child_frame_id=self.config.body_frame_id,
+                frame_id=FRAME_ODOM,
+                child_frame_id=FRAME_BODY,
                 ts=msg.ts,
             )
         )

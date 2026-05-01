@@ -43,7 +43,7 @@ from typing import Any
 from dimos.core.coordination.blueprints import autoconnect
 from dimos.core.global_config import global_config
 from dimos.navigation.nav_stack.main import create_nav_stack, nav_stack_rerun_config
-from dimos.robot.unitree.g1.config import G1_LOCAL_PLANNER_PRECOMPUTED_PATHS
+from dimos.robot.unitree.g1.config import G1_LOCAL_PLANNER_PRECOMPUTED_PATHS, G1_VEHICLE_HEIGHT
 from dimos.robot.unitree.g1.g1_rerun import g1_static_robot
 from dimos.simulation.unity.module import UnityBridgeModule
 from dimos.visualization.vis_module import vis_module
@@ -68,17 +68,16 @@ def _rerun_blueprint() -> Any:
     )
 
 
-vehicle_height = 1.24
 unitree_g1_nav_sim = (
     autoconnect(
         UnityBridgeModule.blueprint(
             unity_binary="",
             unity_scene="home_building_1",
-            vehicle_height=vehicle_height,
+            vehicle_height=G1_VEHICLE_HEIGHT,
         ),
         create_nav_stack(
             use_simple_planner=True,
-            vehicle_height=vehicle_height,
+            vehicle_height=G1_VEHICLE_HEIGHT,
             terrain_analysis={
                 "obstacle_height_threshold": 0.1,
                 "ground_height_threshold": 0.05,

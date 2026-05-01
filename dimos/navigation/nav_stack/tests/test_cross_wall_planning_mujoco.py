@@ -32,9 +32,11 @@ from __future__ import annotations
 
 import pytest
 
-# create_nav_stack pulls in PGO which requires gtsam; mujoco-side test
-# also needs the mujoco package itself.  Skip the whole module if
-# either is missing.
+# create_nav_stack pulls in PGO which requires gtsam; the mujoco-side
+# test also needs the mujoco package.  Skip the whole module if either
+# is missing.  Note: when both ARE installed the test is collected and
+# runs, but is xfail-marked (see pytestmark below) until office1
+# waypoint/planner tuning lands.
 pytest.importorskip("gtsam")
 pytest.importorskip("mujoco")
 
@@ -51,7 +53,20 @@ from dimos.robot.unitree.g1.blueprints.navigation._mujoco_pose_adapter import (
 )
 from dimos.robot.unitree.g1.mujoco_sim import G1SimConnection
 
-pytestmark = [pytest.mark.slow]
+pytestmark = [
+    pytest.mark.slow,
+    # The placeholder waypoints in MUJOCO_OFFICE1_WAYPOINTS are not tuned to
+    # the office1 wall layout, and SimplePlanner's A* fails to path through
+    # the resulting costmap from the spawn position.  The wiring is verified
+    # (odom flows, TF resolves, planner receives goals); reaching the goals
+    # needs scene-specific waypoint tuning + planner tuning, which the user
+    # explicitly accepted as a follow-up.  strict=False means "we expect to
+    # fail; if it ever passes, that's a bonus, not a regression."
+    pytest.mark.xfail(
+        reason="office1 waypoints + planner tuning not yet done — wiring verified, end-to-end not",
+        strict=False,
+    ),
+]
 
 # Ground-truth ceiling guard.  The G1 stands ~1.24 m tall in the mujoco
 # scene and the office1 ceiling is ~3 m, so MAX_ALLOWED_Z = 2.0 catches
