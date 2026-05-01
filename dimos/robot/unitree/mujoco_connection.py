@@ -144,13 +144,28 @@ class MujocoConnection:
 
             self.process = subprocess.Popen(
                 [executable, str(LAUNCHER_PATH), config_pickle, shm_names_json],
-                stderr=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 env=env,
             )
 
         except Exception as e:
             self.shm_data.cleanup()
             raise RuntimeError(f"Failed to start MuJoCo subprocess: {e}") from e
+
+        # Stream subprocess stdout+stderr to the dimos logger.  Without
+        # this, mujoco's "Too many contacts" warnings, mjpython window
+        # failures, and any uncaught Python exceptions in
+        # mujoco_process.py get buffered into the pipe and never
+        # surface — making "the sim stopped after a second"-style
+        # failures impossible to debug from dimos logs.
+        log_thread = threading.Thread(
+            target=self._pump_subprocess_log,
+            name="mujoco-stderr-pump",
+            daemon=True,
+        )
+        log_thread.start()
+        self._stream_threads.append(log_thread)
 
         # Wait for process to be ready
         ready_timeout = 300.0
@@ -181,6 +196,32 @@ class MujocoConnection:
         # Timeout
         self.stop()
         raise RuntimeError("MuJoCo process failed to start (timeout)")
+
+    def _pump_subprocess_log(self) -> None:
+        """Mirror mujoco subprocess stdout+stderr into the dimos logger."""
+        proc = self.process
+        if proc is None or proc.stdout is None:
+            return
+        try:
+            for raw in iter(proc.stdout.readline, b""):
+                if not raw:
+                    break
+                line = raw.decode(errors="replace").rstrip()
+                if not line:
+                    continue
+                lowered = line.lower()
+                if "warning" in lowered or "error" in lowered or "fatal" in lowered:
+                    logger.warning(f"[mujoco] {line}")
+                else:
+                    logger.info(f"[mujoco] {line}")
+            # Stream closed.  If the subprocess died non-zero before the
+            # parent asked it to, surface that — otherwise the dimos
+            # process keeps running and looks frozen.
+            rc = proc.poll()
+            if rc is not None and rc != 0 and not self._is_cleaned_up:
+                logger.error(f"[mujoco] subprocess exited unexpectedly with code {rc}")
+        except Exception as exc:
+            logger.warning(f"mujoco-stderr-pump terminated: {exc}")
 
     def stop(self) -> None:
         if self._is_cleaned_up:
