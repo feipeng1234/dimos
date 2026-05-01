@@ -63,7 +63,7 @@ jobs:
       - name: Remove git LFS to avoid accidental large downloads
         run: sudo rm -f /usr/bin/git-lfs
       - name: Run tests
-        run: uv run pytest --numprocesses=auto --cov=dimos/ -m 'not (tool or self_hosted or mujoco)'
+        run: uv run pytest --numprocesses=auto --cov=dimos/ --junitxml=junit.xml -m 'not (tool or self_hosted or mujoco)'
       - name: Re-run the failing tests with maximum verbosity
         if: failure()
         env:
@@ -72,6 +72,8 @@ jobs:
         run: >-  # `exit 1` makes sure that the job remains red with flaky runs
           uv run pytest --no-cov -vvvvv --lf && exit 1
         shell: bash
+      - name: Combine coverage from subprocesses
+        run: uv run python -m coverage combine
       - name: Turn coverage into xml
         run: uv run python -m coverage xml
       - name: Upload coverage
@@ -121,7 +123,32 @@ jobs:
           git config --global --add safe.directory '*'
           git clean -ffdx -e .venv
       - name: Run tests
-        run: uv run pytest --cov=dimos/ -m '(self_hosted or skipif_no_ros) and not (tool or mujoco)'
+        run: uv run pytest --cov=dimos/ --junitxml=junit.xml -m '(self_hosted or skipif_no_ros) and not (tool or mujoco)'
+      - name: Re-run the failing tests with maximum verbosity
+        if: failure()
+        env:
+          COLOR: yes
+          AIOHTTP_NO_EXTENSIONS: ${{ matrix.no-extensions }}
+        run: >-  # `exit 1` makes sure that the job remains red with flaky runs
+          uv run pytest --no-cov -vvvvv --lf && exit 1
+        shell: bash
+      - name: Combine coverage from subprocesses
+        run: uv run python -m coverage combine
+      - name: Turn coverage into xml
+        run: uv run python -m coverage xml
+      - name: Upload coverage
+        uses: codecov/codecov-action@v6
+        with:
+          disable_search: true
+          fail_ci_if_error: true
+          files: ./coverage.xml
+          use_oidc: true
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v6
+        with:
+          report_type: test_results
+          use_oidc: true
       - name: Check disk space
         if: failure()
         run: |
