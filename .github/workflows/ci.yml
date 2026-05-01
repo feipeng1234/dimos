@@ -17,6 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read  # For checkout
+    env:
+      UV_NO_SYNC: "1"  # Disable installing default packages on `uv run`
 
     steps:
       - name: Checkout
