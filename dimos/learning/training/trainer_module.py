@@ -35,9 +35,9 @@ Wiring patterns:
 
 from __future__ import annotations
 
+from pathlib import Path
 import subprocess
 import threading
-from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel
@@ -45,7 +45,6 @@ from pydantic import BaseModel
 from dimos.core.core import rpc
 from dimos.core.module import Module, ModuleConfig
 from dimos.core.stream import In, Out
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Message types

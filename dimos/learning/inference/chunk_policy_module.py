@@ -30,7 +30,6 @@ CUDA into every install.
 from __future__ import annotations
 
 import threading
-from pathlib import Path
 from typing import Any
 
 from dimos.core.core import rpc

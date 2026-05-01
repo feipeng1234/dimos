@@ -78,9 +78,9 @@ class LearningMonitorModule(Module):
 
     def _on_train_progress(self, msg: TrainProgress) -> None:
         """Forward to enabled sinks. Routes by `msg.phase`:
-          - phase == "build": log dataset progress (episodes, samples)
-          - phase in {"train","eval"}: log loss curves (with EMA smoothing for rerun)
-          - other phases: log message line only.
+        - phase == "build": log dataset progress (episodes, samples)
+        - phase in {"train","eval"}: log loss curves (with EMA smoothing for rerun)
+        - other phases: log message line only.
         """
         raise NotImplementedError
 

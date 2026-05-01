@@ -51,9 +51,7 @@ learning_collect_quest_xarm7 = autoconnect(
     {
         ("buttons", Buttons): LCMTransport("/teleop/buttons", Buttons),
         ("color_image", Image): LCMTransport("/camera/color_image", Image),
-        ("status", EpisodeStatus): LCMTransport(
-            "/learning/episode_status", EpisodeStatus
-        ),
+        ("status", EpisodeStatus): LCMTransport("/learning/episode_status", EpisodeStatus),
     }
 )
 
@@ -68,9 +66,7 @@ learning_collect_quest_piper = autoconnect(
     {
         ("buttons", Buttons): LCMTransport("/teleop/buttons", Buttons),
         ("color_image", Image): LCMTransport("/camera/color_image", Image),
-        ("status", EpisodeStatus): LCMTransport(
-            "/learning/episode_status", EpisodeStatus
-        ),
+        ("status", EpisodeStatus): LCMTransport("/learning/episode_status", EpisodeStatus),
     }
 )
 
@@ -85,9 +81,7 @@ learning_collect_quest_xarm6 = autoconnect(
     {
         ("buttons", Buttons): LCMTransport("/teleop/buttons", Buttons),
         ("color_image", Image): LCMTransport("/camera/color_image", Image),
-        ("status", EpisodeStatus): LCMTransport(
-            "/learning/episode_status", EpisodeStatus
-        ),
+        ("status", EpisodeStatus): LCMTransport("/learning/episode_status", EpisodeStatus),
     }
 )
 
@@ -102,9 +96,7 @@ learning_collect_quest_dual = autoconnect(
     {
         ("buttons", Buttons): LCMTransport("/teleop/buttons", Buttons),
         ("color_image", Image): LCMTransport("/camera/color_image", Image),
-        ("status", EpisodeStatus): LCMTransport(
-            "/learning/episode_status", EpisodeStatus
-        ),
+        ("status", EpisodeStatus): LCMTransport("/learning/episode_status", EpisodeStatus),
     }
 )
 

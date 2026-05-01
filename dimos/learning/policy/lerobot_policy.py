@@ -25,14 +25,11 @@ importing this module does not require a CUDA install.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
 
 from dimos.learning.policy.base import Policy
-
-if TYPE_CHECKING:
-    pass  # lerobot / torch deferred to load()
 
 
 class LeRobotPolicy:

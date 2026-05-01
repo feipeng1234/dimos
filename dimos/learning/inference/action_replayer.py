@@ -26,7 +26,6 @@ below.
 
 from __future__ import annotations
 
-from collections import deque
 from dataclasses import dataclass
 
 from dimos.control.task import (

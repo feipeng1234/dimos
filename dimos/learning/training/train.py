@@ -119,8 +119,8 @@ def _write_dimos_meta(output_dir: Path, spec: DatasetSpec, dataset_path: Path) -
 def main() -> None:
     """CLI entrypoint:
 
-        python -m dimos.learning.training.train bc  <spec.yaml> --output <dir> [...]
-        python -m dimos.learning.training.train vla <spec.yaml> --output <dir> --pretrained <id> [...]
+    python -m dimos.learning.training.train bc  <spec.yaml> --output <dir> [...]
+    python -m dimos.learning.training.train vla <spec.yaml> --output <dir> --pretrained <id> [...]
     """
     raise NotImplementedError
 
