@@ -249,7 +249,7 @@ class ObjectSceneRegistrationModule(Module):
             prompts: List of text descriptions to detect.
 
         Returns:
-            str: Detected objects with their object_id (stable UUID), name, and 3D world position.
+            str: Detected objects with their object_id (stable UUID) and name.
 
         Example:
             detect(["cup"])
@@ -267,13 +267,7 @@ class ObjectSceneRegistrationModule(Module):
         if not detected:
             return "No objects detected."
 
-        obj_list = []
-        for obj in detected:
-            line = f"  - {obj['name']} (object_id='{obj['object_id']}', track_id={obj['track_id']})"
-            pos = obj.get("position")
-            if pos is not None:
-                line += f"  position=(x={pos['x']:.3f}, y={pos['y']:.3f}, z={pos['z']:.3f})"
-            obj_list.append(line)
+        obj_list = [f"  - {obj['name']} (object_id='{obj['object_id']}')" for obj in detected]
         return f"Detected {len(detected)} object(s):\n" + "\n".join(obj_list)
 
     @skill

@@ -25,6 +25,9 @@ from dimos.perception.detection.detectors.base import Detector
 from dimos.perception.detection.type.detection2d.imageDetections2D import ImageDetections2D
 from dimos.utils.data import get_data
 from dimos.utils.gpu_utils import is_cuda_available
+from dimos.utils.logging_config import setup_logger
+
+logger = setup_logger()
 
 
 class YoloePromptMode(Enum):
@@ -135,7 +138,24 @@ class Yoloe2DDetector(Detector):
             results = self.model.track(**track_kwargs)  # type: ignore[arg-type]
 
         detections = ImageDetections2D.from_ultralytics_result(image, results)
-        return self._apply_filters(image, detections)
+        if detections.detections:
+            image_area = max(image.width * image.height, 1)
+            raw_summary = ", ".join(
+                f"{getattr(det, 'name', '?')}@conf={getattr(det, 'confidence', 0):.2f}/area={det.bbox_2d_volume() / image_area:.2f}"
+                for det in detections.detections
+            )
+            logger.info(
+                f"Yoloe raw detections: {len(detections.detections)} [{raw_summary}] "
+                f"(conf>={self.conf}, max_area={self.max_area_ratio})"
+            )
+        filtered = self._apply_filters(image, detections)
+        if len(filtered.detections) != len(detections.detections):
+            logger.info(
+                f"Yoloe filters dropped {len(detections.detections) - len(filtered.detections)} of "
+                f"{len(detections.detections)} detections (max_area={self.max_area_ratio}, "
+                f"excluded={len(self.exclude_class_ids)})"
+            )
+        return filtered
 
     def _apply_filters(
         self,
