@@ -110,6 +110,10 @@ class TestCrossWallPlanningMujoco:
                 robot_model="unitree_g1",
                 simulation=True,
                 mujoco_room="office1",
+                # Run the mujoco physics loop without the interactive
+                # viewer so this test works in headless / CI / non-GUI
+                # macOS environments.
+                mujoco_headless=True,
             )
         )
 

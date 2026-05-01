@@ -12,13 +12,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""PoseStamped → nav_msgs/Odometry adapter for the MuJoCo G1 connection.
+"""MuJoCo G1 → nav_stack pose/odometry adapter.
 
-Nav stack expects `odometry: In[Odometry]` (nav_msgs.Odometry with twist),
-but `G1SimConnection.odom` publishes `PoseStamped`. This module bridges
-the two: it subscribes to a PoseStamped stream, wraps each pose in an
-Odometry message with zero twist (mujoco G1's connection doesn't expose
-linear/angular velocity), and republishes it.
+`G1SimConnection.odom` publishes `PoseStamped` with `frame_id="world"`
+and the connection itself publishes the TF `world → base_link`. The
+nav_stack consumers (SimplePlanner, FarPlanner, MovementManager,
+TerrainAnalysis) expect:
+
+- `odometry` as `nav_msgs/Odometry` with `frame_id=FRAME_ODOM` (`"odom"`)
+  and `child_frame_id=FRAME_BODY` (`"body"`).
+- A TF chain that includes `odom → body` so `(map, body)` and
+  `(odom, body)` lookups resolve.
+
+This module bridges both:
+- Subscribes to a PoseStamped stream, republishes as
+  `nav_msgs/Odometry` with the nav_stack frame names (twist zeroed —
+  the mujoco connection doesn't expose linear/angular velocity).
+- Publishes the matching `odom → body` Transform on the TF tree.
+
+PGO already publishes `map → odom` (loop-closure correction), so the
+chain `map → odom → body` becomes resolvable end-to-end.
 """
 
 from __future__ import annotations
@@ -30,15 +43,18 @@ from dimos.core.module import Module, ModuleConfig
 from dimos.core.stream import In, Out
 from dimos.msgs.geometry_msgs.Pose import Pose
 from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
+from dimos.msgs.geometry_msgs.Transform import Transform
 from dimos.msgs.nav_msgs.Odometry import Odometry
+from dimos.navigation.nav_stack.frames import FRAME_BODY, FRAME_ODOM
 
 
 class MujocoPoseToOdometryAdapterConfig(ModuleConfig):
-    child_frame_id: str = "base_link"
+    odom_frame_id: str = FRAME_ODOM
+    body_frame_id: str = FRAME_BODY
 
 
 class MujocoPoseToOdometryAdapter(Module):
-    """Convert PoseStamped (mujoco connection) → nav_msgs/Odometry (nav stack)."""
+    """Convert mujoco PoseStamped → nav_stack-conventioned Odometry + TF."""
 
     config: MujocoPoseToOdometryAdapterConfig
 
@@ -58,9 +74,19 @@ class MujocoPoseToOdometryAdapter(Module):
         self.odometry.publish(
             Odometry(
                 ts=msg.ts,
-                frame_id=msg.frame_id or "world",
-                child_frame_id=self.config.child_frame_id,
+                frame_id=self.config.odom_frame_id,
+                child_frame_id=self.config.body_frame_id,
                 pose=Pose(position=msg.position, orientation=msg.orientation),
+            )
+        )
+
+        self.tf.publish(
+            Transform(
+                translation=msg.position,
+                rotation=msg.orientation,
+                frame_id=self.config.odom_frame_id,
+                child_frame_id=self.config.body_frame_id,
+                ts=msg.ts,
             )
         )
 
