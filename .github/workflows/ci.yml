@@ -37,27 +37,28 @@ jobs:
         run: sudo rm -f /usr/bin/git-lfs
       - name: Run tests
         run: uv run pytest --numprocesses=auto --cov=dimos/ -m 'not (tool or self_hosted or mujoco)'
-
-      - name: Coverage report
-        if: github.event_name == 'push' && !cancelled()
-        run: |
-          source .venv/bin/activate
-          coverage combine
-          coverage html
-          coverage report
-
-      - name: Run mypy
-        if: ${{ !cancelled() }}
-        run: |
-          source .venv/bin/activate
-          mypy dimos
-
-      - name: Upload coverage report
-        if: github.event_name == 'push' && !cancelled()
-        uses: actions/upload-artifact@v5
+      - name: Re-run the failing tests with maximum verbosity
+        if: failure()
+        env:
+          COLOR: yes
+          AIOHTTP_NO_EXTENSIONS: ${{ matrix.no-extensions }}
+        run: >-  # `exit 1` makes sure that the job remains red with flaky runs
+          uv run pytest --no-cov -vvvvv --lf && exit 1
+        shell: bash
+      - name: Turn coverage into xml
+        run: python -m coverage xml
+      - name: Upload coverage
+        uses: codecov/codecov-action@v6
         with:
-          name: coverage-report
-          path: htmlcov/
+          disable_search: true
+          fail_ci_if_error: true
+          files: ./coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   self-hosted-tests:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
