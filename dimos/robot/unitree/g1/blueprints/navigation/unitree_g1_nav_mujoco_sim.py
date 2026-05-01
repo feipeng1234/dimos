@@ -144,8 +144,14 @@ unitree_g1_nav_mujoco_sim = (
         # --mujoco-room office1 to fall back to the original single-room
         # office, or --mujoco-room scene_empty for a featureless plane.
         mujoco_room="hssd_house",
-        # Spawn near bedroom centre — well clear of furniture in scene_186.
-        mujoco_start_pos="2.5, 2.0",
+        # Spawn outside the rooms on the open world floor plane.  In
+        # scene_186 the bedroom body is at (2.6, 2.1) and bathroom at
+        # (6.4, 2.1), so (0, 0) is clearly free space.  Spawning inside
+        # a room had the robot landing on the room's interior floor box
+        # while the explicit foot↔floor pair pointed at the world floor
+        # plane, producing a tilted/clipping landing.  Robot can walk
+        # into the rooms once the planner sends a goal.
+        mujoco_start_pos="0.0, 0.0",
     )
 )
 
