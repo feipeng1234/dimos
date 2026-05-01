@@ -27,8 +27,14 @@ import mujoco
 from mujoco import viewer
 import numpy as np
 from numpy.typing import NDArray
-import open3d as o3d  # type: ignore[import-untyped]
 
+# NOTE: do NOT eagerly `import open3d` here.  open3d ships its own
+# bundled GLFW (libglfw.3.dylib inside the open3d wheel) which, when
+# imported before mujoco's viewer is set up, registers a competing set
+# of Cocoa GLFW* classes and silently breaks viewer.launch_passive on
+# macOS.  Object class symptom: the cluster of "Class GLFWHelper is
+# implemented in both ... libglfw.3.dylib and ... open3d/cpu/pybind …"
+# warnings.  We import open3d lazily inside the lidar block below.
 from dimos.core.global_config import GlobalConfig
 from dimos.msgs.sensor_msgs.PointCloud2 import PointCloud2
 from dimos.simulation.mujoco.constants import (
@@ -220,6 +226,9 @@ def _run_simulation(config: GlobalConfig, shm: ShmReader) -> None:
                     all_points.append(points)
 
             if all_points:
+                # Lazy-import open3d (see top-of-file note about GLFW conflict).
+                import open3d as o3d  # type: ignore[import-untyped]
+
                 combined_points = np.vstack(all_points)
                 pcd = o3d.geometry.PointCloud()
                 pcd.points = o3d.utility.Vector3dVector(combined_points)
