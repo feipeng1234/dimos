@@ -136,8 +136,10 @@ def spy(sim_nav):
     s.save_topic("/lidar#sensor_msgs.PointCloud2")
     s.start()
 
-    # Wait for at least one message on color_image before tests start
-    s.wait_for_saved_topic("/color_image#sensor_msgs.Image", timeout=60.0)
+    # Wait for at least one message on color_image before tests start.
+    # First frame in CI takes ~78s: 43s engine init + 35s for 26MB Rapier
+    # snapshot upload + physics init before sensors begin publishing.
+    s.wait_for_saved_topic("/color_image#sensor_msgs.Image", timeout=120.0)
 
     yield s
 

@@ -199,7 +199,7 @@ class TestDimSimBinaryOnly:
         that the bridge multicasts. This is the stage that's been failing in CI.
         """
         dimsim_only_spy.wait_for_saved_topic(
-            "/color_image#sensor_msgs.Image", timeout=60.0
+            "/color_image#sensor_msgs.Image", timeout=120.0
         )
         msgs = dimsim_only_spy.messages.get("/color_image#sensor_msgs.Image", [])
         assert len(msgs) > 0
@@ -278,10 +278,10 @@ class TestDimosSimBasic:
 
     def test_color_image_publishes(self, dimos_sim_basic_spy) -> None:
         dimos_sim_basic_spy.wait_for_saved_topic(
-            "/color_image#sensor_msgs.Image", timeout=60.0
+            "/color_image#sensor_msgs.Image", timeout=120.0
         )
 
     def test_odom_publishes(self, dimos_sim_basic_spy) -> None:
         dimos_sim_basic_spy.wait_for_saved_topic(
-            "/odom#geometry_msgs.PoseStamped", timeout=30.0
+            "/odom#geometry_msgs.PoseStamped", timeout=60.0
         )
