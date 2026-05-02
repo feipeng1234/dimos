@@ -159,6 +159,8 @@ def _run_simulation(config: GlobalConfig, shm: ShmReader) -> None:
     # Spawn z (and the kinematic-mode locked z) is set above per robot.
     spawn_z = z
     home_qpos_robot = np.array(data.qpos[7 : 7 + int(model.nu)]).copy()
+    _kin_tick_counter = [0]
+    _kin_last_log = [0.0]
 
     def _step_once(m_viewer: Any) -> None:
         nonlocal last_video_time, last_lidar_time
@@ -189,6 +191,15 @@ def _run_simulation(config: GlobalConfig, shm: ShmReader) -> None:
             data.qpos[6] = float(np.sin(half))
             data.qpos[7 : 7 + int(model.nu)] = home_qpos_robot
             mujoco.mj_forward(model, data)
+            _kin_tick_counter[0] += 1
+            now = time.time()
+            if now - _kin_last_log[0] > 1.0:
+                print(
+                    f"kinematic tick={_kin_tick_counter[0]} cmd=({vx:.2f},{vy:.2f},{wz:.2f}) "
+                    f"pos=({data.qpos[0]:.2f},{data.qpos[1]:.2f},{data.qpos[2]:.2f}) yaw={yaw:.2f}",
+                    flush=True,
+                )
+                _kin_last_log[0] = now
         else:
             # Step simulation
             for _ in range(config.mujoco_steps_per_frame):
