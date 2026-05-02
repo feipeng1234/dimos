@@ -35,13 +35,13 @@ import shutil
 import socket
 import subprocess
 import sys
-import tempfile
 import time
 import urllib.request
 
 import pytest
 import websocket
 
+from dimos.e2e_tests._subprocess_log import dump_log, launch_with_streaming_log
 from dimos.e2e_tests.lcm_spy import LcmSpy
 
 BRIDGE_PORT = 8090
@@ -107,28 +107,6 @@ def _ensure_dimsim_binary() -> Path:
     )
 
 
-def _dump_log(label: str, log_path: Path) -> None:
-    """Print captured subprocess output so pytest surfaces it on failure."""
-    print(f"\n========= {label} stdout/stderr =========")
-    try:
-        text = log_path.read_text(errors="replace")
-    except OSError as exc:
-        print(f"(could not read log: {exc})")
-        return
-    if not text:
-        print("(empty — subprocess produced no output)")
-        return
-    # Trim very large logs but keep head + tail
-    if len(text) > 50_000:
-        head, tail = text[:20_000], text[-20_000:]
-        print(head)
-        print(f"\n... [{len(text) - 40_000} bytes elided] ...\n")
-        print(tail)
-    else:
-        print(text)
-    print(f"========= end {label} =========\n")
-
-
 # ── Layer 1: bare dimsim binary ──────────────────────────────────────────────
 
 
@@ -142,12 +120,8 @@ def dimsim_only():
         f"Port {BRIDGE_PORT} still busy after force-kill"
     )
 
-    log_fd, log_name = tempfile.mkstemp(prefix="dimsim_only_", suffix=".log")
-    os.close(log_fd)
-    log_path = Path(log_name)
-    log_file = log_path.open("w")
-
-    proc = subprocess.Popen(
+    proc, log_path = launch_with_streaming_log(
+        "dimsim_binary",
         [
             str(binary),
             "dev",
@@ -159,15 +133,11 @@ def dimsim_only():
             "--render",
             "cpu",
         ],
-        stdout=log_file,
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
     )
 
     try:
         if not _wait_for_port(BRIDGE_PORT, timeout=120):
-            log_file.flush()
-            _dump_log("dimsim binary", log_path)
+            dump_log("dimsim binary", log_path)
             pytest.fail(f"dimsim bridge port {BRIDGE_PORT} never opened")
         yield proc
     finally:
@@ -186,8 +156,7 @@ def dimsim_only():
             except (ProcessLookupError, PermissionError):
                 proc.kill()
             proc.wait()
-        log_file.close()
-        _dump_log("dimsim binary", log_path)
+        dump_log("dimsim binary", log_path)
         log_path.unlink(missing_ok=True)
         _force_kill_port(BRIDGE_PORT)
 
@@ -247,31 +216,24 @@ def dimos_sim_basic():
         f"Port {BRIDGE_PORT} still busy after force-kill"
     )
 
-    log_fd, log_name = tempfile.mkstemp(prefix="dimos_sim_basic_", suffix=".log")
-    os.close(log_fd)
-    log_path = Path(log_name)
-    log_file = log_path.open("w")
-
     venv_bin = str(Path(sys.prefix) / "bin")
     env = {
         **os.environ,
         "DIMSIM_HEADLESS": "1",
         "DIMSIM_RENDER": os.environ.get("DIMSIM_RENDER", "cpu"),
+        "PYTHONUNBUFFERED": "1",
         "PATH": venv_bin + os.pathsep + os.environ.get("PATH", ""),
     }
 
-    proc = subprocess.Popen(
+    proc, log_path = launch_with_streaming_log(
+        "dimos_sim_basic",
         ["dimos", "--simulation", "run", "sim-basic"],
         env=env,
-        stdout=log_file,
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
     )
 
     try:
         if not _wait_for_port(BRIDGE_PORT, timeout=120):
-            log_file.flush()
-            _dump_log("dimos sim-basic", log_path)
+            dump_log("dimos sim-basic", log_path)
             pytest.fail(f"dimos sim-basic never opened port {BRIDGE_PORT}")
         yield proc
     finally:
@@ -290,8 +252,7 @@ def dimos_sim_basic():
             except (ProcessLookupError, PermissionError):
                 proc.kill()
             proc.wait()
-        log_file.close()
-        _dump_log("dimos sim-basic", log_path)
+        dump_log("dimos sim-basic", log_path)
         log_path.unlink(missing_ok=True)
         _force_kill_port(BRIDGE_PORT)
 

@@ -31,6 +31,7 @@ import time
 
 import pytest
 
+from dimos.e2e_tests._subprocess_log import dump_log, launch_with_streaming_log
 from dimos.e2e_tests.dimos_cli_call import DimosCliCall
 from dimos.e2e_tests.lcm_spy import LcmSpy
 from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
@@ -86,21 +87,12 @@ def _wait_for_port_free(port: int, timeout: float = 30) -> bool:
 
 @pytest.fixture(scope="class")
 def sim_nav():
-    """Start dimos sim-nav headless with GPU rendering, tear down after."""
+    """Start dimos sim-nav headless, tear down after."""
     # Kill any leftover processes from a previous crashed run
     _force_kill_port(BRIDGE_PORT)
     assert _wait_for_port_free(BRIDGE_PORT, timeout=10), (
         f"Port {BRIDGE_PORT} still in use after force-kill"
     )
-
-    log_dir = os.environ.get("DIMSIM_EVAL_LOG_DIR", "")
-    if log_dir:
-        log_path = Path(log_dir)
-        log_path.mkdir(parents=True, exist_ok=True)
-        log_file = open(log_path / "dimos-sim-nav.log", "w")
-        print(f"\n  dimos logs → {log_path}/dimos-sim-nav.log")
-    else:
-        log_file = None
 
     render = os.environ.get("DIMSIM_RENDER", "cpu")
     venv_bin = str(Path(sys.prefix) / "bin")
@@ -108,26 +100,28 @@ def sim_nav():
         **os.environ,
         "DIMSIM_HEADLESS": "1",
         "DIMSIM_RENDER": render,
+        "PYTHONUNBUFFERED": "1",
         "PATH": venv_bin + os.pathsep + os.environ.get("PATH", ""),
     }
-    call = DimosCliCall()
-    call.demo_args = ["sim-nav"]
-    call.process = subprocess.Popen(
+
+    proc, log_path = launch_with_streaming_log(
+        "dimos_sim_nav",
         ["dimos", "--simulation", "run", "sim-nav"],
         env=env,
-        stdout=log_file or subprocess.DEVNULL,
-        stderr=log_file or subprocess.DEVNULL,
-        start_new_session=True,
     )
+    call = DimosCliCall()
+    call.demo_args = ["sim-nav"]
+    call.process = proc
 
     try:
-        assert _wait_for_port(BRIDGE_PORT, timeout=120), f"Bridge not ready on port {BRIDGE_PORT}"
+        if not _wait_for_port(BRIDGE_PORT, timeout=120):
+            dump_log("dimos sim-nav", log_path)
+            pytest.fail(f"Bridge not ready on port {BRIDGE_PORT}")
         yield call
     finally:
         call.stop()
-        if log_file:
-            log_file.close()
-        # Ensure port is freed even if stop() doesn't fully clean up
+        dump_log("dimos sim-nav", log_path)
+        log_path.unlink(missing_ok=True)
         _force_kill_port(BRIDGE_PORT)
 
 
