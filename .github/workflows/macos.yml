@@ -61,6 +61,12 @@ jobs:
           for pkg in gnu-sed gcc portaudio git-lfs libjpeg-turbo; do
             brew list "$pkg" &>/dev/null || brew install "$pkg"
           done
+          # DimSim's bridge launches headless via Playwright with channel: "chrome"
+          # which hardcodes /Applications/Google Chrome.app. Bundled Chromium has
+          # broken WebGL on macOS, so we install real Chrome.
+          if [ ! -d "/Applications/Google Chrome.app" ]; then
+            brew install --cask google-chrome
+          fi
 
       - name: Set up git-lfs
         run: |
