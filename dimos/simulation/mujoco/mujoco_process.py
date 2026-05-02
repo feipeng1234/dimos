@@ -28,15 +28,18 @@ from mujoco import viewer
 import numpy as np
 from numpy.typing import NDArray
 
-# NOTE: do NOT eagerly `import open3d` here.  open3d ships its own
-# bundled GLFW (libglfw.3.dylib inside the open3d wheel) which, when
-# imported before mujoco's viewer is set up, registers a competing set
-# of Cocoa GLFW* classes and silently breaks viewer.launch_passive on
-# macOS.  Object class symptom: the cluster of "Class GLFWHelper is
-# implemented in both ... libglfw.3.dylib and ... open3d/cpu/pybind …"
-# warnings.  We import open3d lazily inside the lidar block below.
+# NOTE: do NOT eagerly import anything that pulls in open3d from
+# top-level — open3d's bundled GLFW (libglfw.3.dylib inside the wheel)
+# registers a competing set of Cocoa GLFW* classes the moment its
+# pybind module loads.  If those classes are registered before mujoco's
+# viewer initialises its own GLFW (which happens inside
+# viewer.launch_passive), Cocoa monitor enumeration goes sideways and
+# launch_passive segfaults in _glfwGetVideoModeCocoa with EXC_BAD_ACCESS
+# at offset 0x100 of a NULL _GLFWmonitor pointer.  PointCloud2 and
+# depth_camera both import open3d at module scope, so they're imported
+# lazily inside _step_once below — by then launch_passive has already
+# loaded mujoco's GLFW first.
 from dimos.core.global_config import GlobalConfig
-from dimos.msgs.sensor_msgs.PointCloud2 import PointCloud2
 from dimos.simulation.mujoco.constants import (
     DEPTH_CAMERA_FOV,
     LIDAR_FPS,
@@ -45,7 +48,6 @@ from dimos.simulation.mujoco.constants import (
     VIDEO_HEIGHT,
     VIDEO_WIDTH,
 )
-from dimos.simulation.mujoco.depth_camera import depth_image_to_point_cloud
 from dimos.simulation.mujoco.model import load_model, load_scene_xml
 from dimos.simulation.mujoco.person_on_track import PersonPositionController
 from dimos.simulation.mujoco.shared_memory import ShmReader
@@ -101,6 +103,7 @@ def _run_simulation(config: GlobalConfig, shm: ShmReader) -> None:
         robot=robot_name,
         scene_xml=load_scene_xml(config),
         mujoco_room=config.mujoco_room,
+        kinematic_robot=config.mujoco_kinematic_robot,
     )
 
     if model is None or data is None:
@@ -153,13 +156,43 @@ def _run_simulation(config: GlobalConfig, shm: ShmReader) -> None:
     video_interval = 1.0 / VIDEO_FPS
     lidar_interval = 1.0 / LIDAR_FPS
 
+    # Spawn z (and the kinematic-mode locked z) is set above per robot.
+    spawn_z = z
+    home_qpos_robot = np.array(data.qpos[7 : 7 + int(model.nu)]).copy()
+
     def _step_once(m_viewer: Any) -> None:
         nonlocal last_video_time, last_lidar_time
         step_start = time.time()
 
-        # Step simulation
-        for _ in range(config.mujoco_steps_per_frame):
-            mujoco.mj_step(model, data)
+        if config.mujoco_kinematic_robot:
+            # Drive the floating base directly from the latest cmd_vel.
+            # Joints stay frozen at the home pose.  No physics for the
+            # robot — its qpos is set, then mj_forward updates kinematics
+            # so cameras + sensors reflect the new pose.  Walls don't
+            # block motion in this mode (the planner's costmap does).
+            cmd = controller.get_command()  # (vx, vy, wz)
+            vx, vy, wz = float(cmd[0]), float(cmd[1]), float(cmd[2])
+
+            qw, qx, qy, qz = (float(c) for c in data.qpos[3:7])
+            yaw = np.arctan2(2.0 * (qw * qz + qx * qy), 1.0 - 2.0 * (qy * qy + qz * qz))
+            dt = float(model.opt.timestep) * float(config.mujoco_steps_per_frame)
+
+            cyaw, syaw = float(np.cos(yaw)), float(np.sin(yaw))
+            data.qpos[0] += dt * (vx * cyaw - vy * syaw)
+            data.qpos[1] += dt * (vx * syaw + vy * cyaw)
+            data.qpos[2] = spawn_z
+            yaw += dt * wz
+            half = yaw * 0.5
+            data.qpos[3] = float(np.cos(half))
+            data.qpos[4] = 0.0
+            data.qpos[5] = 0.0
+            data.qpos[6] = float(np.sin(half))
+            data.qpos[7 : 7 + int(model.nu)] = home_qpos_robot
+            mujoco.mj_forward(model, data)
+        else:
+            # Step simulation
+            for _ in range(config.mujoco_steps_per_frame):
+                mujoco.mj_step(model, data)
 
         person_position_controller.tick(data)
 
@@ -218,6 +251,9 @@ def _run_simulation(config: GlobalConfig, shm: ShmReader) -> None:
                 ),
             ]
 
+            # Lazy import — pulls in open3d.  See top-of-file note.
+            from dimos.simulation.mujoco.depth_camera import depth_image_to_point_cloud
+
             for depth_image, camera_pos, camera_mat in cameras_data:
                 points = depth_image_to_point_cloud(
                     depth_image, camera_pos, camera_mat, fov_degrees=DEPTH_CAMERA_FOV
@@ -226,8 +262,10 @@ def _run_simulation(config: GlobalConfig, shm: ShmReader) -> None:
                     all_points.append(points)
 
             if all_points:
-                # Lazy-import open3d (see top-of-file note about GLFW conflict).
+                # Lazy imports — both pull in open3d.  See top-of-file note.
                 import open3d as o3d  # type: ignore[import-untyped]
+
+                from dimos.msgs.sensor_msgs.PointCloud2 import PointCloud2
 
                 combined_points = np.vstack(all_points)
                 pcd = o3d.geometry.PointCloud()

@@ -79,6 +79,8 @@ def load_model(
     robot: str,
     scene_xml: str,
     mujoco_room: str | None = None,
+    *,
+    kinematic_robot: bool = False,
 ) -> tuple[mujoco.MjModel, mujoco.MjData]:
     mujoco.set_mjcb_control(None)
 
@@ -86,7 +88,25 @@ def load_model(
     model = mujoco.MjModel.from_xml_string(xml_string, assets=get_assets(mujoco_room))
     data = mujoco.MjData(model)
 
-    mujoco.mj_resetDataKeyframe(model, data, 0)
+    # Initialise data from mjModel.qpos0 first.  qpos0 is built from each
+    # body's authored <body pos="..." quat="..."> attributes, so HSSD-style
+    # scenes whose furniture each have a <joint type="free"/> get every
+    # piece placed where it was authored (bed in the bedroom, etc.).
+    #
+    # Calling mj_resetDataKeyframe directly would clobber that — the
+    # robot's "home" keyframe only specifies the G1's 36 qpos slots, so
+    # MuJoCo zero-pads the rest, dumping every furniture body at world
+    # origin and producing the "all furniture overlaps + glitches"
+    # behaviour we hit on scene_186.
+    mujoco.mj_resetData(model, data)
+    # Now overwrite the robot's own qpos slots with the home keyframe so
+    # the G1 starts in its standing pose.  Robot joints occupy the first
+    # (7 + model.nu) qpos slots: 7 for the floating-base free joint and
+    # one per actuator.  Furniture qpos lives after that and stays at
+    # qpos0 from the line above.
+    robot_qpos_len = 7 + int(model.nu)
+    if model.nkey > 0:
+        data.qpos[:robot_qpos_len] = model.key_qpos[0][:robot_qpos_len]
 
     match robot:
         case "unitree_g1":
@@ -106,6 +126,15 @@ def load_model(
     # default_angles vector.  That balloons the ONNX policy's obs and
     # crashes the first control step with INVALID_ARGUMENT.
     home_qpos = np.array(model.keyframe("home").qpos[7 : 7 + model.nu])
+
+    # Kinematic mode skips the ONNX walking policy entirely: the floating
+    # base will be driven by ``data.qpos[0:7]`` updates from cmd_vel each
+    # tick (see ``mujoco_process._step_once``) and the joints stay frozen
+    # at the home pose.  Useful for nav tests where we don't care about
+    # gait, just camera/lidar-driven planning.
+    if kinematic_robot:
+        return model, data
+
     params = {
         "policy_path": (_get_data_dir() / f"{robot}_policy.onnx").as_posix(),
         "default_angles": home_qpos,

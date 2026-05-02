@@ -12,18 +12,27 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from multiprocessing import resource_tracker
 from multiprocessing.shared_memory import SharedMemory
 import pickle
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from numpy.typing import NDArray
 
-from dimos.msgs.sensor_msgs.PointCloud2 import PointCloud2
 from dimos.simulation.mujoco.constants import VIDEO_HEIGHT, VIDEO_WIDTH
 from dimos.utils.logging_config import setup_logger
+
+if TYPE_CHECKING:
+    # PointCloud2 pulls in open3d at module load.  On macOS that registers
+    # GLFW Cocoa classes that conflict with mujoco's bundled GLFW and
+    # segfaults viewer.launch_passive in _glfwGetVideoModeCocoa.  Keep this
+    # symbol available for type-checkers only — the runtime path goes
+    # through pickle.loads which doesn't need the class object here.
+    from dimos.msgs.sensor_msgs.PointCloud2 import PointCloud2
 
 logger = setup_logger()
 
@@ -78,11 +87,11 @@ class ShmSet:
     control: SharedMemory
 
     @classmethod
-    def from_names(cls, shm_names: dict[str, str]) -> "ShmSet":
+    def from_names(cls, shm_names: dict[str, str]) -> ShmSet:
         return cls(**{k: _unregister(SharedMemory(name=shm_names[k])) for k in _shm_sizes.keys()})
 
     @classmethod
-    def from_sizes(cls) -> "ShmSet":
+    def from_sizes(cls) -> ShmSet:
         return cls(**{k: SharedMemory(create=True, size=_shm_sizes[k]) for k in _shm_sizes.keys()})
 
     def to_names(self) -> dict[str, str]:

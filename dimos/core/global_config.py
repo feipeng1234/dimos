@@ -61,6 +61,13 @@ class GlobalConfig(BaseSettings):
     # sessions and on any nodisplay Linux box, since viewer.launch_passive
     # otherwise blocks waiting for a window the host cannot create.
     mujoco_headless: bool | None = None
+    # When True, skip the ONNX walking policy and drive the robot's
+    # floating base directly from cmd_vel — joints are frozen at the
+    # home pose and ``data.qpos[0:7]`` is integrated each tick from
+    # the latest commanded (vx, vy, wz).  Used for the cross-wall nav
+    # test where we don't care about gait, just kinematic placement +
+    # camera/lidar sensing.
+    mujoco_kinematic_robot: bool = False
     robot_model: str | None = None
     robot_width: float = 0.3
     robot_rotation_diameter: float = 0.6
