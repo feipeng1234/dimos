@@ -33,7 +33,10 @@ backends drop in by name without touching the module.
 
 from __future__ import annotations
 
+import atexit
+import os
 from pathlib import Path as FilePath
+import platform
 import sys
 import threading
 import time
@@ -171,6 +174,352 @@ class GsplatBackend:
         return (colors[0].clamp(0, 1) * 255.0).byte().cpu().numpy()
 
 
+class _SplatAppleCamera:
+    """Adapter for splat-apple's expected camera duck-type.
+
+    splat-apple's ``mlx_gs.renderer.renderer.render`` reads
+    ``camera.H/W/fx/fy/cx/cy/W2C`` directly off the object.  We build
+    one of these per ``render()`` call so the W2C reflects the latest
+    robot pose.
+    """
+
+    __slots__ = ("H", "W", "W2C", "cx", "cy", "fx", "fy")
+
+    def __init__(self, spec: CameraSpec, viewmat_mx: object) -> None:
+        self.H = spec.height
+        self.W = spec.width
+        self.fx = spec.focal_pixels()
+        self.fy = spec.focal_pixels()
+        self.cx = spec.cx()
+        self.cy = spec.cy()
+        self.W2C = viewmat_mx
+
+
+def _mlx_subprocess_main(
+    conn: Any,
+    splat_pkl_path: str,
+    spec_pkl_path: str,
+    rasterizer_type: str,
+) -> None:
+    """Standalone subprocess entrypoint for MLX rendering.
+
+    Lives in its own ``spawn``-started Python interpreter so MLX/Metal
+    has a clean process state — independent of whatever the dimos
+    worker happens to have loaded.  Communication: a single
+    ``multiprocessing.Pipe``.  Protocol:
+
+        parent -> child: 4x4 viewmat as a flat 16-tuple, or ``None`` to
+                         request termination.
+        child  -> parent: ``"ready"`` after init, then per-frame
+                          ``("ok", uint8 rgb ndarray)`` or
+                          ``("err", traceback string)``.
+    """
+    import pickle
+    import traceback as _tb
+
+    import numpy as _np
+
+    try:
+        import mlx.core as mx
+        from mlx_gs.core.gaussians import Gaussians
+        from mlx_gs.renderer import renderer as _renderer
+    except Exception as e:  # pragma: no cover - subprocess-only path
+        conn.send(f"import-failed: {e!r}")
+        return
+
+    try:
+        with open(splat_pkl_path, "rb") as f:
+            splat = pickle.load(f)
+        with open(spec_pkl_path, "rb") as f:
+            spec = pickle.load(f)
+
+        # Optional 3D scale pre-filter.  Default 0 (disabled) because
+        # the patched ``mlx_gs/renderer/projection.py`` already does
+        # gsplat-style screen-rect + max-radii culling at the rendering
+        # stage, which handles training-divergence outliers correctly.
+        # Set ``DIMOS_MLX_MAX_SCALE=<meters>`` to additionally drop any
+        # gaussians whose 3D max-axis scale exceeds the threshold (e.g.
+        # 0.5 to be conservative on noisy splats).
+        max_scale_m = float(os.environ.get("DIMOS_MLX_MAX_SCALE", "0"))
+        if max_scale_m > 0:
+            keep = splat.scales.max(axis=1) < max_scale_m
+            n_dropped = int(len(splat.centers) - keep.sum())
+            if n_dropped > 0:
+                splat = type(splat)(
+                    centers=splat.centers[keep],
+                    covariances=splat.covariances[keep],
+                    rgbs=splat.rgbs[keep],
+                    opacities=splat.opacities[keep],
+                    quats_wxyz=splat.quats_wxyz[keep],
+                    scales=splat.scales[keep],
+                )
+
+        scales_raw = _np.log(_np.maximum(splat.scales, 1e-10))
+        op_clip = _np.clip(splat.opacities.flatten(), 1e-6, 1.0 - 1e-6)
+        opacities_raw = _np.log(op_clip / (1.0 - op_clip)).reshape(-1, 1)
+        sh_dc = ((splat.rgbs - 0.5) / 0.28209479177387814).reshape(-1, 1, 3)
+
+        gaussians = Gaussians(
+            means=mx.array(splat.centers, dtype=mx.float32),
+            scales=mx.array(scales_raw, dtype=mx.float32),
+            quaternions=mx.array(splat.quats_wxyz, dtype=mx.float32),
+            opacities=mx.array(opacities_raw, dtype=mx.float32),
+            sh_coeffs=mx.array(sh_dc, dtype=mx.float32),
+        )
+        mx.eval(
+            gaussians.means,
+            gaussians.scales,
+            gaussians.quaternions,
+            gaussians.opacities,
+            gaussians.sh_coeffs,
+        )
+
+        intrinsics_K = _np.eye(3, dtype=_np.float32)
+        intrinsics_K[0, 0] = spec.focal_pixels()
+        intrinsics_K[1, 1] = spec.focal_pixels()
+        intrinsics_K[0, 2] = spec.cx()
+        intrinsics_K[1, 2] = spec.cy()
+        K_mx = mx.array(intrinsics_K, dtype=mx.float32)
+        mx.eval(K_mx)
+    except Exception:  # pragma: no cover
+        conn.send(f"init-failed:\n{_tb.format_exc()}")
+        return
+
+    conn.send("ready")
+
+    class _Cam:
+        H = spec.height
+        W = spec.width
+        fx = spec.focal_pixels()
+        fy = spec.focal_pixels()
+        cx = spec.cx()
+        cy = spec.cy()
+        W2C = K_mx  # placeholder; overwritten per frame
+
+    cam = _Cam()
+
+    while True:
+        msg = conn.recv()
+        if msg is None:
+            return
+        try:
+            viewmat_flat = msg
+            viewmat = _np.asarray(viewmat_flat, dtype=_np.float32).reshape(4, 4)
+            cam.W2C = mx.array(viewmat, dtype=mx.float32)
+            img = _renderer.render(gaussians, cam, rasterizer_type=rasterizer_type)
+            mx.eval(img)
+            rgb_u8 = (_np.clip(_np.array(img), 0.0, 1.0) * 255.0).astype(_np.uint8)
+            conn.send(("ok", rgb_u8))
+        except Exception:
+            conn.send(("err", _tb.format_exc()))
+
+
+class MlxBackend:
+    """MLX-based renderer for macOS Apple Silicon (via ghif/splat-apple).
+
+    Architecture: the actual rasterization runs in a **separate spawned
+    subprocess**, not in the dimos worker.  Why:
+
+      * The dimos worker is itself a forkserver child with a long
+        chain of imports (rpyc, structlog, mujoco, viser_render_module,
+        cv2, ...).  At least one of those leaves the Metal compiler XPC
+        connection in a state where MLX cannot compile its kernels —
+        ``Compiler encountered XPC_ERROR_CONNECTION_INVALID``.
+      * Spawn-starting a brand-new Python interpreter for the rasterizer
+        side-steps that entirely.  The subprocess imports only what it
+        needs (``mlx``, ``mlx_gs``, ``numpy``, ``pickle``); its Metal
+        context is born clean.
+
+    The parent (``MlxBackend``) holds a ``multiprocessing.Pipe`` to the
+    subprocess.  Per ``render()`` call: send the 4x4 viewmat, receive
+    the rendered uint8 image.  Per-frame overhead is dominated by the
+    pickle of a 320x180x3 ndarray (~170 KB; sub-millisecond on Mac).
+
+    Install requirements:
+        git clone https://github.com/ghif/splat-apple
+        echo /path/to/splat-apple > .venv/lib/pythonX.Y/site-packages/splat_apple.pth
+
+    Optional perf upgrade — build the C++ Metal kernel for ~2x speedup:
+        cd /path/to/splat-apple && python setup_mlx.py build_ext --inplace
+        # then run dimos with DIMOS_MLX_RASTERIZER=cpp
+
+    NOTE on a required local patch to splat-apple:
+        ``mlx_gs/renderer/projection.py`` ships with ``radii = clip(radii,
+        0, 1000)`` which doesn't cull anything — it just changes tile-
+        binning extent.  Training-divergence "fog blob" gaussians (centers
+        thousands of meters off-screen and/or 2D radii larger than the
+        image) still get evaluated at every pixel and saturate alpha,
+        producing the cubish-edge / blurry-foreground artifact.  We
+        replace that line with proper culls (AABB-vs-screen-rect intersect
+        + max-2D-radius cull).  The patch is in-place at the cloned splat-
+        apple checkout — re-apply if you ever ``git pull`` it.
+    """
+
+    _RECV_TIMEOUT_SEC = 30.0
+
+    def __init__(
+        self,
+        splat: SplatData,
+        spec: CameraSpec,
+        *,
+        rasterizer_type: str = "python",
+    ) -> None:
+        # The rasterizer runs in a subprocess (see class docstring); we
+        # just stash splat + spec to disk so it can pick them up after
+        # spawn (which doesn't inherit memory from the parent).
+        self._spec = spec
+        self._rasterizer_type = os.environ.get("DIMOS_MLX_RASTERIZER", rasterizer_type)
+        self._proc: Any = None
+        self._pipe: Any = None
+        self._proc_lock = threading.Lock()
+
+        import pickle as _pickle
+        import tempfile
+
+        self._tmpdir = tempfile.mkdtemp(prefix="dimos-mlx-")
+        self._splat_pkl = os.path.join(self._tmpdir, "splat.pkl")
+        self._spec_pkl = os.path.join(self._tmpdir, "spec.pkl")
+        with open(self._splat_pkl, "wb") as f:
+            _pickle.dump(splat, f, protocol=_pickle.HIGHEST_PROTOCOL)
+        with open(self._spec_pkl, "wb") as f:
+            _pickle.dump(spec, f, protocol=_pickle.HIGHEST_PROTOCOL)
+
+        # Verify mlx_gs is importable in the parent (cheap reachability
+        # check) but don't actually use mlx here — that would poison the
+        # parent's Metal state for everyone.
+        import importlib.util
+
+        if importlib.util.find_spec("mlx_gs") is None:
+            raise ImportError(
+                "mlx_gs not importable.  Clone "
+                "https://github.com/ghif/splat-apple and add it to the "
+                "venv via a .pth file (see MlxBackend docstring)."
+            )
+
+        atexit.register(self._shutdown)
+
+        logger.info(
+            f"MlxBackend (splat-apple/{self._rasterizer_type}) configured: "
+            f"{len(splat.centers)} Gaussians, {spec.width}x{spec.height} "
+            f"@ vfov={spec.vfov_deg}° (subprocess starts on first render)"
+        )
+
+    def _ensure_subprocess(self) -> None:
+        """Spawn the rasterizer subprocess on first render call."""
+        if self._proc is not None:
+            return
+        with self._proc_lock:
+            if self._proc is not None:
+                return
+            import multiprocessing as _mp
+
+            ctx = _mp.get_context("spawn")
+            parent_conn, child_conn = ctx.Pipe()
+            proc = ctx.Process(
+                target=_mlx_subprocess_main,
+                args=(
+                    child_conn,
+                    self._splat_pkl,
+                    self._spec_pkl,
+                    self._rasterizer_type,
+                ),
+                daemon=False,
+            )
+            # The dimos worker process is itself started with
+            # ``daemon=True`` (see ``python_worker.py:218``).
+            # ``Process.start()`` asserts that daemonic processes can't
+            # have children, full stop — regardless of the child's own
+            # daemon flag.  Temporarily lie about our daemon-ness for
+            # the duration of the spawn; multiprocessing only consults
+            # this flag at start-time.  Cleanup of the rasterizer
+            # subprocess happens via atexit + ``stop()``.
+            current = _mp.current_process()
+            old_daemon = current._config.get("daemon")  # type: ignore[attr-defined]
+            current._config["daemon"] = False  # type: ignore[attr-defined]
+            try:
+                proc.start()
+            finally:
+                if old_daemon is None:
+                    current._config.pop("daemon", None)  # type: ignore[attr-defined]
+                else:
+                    current._config["daemon"] = old_daemon  # type: ignore[attr-defined]
+
+            # Wait up to 60s for the child to finish loading + Metal init.
+            if not parent_conn.poll(60.0):
+                proc.terminate()
+                raise RuntimeError("MlxBackend subprocess did not signal ready")
+            ready = parent_conn.recv()
+            if ready != "ready":
+                proc.terminate()
+                raise RuntimeError(f"MlxBackend subprocess init failed: {ready}")
+
+            self._proc = proc
+            self._pipe = parent_conn
+            logger.info(
+                f"MlxBackend subprocess ready (pid={proc.pid}, rasterizer={self._rasterizer_type})"
+            )
+
+    def render(self, cam_world_pos: np.ndarray, cam_world_wxyz: np.ndarray) -> np.ndarray:
+        try:
+            self._ensure_subprocess()
+            viewmat = _world_to_camera_viewmat(cam_world_pos, cam_world_wxyz)
+            self._pipe.send(viewmat.tolist())
+            if not self._pipe.poll(self._RECV_TIMEOUT_SEC):
+                raise TimeoutError(
+                    f"MlxBackend subprocess did not respond within "
+                    f"{self._RECV_TIMEOUT_SEC}s (likely hung)"
+                )
+            result = self._pipe.recv()
+            if not isinstance(result, tuple) or len(result) != 2:
+                raise RuntimeError(f"MlxBackend subprocess unexpected reply: {result!r}")
+            tag, payload = result
+            if tag == "ok":
+                return payload  # already (H, W, 3) uint8
+            if tag == "err":
+                raise RuntimeError(f"MlxBackend subprocess render failed:\n{payload}")
+            raise RuntimeError(f"MlxBackend subprocess unknown tag: {tag!r}")
+        except Exception:
+            # The render loop in SplatCameraModule swallows render
+            # failures at DEBUG level — escalate here so a silent
+            # black image isn't impossible to diagnose.
+            logger.exception("MlxBackend.render failed")
+            raise
+
+    def _shutdown(self) -> None:
+        """Best-effort cleanup of the rasterizer subprocess."""
+        if self._proc is None:
+            return
+        try:
+            if self._pipe is not None:
+                try:
+                    self._pipe.send(None)
+                except (BrokenPipeError, OSError):
+                    pass
+            self._proc.join(timeout=5.0)
+            if self._proc.is_alive():
+                self._proc.terminate()
+                self._proc.join(timeout=2.0)
+            if self._proc.is_alive():
+                self._proc.kill()
+        except Exception:
+            logger.warning("MlxBackend: error shutting down subprocess", exc_info=True)
+        finally:
+            self._proc = None
+            self._pipe = None
+            try:
+                import shutil
+
+                shutil.rmtree(self._tmpdir, ignore_errors=True)
+            except Exception:
+                pass
+
+    # Public alias matching the SplatCameraModule's stop() expectation if
+    # one is ever added later — currently the atexit hook is the only
+    # cleanup path.
+    def stop(self) -> None:
+        self._shutdown()
+
+
 class MacosBackend:
     """Cross-platform stub backend.
 
@@ -216,13 +565,32 @@ class MacosBackend:
 def make_backend(splat: SplatData, spec: CameraSpec) -> SplatCameraBackend:
     """Pick a backend based on platform + import availability.
 
-    Linux + gsplat installed -> GsplatBackend.  Anything else -> Mac
-    stub backend (which is fine on Linux too if you haven't installed
-    the splat extra; you just won't get real images).
+    Order:
+      1. macOS + Apple Silicon + ``mlx_gs`` (splat-apple) importable
+         -> ``MlxBackend``.
+      2. macOS Intel, or arm64 Mac without splat-apple installed
+         -> ``MacosBackend`` stub.
+      3. Linux + ``gsplat`` installed -> ``GsplatBackend``.
+      4. Otherwise -> ``MacosBackend`` stub.
     """
+    if sys.platform == "darwin" and platform.machine() == "arm64":
+        try:
+            import mlx_gs  # noqa: F401
+
+            return MlxBackend(splat, spec)
+        except ImportError:
+            logger.warning(
+                "SplatCamera: mlx_gs (splat-apple) not importable on Apple "
+                "Silicon — falling back to stub backend.  Clone "
+                "https://github.com/ghif/splat-apple and expose it via a "
+                ".pth file in the venv (see MlxBackend docstring)."
+            )
+            return MacosBackend(splat, spec)
+
     if sys.platform == "darwin":
-        logger.info("SplatCamera: macOS detected, using stub backend")
+        logger.info("SplatCamera: Intel macOS detected, using stub backend")
         return MacosBackend(splat, spec)
+
     try:
         import gsplat  # noqa: F401
 
@@ -233,6 +601,61 @@ def make_backend(splat: SplatData, spec: CameraSpec) -> SplatCameraBackend:
             "Install dimos[splat] for real splat-rendered images on Linux+CUDA."
         )
         return MacosBackend(splat, spec)
+
+
+# =============================================================================
+# Asset loading without mujoco_playground (so MLX-Metal stays alive)
+# =============================================================================
+#
+# ``dimos.simulation.mujoco.model.get_assets`` walks several directories
+# and reads mesh bytes, but it does so via ``mjx_env.update_assets``.
+# Importing ``mjx_env`` pulls in ``mujoco_playground._src.wrapper_torch``
+# which imports NVIDIA Warp, which initializes Metal aggressively on
+# macOS — corrupting the Metal compiler XPC connection that MLX needs
+# to compile splat-camera kernels.  This local re-implementation does
+# the same directory walking with stdlib only and locates
+# ``mujoco_playground``'s bundled menagerie via ``importlib.util.find_spec``
+# (which finds the package on disk without executing its ``__init__``).
+
+
+def _update_assets_no_warp(assets: dict[str, bytes], root: FilePath, pattern: str = "*") -> None:
+    if not root.exists():
+        return
+    for f in root.glob(pattern):
+        if f.is_file():
+            assets[f.name] = f.read_bytes()
+
+
+def _menagerie_path() -> FilePath | None:
+    import importlib.util
+
+    spec = importlib.util.find_spec("mujoco_playground")
+    if spec is None or not spec.submodule_search_locations:
+        return None
+    return (
+        FilePath(next(iter(spec.submodule_search_locations))) / "external_deps" / "mujoco_menagerie"
+    )
+
+
+def _load_robot_assets(data_dir: FilePath, person_dir: FilePath) -> dict[str, bytes]:
+    """No-warp replacement for ``dimos.simulation.mujoco.model.get_assets``.
+
+    Mirrors the asset set that the original loads, but without dragging
+    in ``mujoco_playground`` (and through it ``warp`` and ``torch``)
+    which clobbers Metal for MLX.  See module-level note above.
+    """
+    assets: dict[str, bytes] = {}
+    _update_assets_no_warp(assets, data_dir, "*.xml")
+    _update_assets_no_warp(assets, data_dir, "*.obj")
+    _update_assets_no_warp(assets, data_dir / "scene_office1" / "textures", "*.png")
+    _update_assets_no_warp(assets, data_dir / "scene_office1" / "office_split", "*.obj")
+    menagerie = _menagerie_path()
+    if menagerie is not None:
+        _update_assets_no_warp(assets, menagerie / "unitree_go1" / "assets")
+        _update_assets_no_warp(assets, menagerie / "unitree_g1" / "assets")
+    _update_assets_no_warp(assets, person_dir, "*.obj")
+    _update_assets_no_warp(assets, person_dir, "*.png")
+    return assets
 
 
 # =============================================================================
@@ -310,9 +733,18 @@ class SplatCameraModule(Module):
         splat = load_splat(self._splat_path, alignment=alignment)
         logger.info(f"SplatCamera: loaded {len(splat.centers)} Gaussians")
 
-        from dimos.simulation.mujoco.model import get_assets
+        # IMPORTANT: do NOT use ``dimos.simulation.mujoco.model.get_assets``
+        # here.  That import chain pulls ``mujoco_playground._src.wrapper_torch``
+        # which loads NVIDIA Warp, which grabs Metal in a way that corrupts
+        # the XPC compiler connection MLX needs to render splats.  Use the
+        # local no-warp loader instead — it produces the same asset bytes.
+        from dimos.utils.data import get_data
 
-        self._robot = load_robot_meshes(self._mjcf_path, assets=get_assets())
+        data_dir = FilePath(str(get_data("mujoco_sim")))
+        person_dir = FilePath(str(get_data("person")))
+        self._robot = load_robot_meshes(
+            self._mjcf_path, assets=_load_robot_assets(data_dir, person_dir)
+        )
 
         cam_body_id = mujoco.mj_name2id(
             self._robot.model, mujoco.mjtObj.mjOBJ_BODY, self._camera_spec.body_name
@@ -564,6 +996,7 @@ splat_camera = SplatCameraModule.blueprint
 __all__ = [
     "GsplatBackend",
     "MacosBackend",
+    "MlxBackend",
     "SplatCameraBackend",
     "SplatCameraModule",
     "make_backend",

@@ -1,0 +1,43 @@
+--- a/mlx_gs/renderer/projection.py
++++ b/mlx_gs/renderer/projection.py
+@@ -60,10 +60,36 @@ def project_gaussians(gaussians, camera):
+     # Safe sqrt for radii
+     radii = mx.ceil(3.0 * mx.sqrt(mx.maximum(1e-10, lambda1)))
+     
+-    # Mask invalid to ensure they don't contribute
++    # === DIMOS LOCAL PATCH: gsplat-style culling ===========================
++    # splat-apple originally did `radii = clip(radii, 0, 1000)` which doesn't
++    # actually cull anything — it just changes tile-binning extent.  Huge
++    # gaussians (training-divergence "fog blobs") still get evaluated at
++    # every pixel with their true cov_2d, saturating alpha and washing the
++    # image out.  Two real culls instead:
++    #
++    #   1. AABB-vs-screen-rect: drop gaussians whose 3-sigma AABB is
++    #      entirely outside the image rect.  splat-apple's tile-binner
++    #      clamps the AABB tile-range to [0, num_tiles-1] which incorrectly
++    #      pools off-screen-center gaussians into edge tiles, producing the
++    #      solid-color border blocks; this cull stops that.
++    #   2. Max-radius: drop gaussians whose 2D radius exceeds the longer
++    #      image side.  In a well-trained scene the biggest legitimate
++    #      gaussian projects to a fraction of the image; anything larger is
++    #      training divergence and would just saturate alpha everywhere.
++    u = means2D[:, 0]
++    v = means2D[:, 1]
++    W_px = float(camera.W)
++    H_px = float(camera.H)
++    on_screen = (
++        (u + radii > 0.0)
++        & (u - radii < W_px)
++        & (v + radii > 0.0)
++        & (v - radii < H_px)
++    )
++    max_radii = max(W_px, H_px)
++    radius_ok = radii < max_radii
++    valid_mask = valid_mask & on_screen & radius_ok
+     radii = mx.where(valid_mask, radii, mx.zeros_like(radii))
+-    
+-    # Clamp radii to avoid massive Gaussians from numerical issues
+-    radii = mx.clip(radii, 0, 1000)
++    # === END DIMOS PATCH ===================================================
+     
+     return means2D, cov2D, radii, valid_mask, z

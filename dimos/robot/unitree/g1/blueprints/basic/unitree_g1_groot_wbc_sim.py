@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import sys
 
 from dimos.agents.mcp.mcp_client import McpClient
 from dimos.agents.mcp.mcp_server import McpServer
@@ -64,6 +65,8 @@ from dimos.core.stream import In
 from dimos.core.transport import LCMTransport
 from dimos.hardware.whole_body.spec import WholeBodyConfig
 from dimos.mapping.costmapper import CostMapper
+from dimos.mapping.mesh_camera import MeshCameraModule
+from dimos.mapping.static_costmap import StaticCostmapModule
 from dimos.mapping.voxels import VoxelGridMapper
 from dimos.memory2.module import Recorder, RecorderConfig
 from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
@@ -122,16 +125,155 @@ class G1Memory(Recorder):
 # subprocess (and now the in-process MujocoEngine) computes PD itself.
 _MJCF_PATH = "data/mujoco_sim/g1_gear_wbc.xml"
 
-# Manipulation: G1 left arm as a 7-DOF stationary manipulator rooted
-# at the floating-base pelvis.  Drake-driven IK + RRT plans
-# trajectories; the coordinator's "trajectory" task on the same
-# joint subset executes them.
+# Optional scene mesh (.usdz / .glb / .obj / etc.) — used by:
+#   * viser viewer (renders the colored mesh in the browser)
+#   * MeshCameraModule (ray-casts the head-camera RGB feed)
+#   * MuJoCo physics (when DIMOS_SCENE_MESH_COLLISION=1, the default
+#     when a path is provided — the mesh is baked into a wrapped MJCF
+#     and added as a static collidable so the robot can't phase
+#     through walls).
+# Configure via env vars so trying different downloaded scenes doesn't
+# require editing the blueprint:
+#   DIMOS_SCENE_MESH_PATH   = path to .usdz/.glb/.obj/etc.
+#   DIMOS_SCENE_MESH_SCALE  = e.g. 0.01 if source is centimeters
+#   DIMOS_SCENE_MESH_TRANSLATION = "x,y,z" world-frame offset
+#   DIMOS_SCENE_MESH_ROTATION_ZYX_DEG = "z,y,x" extra euler in degrees
+#   DIMOS_SCENE_MESH_Y_UP   = "0" to disable the y-up→z-up swap
+#   DIMOS_SCENE_MESH_COLLISION = "0" to skip baking + use the bare
+#       robot MJCF (visualization-only).  Default: bake when path set.
+#   DIMOS_SCENE_MESH_AUTO_GROUND = "1" to auto-translate the scene so
+#       the *first* surface a ray-down at origin hits lands at world
+#       z=0.  Off by default — for multi-story scenes the first hit is
+#       usually a ceiling / upper floor, not the ground.  Use only when
+#       you know origin is over the surface you want to stand on.
+_scene_mesh_path = os.environ.get("DIMOS_SCENE_MESH_PATH", "") or None
+# Default scale 0.05 targets Sketchfab USDZ exports (typically in cm
+# with maps designed for ~30×60 m FPS arenas).  Override for meshes
+# already authored in meters.
+_scene_mesh_scale = float(os.environ.get("DIMOS_SCENE_MESH_SCALE", "0.05"))
+_scene_mesh_translation = tuple(
+    float(x) for x in os.environ.get("DIMOS_SCENE_MESH_TRANSLATION", "0,0,0").split(",")
+)
+_scene_mesh_rotation = tuple(
+    float(x) for x in os.environ.get("DIMOS_SCENE_MESH_ROTATION_ZYX_DEG", "0,0,0").split(",")
+)
+_scene_mesh_y_up = os.environ.get("DIMOS_SCENE_MESH_Y_UP", "1") != "0"
+_scene_mesh_collision = os.environ.get("DIMOS_SCENE_MESH_COLLISION", "1") not in ("", "0")
+_scene_mesh_auto_ground = os.environ.get("DIMOS_SCENE_MESH_AUTO_GROUND", "0") not in ("", "0")
+
+if _scene_mesh_path:
+    from dimos.mapping.mesh_scene import SceneMeshAlignment, floor_z_under_origin
+
+    # If auto-ground is on, ray-cast the scene under (0, 0, ·) once with
+    # the user's alignment, then subtract that floor z from translation
+    # so the floor at origin lands exactly on world z=0.  All three
+    # downstream views (viser, mesh camera, MuJoCo physics) get the
+    # *same* corrected SceneMeshAlignment, so geometry is identical
+    # everywhere — robot's feet rest on the same surface they're drawn
+    # on.  Disable with DIMOS_SCENE_MESH_AUTO_GROUND=0.
+    if _scene_mesh_auto_ground:
+        try:
+            _probe_align = SceneMeshAlignment(
+                scale=_scene_mesh_scale,
+                rotation_zyx_deg=_scene_mesh_rotation,
+                translation=_scene_mesh_translation,
+                y_up=_scene_mesh_y_up,
+            )
+            _floor_z = floor_z_under_origin(_scene_mesh_path, alignment=_probe_align)
+            if abs(_floor_z) > 1e-6:
+                _scene_mesh_translation = (
+                    _scene_mesh_translation[0],
+                    _scene_mesh_translation[1],
+                    _scene_mesh_translation[2] - _floor_z,
+                )
+                logger.info(
+                    f"Scene-mesh auto-ground: floor under origin was at z={_floor_z:+.3f} m; "
+                    f"translating scene by dz={-_floor_z:+.3f} m so it lands at z=0"
+                )
+        except Exception as e:
+            logger.warning(f"Scene-mesh auto-ground probe failed: {e}; using user alignment as-is")
+
+    if _scene_mesh_collision:
+        from dimos.mapping.usdz_to_mjcf import bake_scene_mjcf
+
+        try:
+            _MJCF_PATH = str(
+                bake_scene_mjcf(
+                    scene_mesh_path=_scene_mesh_path,
+                    robot_mjcf_path=_MJCF_PATH,
+                    alignment=SceneMeshAlignment(
+                        scale=_scene_mesh_scale,
+                        rotation_zyx_deg=_scene_mesh_rotation,
+                        translation=_scene_mesh_translation,
+                        y_up=_scene_mesh_y_up,
+                    ),
+                )
+            )
+            logger.info(f"Scene-mesh collision: using wrapped MJCF {_MJCF_PATH}")
+        except Exception as e:
+            logger.warning(
+                f"Failed to bake scene mesh into MJCF: {e}; falling back to bare robot MJCF "
+                f"(visualization will still show the mesh, but physics won't collide with it)"
+            )
+
+# Optional MuJoCo native viewer.  ``MujocoSimModule`` runs MuJoCo on a
+# *worker* thread and on macOS that can't host ``viewer.launch_passive``
+# (glfw needs the main thread).  Spawn a separate process *from the
+# dimos CLI main process*, that subscribes to ``/coordinator/joint_state``
+# + ``/odom`` over LCM and mirrors the live state into its own
+# ``MjData``.  No physics in the viewer — just rendering — so what you
+# see is exactly what dimos's engine is producing.
 #
-# Both arms registered.  Drake's "load g1.urdf twice → two complete G1s
-# welded at world origin → COLLISION_AT_START" trap is sidestepped by
-# ManipulationModule._initialize_planning, which dedupes by model_path
-# and registers the second arm via DrakeWorld.add_robot(share_model_with=…)
-# — one URDF parse, two views (left_wrist_yaw vs right_wrist_yaw).
+# IMPORTANT: this blueprint module is also imported inside dimos worker
+# processes when they look up module classes.  Workers are daemonic
+# (multiprocessing forbids them from spawning children).  Only spawn
+# from MainProcess so worker imports are no-ops here.
+import multiprocessing as _mp
+
+if (
+    os.environ.get("DIMOS_MUJOCO_VIEW", "0") not in ("", "0")
+    and _mp.current_process().name == "MainProcess"
+):
+    import shutil
+    import subprocess
+
+    # ``mujoco.viewer.launch_passive`` checks ``sys.executable`` and
+    # raises on macOS unless it's ``mjpython`` (a glfw-bootstrap launcher
+    # shipped with the mujoco package).  Linux has no such restriction
+    # and runs fine under regular ``python``.
+    if sys.platform == "darwin":
+        _viewer_python = shutil.which("mjpython") or shutil.which("python")
+    else:
+        _viewer_python = sys.executable
+    if _viewer_python is None:
+        logger.warning(
+            "DIMOS_MUJOCO_VIEW=1: couldn't locate mjpython/python on PATH; viewer not launched"
+        )
+    else:
+        _viewer_proc = subprocess.Popen(
+            [
+                _viewer_python,
+                "-m",
+                "dimos.simulation.engines.mujoco_view_subprocess",
+                _MJCF_PATH,
+            ],
+        )
+        logger.info(
+            f"DIMOS_MUJOCO_VIEW=1: MuJoCo viewer subprocess started "
+            f"(pid={_viewer_proc.pid}, executable={_viewer_python}, mjcf={_MJCF_PATH})"
+        )
+
+# Manipulation: G1 left + right arms as 7-DOF stationary manipulators
+# rooted at the floating-base pelvis.  Drake-driven IK + RRT plans
+# trajectories; the coordinator's "trajectory" task on the same joint
+# subset executes them.
+#
+# Both arms share a single URDF parse — Drake's "load g1.urdf twice ->
+# two complete G1s welded at world origin -> COLLISION_AT_START" trap
+# is sidestepped by ManipulationModule._initialize_planning, which
+# dedupes by model_path and registers the second arm via
+# DrakeWorld.add_robot(share_model_with=...) — one parse, two views
+# (left_wrist_yaw vs right_wrist_yaw).
 _g1_left_arm_cfg = g1_left_arm()
 _g1_right_arm_cfg = g1_right_arm()
 
@@ -203,7 +345,7 @@ _g1_coordinator = (
 # torso lidar instead — a separate splat camera handles RGB perception.
 _g1_engine = MujocoSimModule.blueprint(
     address=_MJCF_PATH,
-    headless=False,
+    headless=sys.platform == "darwin",
     dof=29,
     # SplatCameraModule is the canonical RGB source for this sim; suppress
     # MujocoSimModule's own RGB to keep /splat/color_image single-publisher
@@ -267,37 +409,77 @@ except Exception as e:
     logger.warning(f"Splat asset unavailable: {e}; viser viewer + splat camera disabled")
     _splat_path = None
 if _splat_path is not None and _splat_path.exists():
+    # Scene-mesh env vars (DIMOS_SCENE_MESH_*) are parsed at module top —
+    # the resulting alignment + path get reused here for the viser viewer
+    # and the mesh-camera module.
+
+    # When the user provides their own scene mesh, don't show the unrelated
+    # dimos_office splat in the viewer at all — the splat would just confuse
+    # the picture.  The SplatCameraModule below still uses the splat for the
+    # head-camera feed (separate concern, still publishes ``/splat/color_image``).
+    _viser_splat_path = None if _scene_mesh_path else str(_splat_path)
     _g1_viser = ViserRenderModule.blueprint(
-        splat_path=str(_splat_path),
+        splat_path=_viser_splat_path,
         mjcf_path=_MJCF_PATH,
         alignment_yaml=str(_alignment_yaml) if _alignment_yaml.exists() else None,
         port=8082,
+        scene_mesh_path=_scene_mesh_path,
+        scene_mesh_scale=_scene_mesh_scale,
+        scene_mesh_translation=_scene_mesh_translation,
+        scene_mesh_rotation_zyx_deg=_scene_mesh_rotation,
+        scene_mesh_y_up=_scene_mesh_y_up,
     ).transports(
         {
             ("joint_state", JointState): LCMTransport("/coordinator/joint_state", JointState),
             ("odom", PoseStamped): LCMTransport("/odom", PoseStamped),
         },
     )
-    _g1_splat_cam = SplatCameraModule.blueprint(
-        splat_path=str(_splat_path),
-        mjcf_path=_MJCF_PATH,
-        alignment_yaml=str(_alignment_yaml) if _alignment_yaml.exists() else None,
-        render_hz=10.0,
-        # Match the MJCF camera name MujocoSimModule renders depth from
-        # so the published color frame_id == depth frame_id ==
-        # head_color_color_optical_frame.  ObjectSceneRegistration's
-        # tf.get(target_frame, color.frame_id, ts) succeeds because
-        # MujocoSimModule already publishes TF for that frame.
-        frame_id="head_color_color_optical_frame",
-    ).transports(
-        {
-            ("joint_state", JointState): LCMTransport("/coordinator/joint_state", JointState),
-            ("odom", PoseStamped): LCMTransport("/odom", PoseStamped),
-            ("color_image", Image): LCMTransport("/splat/color_image", Image),
-            ("camera_info", CameraInfo): LCMTransport("/splat/camera_info", CameraInfo),
-        },
-    )
-    _viser_modules = (_g1_viser, _g1_splat_cam)
+    # Camera publisher.  When the user provided their own scene mesh we
+    # render the head camera by ray-casting that mesh (so /splat/color_image
+    # actually shows the loaded scene); otherwise we fall back to the splat
+    # rasterizer driving dimos_office.  Set ``DIMOS_DISABLE_MESH_CAMERA=1``
+    # to force the splat path even when a mesh is provided (escape hatch
+    # while debugging — accepts any non-empty value other than "0").
+    _disable_mesh_cam = os.environ.get("DIMOS_DISABLE_MESH_CAMERA", "0") not in ("", "0")
+    if _scene_mesh_path and not _disable_mesh_cam:
+        _g1_camera = MeshCameraModule.blueprint(
+            scene_path=_scene_mesh_path,
+            mjcf_path=_MJCF_PATH,
+            scene_scale=_scene_mesh_scale,
+            scene_translation=_scene_mesh_translation,
+            scene_rotation_zyx_deg=_scene_mesh_rotation,
+            scene_y_up=_scene_mesh_y_up,
+            render_hz=10.0,
+            # ObjectSceneRegistration's tf.get(target_frame, color.frame_id, ts)
+            # needs color.frame_id == the MJCF camera's TF frame so the
+            # head/depth_image frame_id matches.
+            frame_id="head_color_color_optical_frame",
+        ).transports(
+            {
+                ("joint_state", JointState): LCMTransport("/coordinator/joint_state", JointState),
+                ("odom", PoseStamped): LCMTransport("/odom", PoseStamped),
+                ("color_image", Image): LCMTransport("/splat/color_image", Image),
+                ("camera_info", CameraInfo): LCMTransport("/splat/camera_info", CameraInfo),
+            },
+        )
+    else:
+        _g1_camera = SplatCameraModule.blueprint(
+            splat_path=str(_splat_path),
+            mjcf_path=_MJCF_PATH,
+            alignment_yaml=str(_alignment_yaml) if _alignment_yaml.exists() else None,
+            render_hz=10.0,
+            # Match MujocoSimModule's depth camera frame so RGB and depth
+            # share frame_id; ObjectSceneRegistration's tf lookup needs that.
+            frame_id="head_color_color_optical_frame",
+        ).transports(
+            {
+                ("joint_state", JointState): LCMTransport("/coordinator/joint_state", JointState),
+                ("odom", PoseStamped): LCMTransport("/odom", PoseStamped),
+                ("color_image", Image): LCMTransport("/splat/color_image", Image),
+                ("camera_info", CameraInfo): LCMTransport("/splat/camera_info", CameraInfo),
+            },
+        )
+    _viser_modules = (_g1_viser, _g1_camera)
 
 # Mapping + planning + memory + telemetry layered on top of the base
 # sim.  The base sim publishes pointcloud → /lidar (see the engine
@@ -311,6 +493,13 @@ _g1_perception_stack = (
         }
     ),
     CostMapper.blueprint(),
+    # On macOS the depth-render-based ``/lidar`` pipeline is silent
+    # (mujoco.Renderer can't build Metal pipeline state in a forkserver
+    # child — see splat_camera.py's MlxBackend for the same XPC issue),
+    # so ``CostMapper`` would sit idle.  Publish a constant all-free
+    # ``OccupancyGrid`` instead so click-to-nav has something to plan
+    # against — correct for the flat-floor MJCF baseline.
+    *((StaticCostmapModule.blueprint(),) if sys.platform == "darwin" else ()),
     ReplanningAStarPlanner.blueprint(),
     # Visual perception (object detection + tracking, semantic spatial memory)
     SpatialMemory.blueprint(),
@@ -331,6 +520,11 @@ _g1_perception_stack = (
 # Vision is via PerceiveLoopSkill (Qwen API), memory introspection via
 # TemporalMemory.query().  Requires OPENAI_API_KEY (LLM + TTS) and
 # ALIBABA_API_KEY (Qwen-VL for navigate_with_text + look_out_for).
+#
+# Note: on macOS, McpServer.on_system_modules can stall past its 120 s
+# budget because the agentic + heavy perception modules cost ~30+ s of
+# cold-start. If running on Mac, gate this stack off and rely only on
+# G1SimLocomotion + PatrollingModule + WavefrontFrontierExplorer.
 _g1_agentic_stack = (
     McpServer.blueprint(),
     McpClient.blueprint(system_prompt=G1_SYSTEM_PROMPT),
