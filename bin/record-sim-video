@@ -136,26 +136,24 @@ def main() -> int:
     captured: list[Path] = []
     capture_period = 1.0 / args.fps
 
-    # Fixed top-down camera looking at the whole house — same framing as
-    # the doc-friendly screenshot in /tmp/scene_209_walls_topdown.png.
-    # Robot position is overlaid as a red disk after we render so the
-    # video clearly shows the path being walked.
-    cam.lookat[:] = (1.5, 8.0, 0.0)
-    cam.distance = 22.0
+    # Fixed top-down camera framing the whole 13-room house.  Camera
+    # framing chosen to cover y∈[-7, 25] (south of dining_room to north
+    # of bedroom_4).  Projection scale is derived from the model's actual
+    # vis.global_.fovy — the earlier ad-hoc heuristic was off by ~½ and
+    # placed the marker in the wrong room.
+    import math as _math
+    cam.lookat[:] = (1.5, 9.5, 0.0)
+    cam.distance = 40.0
     cam.azimuth = 90.0
-    cam.elevation = -89.0  # almost dead-top-down — slight tilt keeps walls visible
+    cam.elevation = -89.999
+    _fovy_rad = _math.radians(model.vis.global_.fovy)
+    _vis_h = 2.0 * cam.distance * _math.tan(_fovy_rad / 2.0)
 
     def _draw_robot_marker(arr: np.ndarray, x: float, y: float) -> None:
-        # Project world (x, y) onto the rendered top-down image.  At
-        # elevation = -89° the y-axis runs roughly down, x-axis right.
-        # We approximate the projection by inverting MuJoCo's renderer
-        # framing analytically: the lookat point maps to image centre,
-        # and the visible rect is roughly cam.distance × cam.distance
-        # wide for default fovy=45°.  Good enough for a pose marker.
         h, w, _ = arr.shape
-        scale = min(w, h) / (cam.distance * 1.6)
-        cx = w / 2 + (x - cam.lookat[0]) * scale
-        cy = h / 2 - (y - cam.lookat[1]) * scale
+        px_per_m = h / _vis_h
+        cx = w / 2 + (x - cam.lookat[0]) * px_per_m
+        cy = h / 2 - (y - cam.lookat[1]) * px_per_m
         r = 6
         ix0, ix1 = max(0, int(cx - r)), min(w, int(cx + r))
         iy0, iy1 = max(0, int(cy - r)), min(h, int(cy + r))
