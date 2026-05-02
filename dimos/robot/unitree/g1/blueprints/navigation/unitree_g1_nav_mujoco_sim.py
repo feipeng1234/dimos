@@ -146,9 +146,13 @@ unitree_g1_nav_mujoco_sim = (
         mujoco_room="hssd_house",
         # Scene_209 spans y ∈ [-3.5, 22.25] (south to north) with the
         # central hallway at (1.2, 10) and rooms branching off it.
-        # Spawn at (1.2, -1.0) — south of every room, on the open
-        # extended floor plane, facing into the dining room corridor.
-        mujoco_start_pos="1.2, -1.0",
+        # Spawn at (1.2, 1.0) — inside the south end of the central
+        # hallway interior (hallway floor spans y ∈ [0, 20], x ∈ [0, 2.4],
+        # 2.4 m wide × 20 m tall).  Earlier placements at y=-1 sat in
+        # the wall band between dining_room (north edge y≈-0.2) and the
+        # hallway (south edge y=0); the robot would clip into the wall
+        # rather than land on a clear floor patch.
+        mujoco_start_pos="1.2, 1.0",
     )
 )
 
