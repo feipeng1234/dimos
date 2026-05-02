@@ -126,12 +126,20 @@ class EvalClient:
         self.ws.send(json.dumps(msg))
 
     def _wait_for(self, msg_type: str, timeout: float = 120) -> dict:
-        self.ws.settimeout(timeout)
+        # Track an absolute deadline (see test_dimsim_eval.EvalClient._wait_for).
+        deadline = time.time() + timeout
         while True:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                raise TimeoutError(f"Timed out waiting for {msg_type!r}")
+            self.ws.settimeout(min(remaining, 5.0))
             raw = self.ws.recv()
-            if isinstance(raw, bytes):
+            if isinstance(raw, bytes) or not raw:
                 continue
-            msg = json.loads(raw)
+            try:
+                msg = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
             if msg.get("type") == msg_type:
                 return msg
 
@@ -196,12 +204,19 @@ class ChannelEvalClient(EvalClient):
         self.ws.send(json.dumps(msg))
 
     def _wait_for(self, msg_type: str, timeout: float = 120) -> dict:
-        self.ws.settimeout(timeout)
+        # Track an absolute deadline: the bridge sends pose updates at 50 Hz so
+        # each recv() returns in ~20 ms; a single up-front settimeout() would
+        # never trip and the loop would hang the test forever.
+        deadline = time.time() + timeout
         while True:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                raise TimeoutError(
+                    f"Timed out waiting for {msg_type!r} on {self.channel}"
+                )
+            self.ws.settimeout(min(remaining, 5.0))
             raw = self.ws.recv()
-            if isinstance(raw, bytes):
-                continue
-            if not raw:
+            if isinstance(raw, bytes) or not raw:
                 continue
             try:
                 msg = json.loads(raw)

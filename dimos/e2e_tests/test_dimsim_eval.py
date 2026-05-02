@@ -109,12 +109,22 @@ class EvalClient:
         self.ws.send(json.dumps(msg))
 
     def _wait_for(self, msg_type: str, timeout: float = 120) -> dict:
-        self.ws.settimeout(timeout)
+        # Track an absolute deadline: the bridge streams pose at 50 Hz so each
+        # individual recv() returns in ~20 ms and a single up-front settimeout()
+        # would never trip even if the workflow hung indefinitely.
+        deadline = time.time() + timeout
         while True:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                raise TimeoutError(f"Timed out waiting for {msg_type!r}")
+            self.ws.settimeout(min(remaining, 5.0))
             raw = self.ws.recv()
-            if isinstance(raw, bytes):
+            if isinstance(raw, bytes) or not raw:
                 continue
-            msg = json.loads(raw)
+            try:
+                msg = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
             if msg.get("type") == msg_type:
                 return msg
 

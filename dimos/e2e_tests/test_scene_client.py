@@ -101,6 +101,7 @@ def scene(dimsim_server):
     client.close()
 
 
+@pytest.mark.skipif_in_ci
 @pytest.mark.slow
 class TestSceneClient:
     """SceneClient SDK tests against a live dimsim instance."""
