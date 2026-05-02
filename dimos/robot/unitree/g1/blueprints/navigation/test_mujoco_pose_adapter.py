@@ -16,7 +16,7 @@
 
 The adapter converts a `PoseStamped` (mujoco connection convention,
 frame_id="world") to a `nav_msgs/Odometry` (nav_stack convention,
-frame_id=FRAME_ODOM, child_frame_id=FRAME_BODY) and publishes a
+frame_id=_FRAME_PARENT, child_frame_id=_FRAME_CHILD) and publishes a
 matching `odom→body` Transform.
 
 These tests bypass the full module lifecycle and exercise the
@@ -31,10 +31,14 @@ from dimos.msgs.geometry_msgs.Quaternion import Quaternion
 from dimos.msgs.geometry_msgs.Transform import Transform
 from dimos.msgs.geometry_msgs.Vector3 import Vector3
 from dimos.msgs.nav_msgs.Odometry import Odometry
-from dimos.navigation.nav_stack.frames import FRAME_BODY, FRAME_ODOM
 from dimos.robot.unitree.g1.blueprints.navigation._mujoco_pose_adapter import (
     MujocoPoseToOdometryAdapter,
 )
+
+# Match the per-module string literals the adapter uses (frames.py
+# was deleted on rosnav8 in favour of inline strings).
+_FRAME_PARENT = "map"
+_FRAME_CHILD = "sensor"
 
 
 class _FakePort:
@@ -77,8 +81,8 @@ def test_publishes_odometry_with_nav_stack_frame_names() -> None:
     assert len(odometry_port.messages) == 1
     odom = odometry_port.messages[0]
     assert isinstance(odom, Odometry)
-    assert odom.frame_id == FRAME_ODOM
-    assert odom.child_frame_id == FRAME_BODY
+    assert odom.frame_id == _FRAME_PARENT
+    assert odom.child_frame_id == _FRAME_CHILD
     assert odom.ts == 42.0
     assert odom.position.x == 1.0
     assert odom.position.y == 2.0
@@ -101,8 +105,8 @@ def test_publishes_tf_transform_alongside_odometry() -> None:
     assert len(tf_port.messages) == 1
     tf_msg = tf_port.messages[0]
     assert isinstance(tf_msg, Transform)
-    assert tf_msg.frame_id == FRAME_ODOM
-    assert tf_msg.child_frame_id == FRAME_BODY
+    assert tf_msg.frame_id == _FRAME_PARENT
+    assert tf_msg.child_frame_id == _FRAME_CHILD
     assert tf_msg.ts == 7.0
     assert tf_msg.translation.x == -3.0
     assert tf_msg.translation.y == 4.0

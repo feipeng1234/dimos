@@ -19,8 +19,8 @@ and the connection itself publishes the TF `world → base_link`. The
 nav_stack consumers (SimplePlanner, FarPlanner, MovementManager,
 TerrainAnalysis) expect:
 
-- `odometry` as `nav_msgs/Odometry` with `frame_id=FRAME_ODOM` (`"odom"`)
-  and `child_frame_id=FRAME_BODY` (`"body"`).
+- `odometry` as `nav_msgs/Odometry` with `frame_id=_FRAME_PARENT` (`"odom"`)
+  and `child_frame_id=_FRAME_CHILD` (`"body"`).
 - A TF chain that includes `odom → body` so `(map, body)` and
   `(odom, body)` lookups resolve.
 
@@ -45,7 +45,17 @@ from dimos.msgs.geometry_msgs.Pose import Pose
 from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
 from dimos.msgs.geometry_msgs.Transform import Transform
 from dimos.msgs.nav_msgs.Odometry import Odometry
-from dimos.navigation.nav_stack.frames import FRAME_BODY, FRAME_ODOM
+
+# Frame names match the convention the Unity sim's UnityBridgeModule
+# publishes (``frame_id="map"``, ``child_frame_id="sensor"``) so the
+# downstream nav_stack consumers (SimplePlanner / FarPlanner /
+# MovementManager / TerrainAnalysis) see the same TF tree shape from
+# either sim source.  Was previously
+# ``from dimos.navigation.nav_stack.frames import _FRAME_CHILD, _FRAME_PARENT``
+# but ``frames.py`` was deleted on rosnav8 in favour of per-module
+# string literals.
+_FRAME_PARENT = "map"
+_FRAME_CHILD = "sensor"
 
 
 class MujocoPoseToOdometryAdapterConfig(ModuleConfig):
@@ -53,13 +63,7 @@ class MujocoPoseToOdometryAdapterConfig(ModuleConfig):
 
 
 class MujocoPoseToOdometryAdapter(Module):
-    """Convert mujoco PoseStamped → nav_stack-conventioned Odometry + TF.
-
-    Frame names are intentionally hardcoded to ``FRAME_ODOM`` / ``FRAME_BODY``
-    rather than being config knobs: nav_stack consumers (SimplePlanner,
-    FarPlanner, MovementManager, TerrainAnalysis) hardcode-search for those
-    exact frame strings, so any other choice would silently break TF lookups.
-    """
+    """Convert mujoco PoseStamped → nav_stack-conventioned Odometry + TF."""
 
     config: MujocoPoseToOdometryAdapterConfig
 
@@ -82,8 +86,8 @@ class MujocoPoseToOdometryAdapter(Module):
         self.odometry.publish(
             Odometry(
                 ts=msg.ts,
-                frame_id=FRAME_ODOM,
-                child_frame_id=FRAME_BODY,
+                frame_id=_FRAME_PARENT,
+                child_frame_id=_FRAME_CHILD,
                 pose=Pose(position=msg.position, orientation=msg.orientation),
             )
         )
@@ -92,8 +96,8 @@ class MujocoPoseToOdometryAdapter(Module):
             Transform(
                 translation=msg.position,
                 rotation=msg.orientation,
-                frame_id=FRAME_ODOM,
-                child_frame_id=FRAME_BODY,
+                frame_id=_FRAME_PARENT,
+                child_frame_id=_FRAME_CHILD,
                 ts=msg.ts,
             )
         )
