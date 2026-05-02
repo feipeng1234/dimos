@@ -144,15 +144,11 @@ unitree_g1_nav_mujoco_sim = (
         # --mujoco-room office1 to fall back to the original single-room
         # office, or --mujoco-room scene_empty for a featureless plane.
         mujoco_room="hssd_house",
-        # Scene_209 spans y ∈ [-6.2, 24.5] (south to north) with the
-        # central hallway at (1.2, 10) and rooms branching off it.
-        # Spawn at (1.2, -7.0) — on the open extended world floor about
-        # 0.8 m south of the dining_room's south wall (dining_room spans
-        # y ∈ [-6.2, -0.2], x ∈ [-3.8, 4.2]).  Robot drives north into
-        # the dining_room as the first leg.  The floor plane was widened
-        # to size="20 25" pos="0 9 -0.001" specifically so y=-7 is on
-        # solid ground.
-        mujoco_start_pos="1.2, -7.0",
+        # Spawn inside the dining_room (interior centre — the room's
+        # body frame).  Earlier placements on the open floor or in the
+        # hallway corridor kept landing in wall bands; the dining_room
+        # interior is a reliable known-walkable patch.
+        mujoco_start_pos="0.2, -3.2",
     )
 )
 
