@@ -100,6 +100,7 @@ def sim_nav():
         **os.environ,
         "DIMSIM_HEADLESS": "1",
         "DIMSIM_RENDER": render,
+        "DIMSIM_VERBOSE": "1",
         "PYTHONUNBUFFERED": "1",
         "PATH": venv_bin + os.pathsep + os.environ.get("PATH", ""),
     }

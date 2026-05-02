@@ -221,6 +221,7 @@ def dimos_sim_basic():
         **os.environ,
         "DIMSIM_HEADLESS": "1",
         "DIMSIM_RENDER": os.environ.get("DIMSIM_RENDER", "cpu"),
+        "DIMSIM_VERBOSE": "1",
         "PYTHONUNBUFFERED": "1",
         "PATH": venv_bin + os.pathsep + os.environ.get("PATH", ""),
     }
