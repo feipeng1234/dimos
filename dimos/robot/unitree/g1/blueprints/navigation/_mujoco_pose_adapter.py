@@ -14,24 +14,23 @@
 
 """MuJoCo G1 → nav_stack pose/odometry adapter.
 
-`G1SimConnection.odom` publishes `PoseStamped` with `frame_id="world"`
-and the connection itself publishes the TF `world → base_link`. The
-nav_stack consumers (SimplePlanner, FarPlanner, MovementManager,
-TerrainAnalysis) expect:
+`G1SimConnection.odom` publishes a ``PoseStamped`` (frame_id="world",
+the mujoco subprocess's world frame) on a stream consumed only by this
+adapter.  The nav_stack consumers (PGO, SimplePlanner, FarPlanner,
+MovementManager, TerrainAnalysis) want a ``nav_msgs/Odometry`` instead.
 
-- `odometry` as `nav_msgs/Odometry` with `frame_id=_FRAME_PARENT` (`"odom"`)
-  and `child_frame_id=_FRAME_CHILD` (`"body"`).
-- A TF chain that includes `odom → body` so `(map, body)` and
-  `(odom, body)` lookups resolve.
+Frame conventions: we pass ``msg.frame_id`` straight through (so the
+output Odometry inherits whatever world frame G1SimConnection's source
+labels its pose in — currently "world"), and use ``"base_link"`` as the
+child frame to match the existing G1 TF tree
+(``mujoco_sim.py::_publish_tf`` publishes ``world → base_link``,
+``base_link → camera_link``, etc).  We do NOT republish a transform on
+``self.tf`` — that edge is already in the TF tree.
 
-This module bridges both:
-- Subscribes to a PoseStamped stream, republishes as
-  `nav_msgs/Odometry` with the nav_stack frame names (twist zeroed —
-  the mujoco connection doesn't expose linear/angular velocity).
-- Publishes the matching `odom → body` Transform on the TF tree.
-
-PGO already publishes `map → odom` (loop-closure correction), so the
-chain `map → odom → body` becomes resolvable end-to-end.
+PGO's ``_on_odom`` only reads ``msg.pose`` + ``msg.ts``; the frame
+strings are informational for downstream consumers that match against
+their own ``ModuleConfig.world_frame`` / ``body_frame`` knobs (see
+``SimplePlannerConfig`` / ``PGOConfig``).
 """
 
 from __future__ import annotations
@@ -43,19 +42,15 @@ from dimos.core.module import Module, ModuleConfig
 from dimos.core.stream import In, Out
 from dimos.msgs.geometry_msgs.Pose import Pose
 from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
-from dimos.msgs.geometry_msgs.Transform import Transform
 from dimos.msgs.nav_msgs.Odometry import Odometry
 
-# Frame names match the convention the Unity sim's UnityBridgeModule
-# publishes (``frame_id="map"``, ``child_frame_id="sensor"``) so the
-# downstream nav_stack consumers (SimplePlanner / FarPlanner /
-# MovementManager / TerrainAnalysis) see the same TF tree shape from
-# either sim source.  Was previously
-# ``from dimos.navigation.nav_stack.frames import _FRAME_CHILD, _FRAME_PARENT``
-# but ``frames.py`` was deleted on rosnav8 in favour of per-module
-# string literals.
-_FRAME_PARENT = "map"
-_FRAME_CHILD = "sensor"
+# G1's canonical body frame, used by every other G1 module that
+# publishes a transform with the robot as its child (see
+# ``dimos/robot/unitree/g1/mujoco_sim.py::_publish_tf`` and
+# ``dimos/robot/unitree/g1/blueprints/primitive/...``).  Hardcoding
+# this matches the de-facto convention rather than introducing a
+# fourth name.
+_G1_BODY_FRAME = "base_link"
 
 
 class MujocoPoseToOdometryAdapterConfig(ModuleConfig):
@@ -63,7 +58,7 @@ class MujocoPoseToOdometryAdapterConfig(ModuleConfig):
 
 
 class MujocoPoseToOdometryAdapter(Module):
-    """Convert mujoco PoseStamped → nav_stack-conventioned Odometry + TF."""
+    """Convert mujoco PoseStamped → nav_msgs/Odometry, frame-passthrough."""
 
     config: MujocoPoseToOdometryAdapterConfig
 
@@ -86,19 +81,9 @@ class MujocoPoseToOdometryAdapter(Module):
         self.odometry.publish(
             Odometry(
                 ts=msg.ts,
-                frame_id=_FRAME_PARENT,
-                child_frame_id=_FRAME_CHILD,
+                frame_id=msg.frame_id,
+                child_frame_id=_G1_BODY_FRAME,
                 pose=Pose(position=msg.position, orientation=msg.orientation),
-            )
-        )
-
-        self.tf.publish(
-            Transform(
-                translation=msg.position,
-                rotation=msg.orientation,
-                frame_id=_FRAME_PARENT,
-                child_frame_id=_FRAME_CHILD,
-                ts=msg.ts,
             )
         )
 

@@ -14,31 +14,24 @@
 
 """Unit tests for MujocoPoseToOdometryAdapter.
 
-The adapter converts a `PoseStamped` (mujoco connection convention,
-frame_id="world") to a `nav_msgs/Odometry` (nav_stack convention,
-frame_id=_FRAME_PARENT, child_frame_id=_FRAME_CHILD) and publishes a
-matching `odom→body` Transform.
-
-These tests bypass the full module lifecycle and exercise the
-conversion logic directly so we can verify frame names, pose values,
-and timestamps without standing up a coordinator.
+The adapter converts a ``PoseStamped`` (the mujoco subprocess publishes
+these on ``G1SimConnection.odom`` with frame_id="world") to a
+``nav_msgs/Odometry``.  Frame names: parent passes through from the
+input (so consumers see the same world frame the source labelled it
+in), and child is hardcoded to ``"base_link"`` — G1's canonical body
+frame, used throughout the rest of the G1 module tree
+(``mujoco_sim.py::_publish_tf``, the camera modules, etc).
 """
 
 from __future__ import annotations
 
 from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
 from dimos.msgs.geometry_msgs.Quaternion import Quaternion
-from dimos.msgs.geometry_msgs.Transform import Transform
 from dimos.msgs.geometry_msgs.Vector3 import Vector3
 from dimos.msgs.nav_msgs.Odometry import Odometry
 from dimos.robot.unitree.g1.blueprints.navigation._mujoco_pose_adapter import (
     MujocoPoseToOdometryAdapter,
 )
-
-# Match the per-module string literals the adapter uses (frames.py
-# was deleted on rosnav8 in favour of inline strings).
-_FRAME_PARENT = "map"
-_FRAME_CHILD = "sensor"
 
 
 class _FakePort:
@@ -51,23 +44,21 @@ class _FakePort:
         self.messages.append(msg)
 
 
-def _make_adapter() -> tuple[MujocoPoseToOdometryAdapter, _FakePort, _FakePort]:
-    """Build an adapter with stubbed `odometry` and `tf` ports.
+def _make_adapter() -> tuple[MujocoPoseToOdometryAdapter, _FakePort]:
+    """Build an adapter with a stubbed ``odometry`` port.
 
-    Avoids `MujocoPoseToOdometryAdapter()` (which would auto-instantiate
-    `odom: In[PoseStamped]` and `odometry: Out[Odometry]` from the type
-    annotations) so we can isolate the conversion logic.
+    Avoids ``MujocoPoseToOdometryAdapter()`` (which would auto-instantiate
+    ``odom: In[PoseStamped]`` and ``odometry: Out[Odometry]`` from the
+    type annotations) so we can isolate the conversion logic.
     """
     adapter = MujocoPoseToOdometryAdapter.__new__(MujocoPoseToOdometryAdapter)
     odometry_port = _FakePort()
-    tf_port = _FakePort()
     adapter.odometry = odometry_port  # type: ignore[assignment]
-    adapter._tf = tf_port  # type: ignore[assignment]
-    return adapter, odometry_port, tf_port
+    return adapter, odometry_port
 
 
-def test_publishes_odometry_with_nav_stack_frame_names() -> None:
-    adapter, odometry_port, _ = _make_adapter()
+def test_passes_through_input_frame_id_with_g1_body_child() -> None:
+    adapter, odometry_port = _make_adapter()
 
     pose = PoseStamped(
         ts=42.0,
@@ -81,8 +72,8 @@ def test_publishes_odometry_with_nav_stack_frame_names() -> None:
     assert len(odometry_port.messages) == 1
     odom = odometry_port.messages[0]
     assert isinstance(odom, Odometry)
-    assert odom.frame_id == _FRAME_PARENT
-    assert odom.child_frame_id == _FRAME_CHILD
+    assert odom.frame_id == "world"  # passed through from PoseStamped
+    assert odom.child_frame_id == "base_link"  # G1 canonical body frame
     assert odom.ts == 42.0
     assert odom.position.x == 1.0
     assert odom.position.y == 2.0
@@ -90,31 +81,29 @@ def test_publishes_odometry_with_nav_stack_frame_names() -> None:
     assert odom.orientation.w == 1.0
 
 
-def test_publishes_tf_transform_alongside_odometry() -> None:
-    adapter, _, tf_port = _make_adapter()
+def test_inherits_alternate_frame_id_when_source_changes() -> None:
+    adapter, odometry_port = _make_adapter()
 
+    # If anyone ever changes G1SimConnection's PoseStamped frame_id, the
+    # adapter inherits it instead of silently overriding to a hardcoded
+    # name.
     pose = PoseStamped(
-        ts=7.0,
-        frame_id="world",
-        position=Vector3(-3.0, 4.0, 1.0),
-        orientation=Quaternion(0.0, 0.0, 0.7071, 0.7071),
+        ts=1.0,
+        frame_id="some_other_world",
+        position=Vector3(0.0, 0.0, 0.0),
+        orientation=Quaternion(0.0, 0.0, 0.0, 1.0),
     )
 
     adapter._on_pose(pose)
 
-    assert len(tf_port.messages) == 1
-    tf_msg = tf_port.messages[0]
-    assert isinstance(tf_msg, Transform)
-    assert tf_msg.frame_id == _FRAME_PARENT
-    assert tf_msg.child_frame_id == _FRAME_CHILD
-    assert tf_msg.ts == 7.0
-    assert tf_msg.translation.x == -3.0
-    assert tf_msg.translation.y == 4.0
-    assert tf_msg.translation.z == 1.0
+    odom = odometry_port.messages[0]
+    assert isinstance(odom, Odometry)
+    assert odom.frame_id == "some_other_world"
+    assert odom.child_frame_id == "base_link"
 
 
-def test_each_pose_emits_one_odom_and_one_tf() -> None:
-    adapter, odometry_port, tf_port = _make_adapter()
+def test_each_pose_emits_one_odom() -> None:
+    adapter, odometry_port = _make_adapter()
 
     # Note: PoseStamped substitutes ``time.time()`` for a literal ``ts=0``,
     # so we start at 1.0 to keep the assertion deterministic.
@@ -129,6 +118,4 @@ def test_each_pose_emits_one_odom_and_one_tf() -> None:
         adapter._on_pose(pose)
 
     assert len(odometry_port.messages) == 5
-    assert len(tf_port.messages) == 5
     assert [m.ts for m in odometry_port.messages] == timestamps  # type: ignore[attr-defined]
-    assert [m.ts for m in tf_port.messages] == timestamps  # type: ignore[attr-defined]
