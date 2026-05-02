@@ -32,7 +32,7 @@ from dimos.core.coordination.blueprints import autoconnect
 from dimos.core.transport import JpegLcmTransport
 from dimos.mapping.costmapper import CostMapper
 from dimos.mapping.voxels import VoxelGridMapper
-from dimos.msgs.sensor_msgs import Image
+from dimos.msgs.sensor_msgs.Image import Image
 from dimos.navigation.frontier_exploration.wavefront_frontier_goal_selector import (
     WavefrontFrontierExplorer,
 )
@@ -41,7 +41,7 @@ from dimos.perception.experimental.temporal_memory.temporal_memory import Tempor
 from dimos.perception.spatial_perception import SpatialMemory
 from dimos.robot.sim.bridge import sim_bridge
 from dimos.robot.sim.tf_module import sim_tf
-from dimos.utils.data import DIMOS_PROJECT_ROOT
+from dimos.constants import DIMOS_PROJECT_ROOT
 
 # Per-instance isolation: separate ChromaDB + visual memory paths
 _instance_id = os.environ.get("EVAL_INSTANCE_ID", "0")

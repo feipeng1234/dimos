@@ -219,8 +219,11 @@ def eval_client(sim_eval):
     client.close()
 
 
-# Runs in CI: spawns dimos sim-eval headless, exercises the eval harness over WS.
-# Requires multicast routing, network egress (dimsim binary download), and headless Chrome.
+# Skipped in CI: headless Chrome WebGL pipeline doesn't produce sensor frames on
+# the self-hosted macOS runner, so dimos sim-eval times out before any workflow runs.
+# Run locally with a real browser:
+#     pytest dimos/e2e_tests/test_dimsim_eval.py -v -s
+@pytest.mark.skipif_in_ci
 class TestSimEvalSequential:
     """Run DimSim evals sequentially against a live dimos sim-eval instance."""
 

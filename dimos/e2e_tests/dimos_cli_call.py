@@ -45,6 +45,7 @@ class DimosCliCall:
         session and ``os.killpg`` can raise ``PermissionError``.  In that case
         we fall back to signalling just the lead process.
         """
+        assert self.process is not None
         try:
             os.killpg(self.process.pid, sig)
         except PermissionError:

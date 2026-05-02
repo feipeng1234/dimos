@@ -41,7 +41,7 @@ import json
 from pathlib import Path
 import shutil
 import threading
-from typing import Any
+from typing import Any, cast
 import uuid
 
 import websocket
@@ -198,7 +198,7 @@ class SceneClient:
         self.channel = channel
         self.timeout = timeout
         self._pending: dict[str, threading.Event] = {}
-        self._results: dict[str, dict] = {}
+        self._results: dict[str, dict[str, Any]] = {}
         self._ws: websocket.WebSocket | None = None
         self._recv_thread: threading.Thread | None = None
         self._closed = False
@@ -211,7 +211,7 @@ class SceneClient:
         if self.channel:
             url += f"&channel={self.channel}"
         self._ws = websocket.WebSocket()
-        self._ws.connect(url)
+        self._ws.connect(url)  # type: ignore[no-untyped-call]
         self._ws.settimeout(1.0)
         self._recv_thread = threading.Thread(target=self._recv_loop, daemon=True)
         self._recv_thread.start()
@@ -316,7 +316,7 @@ class SceneClient:
         collider: str | None = "trimesh",
         name: str | None = None,
         auto_scale: bool | float = True,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Load a GLTF/GLB map into the scene.
 
         Parameters
@@ -367,7 +367,7 @@ scene.add(model);
 {collider_js}
 return {{ name: model.name, uuid: model.uuid, collider: col, scaleFactor }};
 """
-        return self.exec(code)
+        return cast(dict[str, Any], self.exec(code))
 
     def remove_object(self, name: str) -> bool:
         """Remove a named object from the scene.
@@ -393,7 +393,7 @@ obj.traverse(c => {{ if (c.isMesh) {{ c.geometry?.dispose(); c.material?.dispose
 scene.remove(obj);
 return true;
 """
-        return self.exec(code)
+        return cast(bool, self.exec(code))
 
     def add_npc(
         self,
@@ -404,7 +404,7 @@ return true;
         scale: float | None = None,
         animation: str | int = 0,
         collider: bool = True,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Add an animated NPC character to the scene.
 
         Parameters
@@ -441,7 +441,7 @@ return true;
             opts["rotation"] = rotation
         if scale is not None:
             opts["scale"] = scale
-        return self.exec(f"return await addNPC({json.dumps(opts)});")
+        return cast(dict[str, Any], self.exec(f"return await addNPC({json.dumps(opts)});"))
 
     def remove_npc(self, name: str) -> bool:
         """Remove an NPC by name. Stops animation and removes collider.
@@ -456,13 +456,13 @@ return true;
         bool
             True if NPC was found and removed.
         """
-        return self.exec(f"return removeNPC({json.dumps(name)});")
+        return cast(bool, self.exec(f"return removeNPC({json.dumps(name)});"))
 
     def add_collider(
         self,
         name: str,
         shape: str = "trimesh",
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Add a physics collider to a named scene object.
 
         Parameters
@@ -482,7 +482,7 @@ const obj = scene.getObjectByName({json.dumps(name)});
 if (!obj) throw new Error("Object not found: {name}");
 return addCollider(obj, {json.dumps(shape)});
 """
-        return self.exec(code)
+        return cast(dict[str, Any], self.exec(code))
 
     def remove_collider(self, name: str) -> bool:
         """Remove collider from a named scene object.
@@ -502,7 +502,7 @@ const obj = scene.getObjectByName({json.dumps(name)});
 if (!obj) throw new Error("Object not found: {name}");
 return removeCollider(obj);
 """
-        return self.exec(code)
+        return cast(bool, self.exec(code))
 
     def add_object(
         self,
@@ -515,7 +515,7 @@ return removeCollider(obj);
         mass: float = 1.0,
         restitution: float = 0.3,
         collider: str | None = "box",
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Add a primitive object to the scene with optional physics.
 
         Parameters
@@ -580,7 +580,7 @@ scene.add(mesh);
 {collider_js}
 return {{ name: mesh.name, uuid: mesh.uuid, collider: col }};
 """
-        return self.exec(code)
+        return cast(dict[str, Any], self.exec(code))
 
     def set_embodiment(
         self,
@@ -600,7 +600,7 @@ return {{ name: mesh.name, uuid: mesh.uuid, collider: col }};
         max_slope_angle: float | None = None,
         friction: float | None = None,
         max_altitude: float | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Set the robot embodiment — from a preset or fully custom.
 
         Use a named preset as a starting point, then override any field.
@@ -844,9 +844,9 @@ for (const obj of toRemove) {
 }
 return count;
 """
-        return self.exec(code)
+        return cast(int, self.exec(code))
 
-    def get_scene_info(self) -> dict:
+    def get_scene_info(self) -> dict[str, Any]:
         """Get info about the current scene (object names, counts).
 
         Returns
@@ -862,7 +862,7 @@ scene.traverse(obj => {
 });
 return { objectCount: objects.length, objects: objects.slice(0, 100) };
 """
-        return self.exec(code)
+        return cast(dict[str, Any], self.exec(code))
 
     def set_agent_position(
         self,
@@ -886,7 +886,7 @@ return { objectCount: objects.length, objects: objects.slice(0, 100) };
             cmd["channel"] = self.channel
         self._ws.send(json.dumps(cmd))  # type: ignore[union-attr]
 
-    def get_agent_position(self) -> dict:
+    def get_agent_position(self) -> dict[str, Any]:
         """Get the agent's current world position.
 
         Returns
@@ -898,7 +898,7 @@ return { objectCount: objects.length, objects: objects.slice(0, 100) };
 const p = agent.group.position;
 return { x: p.x, y: p.y, z: p.z };
 """
-        return self.exec(code)
+        return cast(dict[str, Any], self.exec(code))
 
 
 __all__ = ["EMBODIMENT_PRESETS", "SceneClient", "SceneExecError"]
