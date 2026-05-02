@@ -96,6 +96,22 @@ jobs:
           sudo sysctl -w net.inet.udp.recvspace=2097152
           sudo sysctl -w net.inet.udp.maxdgram=65535
 
+      - name: Run dimsim e2e tests (fast feedback)
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ALIBABA_API_KEY: ${{ secrets.ALIBABA_API_KEY }}
+          LCM_DEFAULT_URL: "udpm://239.255.76.67:7667?ttl=0"
+          CI: "1"
+        # continue-on-error so the rest of the suite still runs and we get full
+        # CI signal even when sim-nav is broken.
+        continue-on-error: true
+        run: |
+          source .venv/bin/activate
+          python -m pytest --timeout=120 -v \
+            dimos/e2e_tests/test_dimsim_pipeline.py \
+            dimos/e2e_tests/test_dimsim_nav.py
+
       - name: Run tests
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -105,12 +121,7 @@ jobs:
           CI: "1"
         run: |
           source .venv/bin/activate
-          # Run dimsim e2e tests first so we get fast feedback on the long-pole
-          # subprocess tests; pytest dedupes so the dimos/ walk skips the repeats.
-          python -m pytest --durations=10 -m 'not (tool or mujoco)' --timeout=120 \
-            dimos/e2e_tests/test_dimsim_pipeline.py \
-            dimos/e2e_tests/test_dimsim_nav.py \
-            dimos/
+          python -m pytest --durations=10 -m 'not (tool or mujoco)' --timeout=120 dimos/
 
       - name: Check disk usage (post-test)
         if: always()
