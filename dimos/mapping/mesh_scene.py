@@ -328,6 +328,152 @@ def make_raycasting_scene(
     return scene
 
 
+@dataclass
+class ScenePrimMesh:
+    """One USD ``Mesh`` prim's geometry, ready to write to OBJ.
+
+    Used by ``load_scene_prims`` to keep prims separate so MuJoCo can
+    treat each as its own (approximately convex) collision shape.  When
+    the loader handles a non-USD format the input is returned as a
+    single-element list with the whole mesh in it.
+    """
+
+    name: str
+    """Sanitized identifier (safe for MJCF asset names) — typically the
+    USD prim path with non-alphanumerics replaced."""
+
+    vertices: np.ndarray
+    """``(N, 3)`` float32, in world frame after alignment."""
+
+    triangles: np.ndarray
+    """``(M, 3)`` int32 vertex indices."""
+
+
+def load_scene_prims(
+    path: str | Path,
+    alignment: SceneMeshAlignment | None = None,
+) -> list[ScenePrimMesh]:
+    """Load a USD/USDZ scene as one ``ScenePrimMesh`` per Mesh prim.
+
+    Per-prim splitting is what MuJoCo wants for non-trivial scenes:
+    each prim's convex hull approximates the prim well, while the
+    convex hull of the *whole* scene is its bounding box.  Falls back
+    to a single ScenePrimMesh for non-USD inputs (a single ``.obj`` or
+    ``.glb`` doesn't carry per-part semantics in our loader).
+
+    Same alignment rules as ``load_scene_mesh``.
+    """
+    path = Path(path)
+    align = alignment or SceneMeshAlignment()
+    suffix = path.suffix.lower()
+
+    if suffix not in {".usdz", ".usd", ".usdc", ".usda"}:
+        # Non-USD: one part, whole mesh.
+        whole = load_scene_mesh(path, alignment=align)
+        return [
+            ScenePrimMesh(
+                name="scene",
+                vertices=np.asarray(whole.vertices, dtype=np.float32),
+                triangles=np.asarray(whole.triangles, dtype=np.int32),
+            )
+        ]
+
+    try:
+        from pxr import Usd, UsdGeom
+    except ImportError as e:
+        raise ImportError("loading .usdz/.usd requires usd-core: `uv pip install usd-core`") from e
+
+    stage = Usd.Stage.Open(str(path))
+    if stage is None:
+        raise RuntimeError(f"could not open USD stage: {path}")
+
+    R = _world_rotation(align)
+    T = np.asarray(align.translation, dtype=np.float64)
+    s = float(align.scale)
+
+    prims: list[ScenePrimMesh] = []
+    for prim in stage.Traverse():
+        if not prim.IsA(UsdGeom.Mesh):
+            continue
+        usd_mesh = UsdGeom.Mesh(prim)
+        pts_attr = usd_mesh.GetPointsAttr().Get()
+        if pts_attr is None or len(pts_attr) == 0:
+            continue
+        pts = np.asarray(pts_attr, dtype=np.float64)
+        face_verts = np.asarray(usd_mesh.GetFaceVertexIndicesAttr().Get(), dtype=np.int32)
+        face_counts = np.asarray(usd_mesh.GetFaceVertexCountsAttr().Get(), dtype=np.int32)
+
+        # Local → stage-root via the USD prim's accumulated transform.
+        xform = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+        m = np.asarray(xform, dtype=np.float64).T
+        pts_h = np.hstack([pts, np.ones((len(pts), 1), dtype=np.float64)])
+        pts_stage = (m @ pts_h.T).T[:, :3]
+
+        # Stage-root → dimos world via SceneMeshAlignment (scale → rot → trans).
+        pts_world = (R @ (s * pts_stage).T).T + T
+
+        # Triangulate any quads / n-gons (vertex indices are local to this prim now).
+        tris: list[tuple[int, int, int]] = []
+        cursor = 0
+        for n in face_counts:
+            for k in range(1, n - 1):
+                tris.append(
+                    (
+                        int(face_verts[cursor]),
+                        int(face_verts[cursor + k]),
+                        int(face_verts[cursor + k + 1]),
+                    )
+                )
+            cursor += n
+        if not tris:
+            continue
+
+        # MJCF asset names: strip the leading slash, swap remaining
+        # path separators / dots for underscores.  USD prim paths can
+        # collide on the same leaf; suffix the index so each is unique.
+        raw = str(prim.GetPath()).lstrip("/")
+        clean = "".join(c if c.isalnum() else "_" for c in raw)
+        prims.append(
+            ScenePrimMesh(
+                name=f"{clean}__{len(prims)}",
+                vertices=pts_world.astype(np.float32),
+                triangles=np.asarray(tris, dtype=np.int32),
+            )
+        )
+
+    if not prims:
+        raise RuntimeError(f"no Mesh prims with triangles found in {path}")
+    return prims
+
+
+def floor_z_under_origin(
+    scene_mesh_path: str | Path,
+    alignment: SceneMeshAlignment | None = None,
+) -> float:
+    """Return the z of the first surface ``(x=0, y=0)`` falls onto.
+
+    Casts one ray straight down from a high z; the first hit defines
+    the local floor at origin.  Falls back to the mesh's bbox min-z
+    when origin is over a hole (or outside the bbox xy footprint).
+    Used by the GR00T sim blueprint to align the loaded scene with
+    the robot's default spawn pose so all three downstream views
+    (viser, mesh camera, MuJoCo physics) share one world frame.
+    """
+    import open3d.core as o3c
+
+    mesh = load_scene_mesh(scene_mesh_path, alignment=alignment)
+    scene = make_raycasting_scene(mesh)
+    rays = o3c.Tensor(
+        np.array([[0.0, 0.0, 1000.0, 0.0, 0.0, -1.0]], dtype=np.float32),
+        dtype=o3c.Dtype.Float32,
+    )
+    t = float(scene.cast_rays(rays)["t_hit"].numpy()[0])
+    if np.isfinite(t):
+        return 1000.0 - t
+    bb = mesh.get_axis_aligned_bounding_box()
+    return float(bb.min_bound[2])
+
+
 __all__ = [
     "SceneMeshAlignment",
     "load_scene_mesh",

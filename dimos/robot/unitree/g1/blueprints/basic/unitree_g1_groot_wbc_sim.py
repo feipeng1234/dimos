@@ -113,6 +113,144 @@ class G1Memory(Recorder):
 # subprocess (and now the in-process MujocoEngine) computes PD itself.
 _MJCF_PATH = "data/mujoco_sim/g1_gear_wbc.xml"
 
+# Optional scene mesh (.usdz / .glb / .obj / etc.) — used by:
+#   * viser viewer (renders the colored mesh in the browser)
+#   * MeshCameraModule (ray-casts the head-camera RGB feed)
+#   * MuJoCo physics (when DIMOS_SCENE_MESH_COLLISION=1, the default
+#     when a path is provided — the mesh is baked into a wrapped MJCF
+#     and added as a static collidable so the robot can't phase
+#     through walls).
+# Configure via env vars so trying different downloaded scenes doesn't
+# require editing the blueprint:
+#   DIMOS_SCENE_MESH_PATH   = path to .usdz/.glb/.obj/etc.
+#   DIMOS_SCENE_MESH_SCALE  = e.g. 0.01 if source is centimeters
+#   DIMOS_SCENE_MESH_TRANSLATION = "x,y,z" world-frame offset
+#   DIMOS_SCENE_MESH_ROTATION_ZYX_DEG = "z,y,x" extra euler in degrees
+#   DIMOS_SCENE_MESH_Y_UP   = "0" to disable the y-up→z-up swap
+#   DIMOS_SCENE_MESH_COLLISION = "0" to skip baking + use the bare
+#       robot MJCF (visualization-only).  Default: bake when path set.
+#   DIMOS_SCENE_MESH_AUTO_GROUND = "1" to auto-translate the scene so
+#       the *first* surface a ray-down at origin hits lands at world
+#       z=0.  Off by default — for multi-story scenes the first hit is
+#       usually a ceiling / upper floor, not the ground.  Use only when
+#       you know origin is over the surface you want to stand on.
+_scene_mesh_path = os.environ.get("DIMOS_SCENE_MESH_PATH", "") or None
+# Default scale 0.05 targets Sketchfab USDZ exports (typically in cm
+# with maps designed for ~30×60 m FPS arenas).  Override for meshes
+# already authored in meters.
+_scene_mesh_scale = float(os.environ.get("DIMOS_SCENE_MESH_SCALE", "0.05"))
+_scene_mesh_translation = tuple(
+    float(x) for x in os.environ.get("DIMOS_SCENE_MESH_TRANSLATION", "0,0,0").split(",")
+)
+_scene_mesh_rotation = tuple(
+    float(x) for x in os.environ.get("DIMOS_SCENE_MESH_ROTATION_ZYX_DEG", "0,0,0").split(",")
+)
+_scene_mesh_y_up = os.environ.get("DIMOS_SCENE_MESH_Y_UP", "1") != "0"
+_scene_mesh_collision = os.environ.get("DIMOS_SCENE_MESH_COLLISION", "1") not in ("", "0")
+_scene_mesh_auto_ground = os.environ.get("DIMOS_SCENE_MESH_AUTO_GROUND", "0") not in ("", "0")
+
+if _scene_mesh_path:
+    from dimos.mapping.mesh_scene import SceneMeshAlignment, floor_z_under_origin
+
+    # If auto-ground is on, ray-cast the scene under (0, 0, ·) once with
+    # the user's alignment, then subtract that floor z from translation
+    # so the floor at origin lands exactly on world z=0.  All three
+    # downstream views (viser, mesh camera, MuJoCo physics) get the
+    # *same* corrected SceneMeshAlignment, so geometry is identical
+    # everywhere — robot's feet rest on the same surface they're drawn
+    # on.  Disable with DIMOS_SCENE_MESH_AUTO_GROUND=0.
+    if _scene_mesh_auto_ground:
+        try:
+            _probe_align = SceneMeshAlignment(
+                scale=_scene_mesh_scale,
+                rotation_zyx_deg=_scene_mesh_rotation,
+                translation=_scene_mesh_translation,
+                y_up=_scene_mesh_y_up,
+            )
+            _floor_z = floor_z_under_origin(_scene_mesh_path, alignment=_probe_align)
+            if abs(_floor_z) > 1e-6:
+                _scene_mesh_translation = (
+                    _scene_mesh_translation[0],
+                    _scene_mesh_translation[1],
+                    _scene_mesh_translation[2] - _floor_z,
+                )
+                logger.info(
+                    f"Scene-mesh auto-ground: floor under origin was at z={_floor_z:+.3f} m; "
+                    f"translating scene by dz={-_floor_z:+.3f} m so it lands at z=0"
+                )
+        except Exception as e:
+            logger.warning(f"Scene-mesh auto-ground probe failed: {e}; using user alignment as-is")
+
+    if _scene_mesh_collision:
+        from dimos.mapping.usdz_to_mjcf import bake_scene_mjcf
+
+        try:
+            _MJCF_PATH = str(
+                bake_scene_mjcf(
+                    scene_mesh_path=_scene_mesh_path,
+                    robot_mjcf_path=_MJCF_PATH,
+                    alignment=SceneMeshAlignment(
+                        scale=_scene_mesh_scale,
+                        rotation_zyx_deg=_scene_mesh_rotation,
+                        translation=_scene_mesh_translation,
+                        y_up=_scene_mesh_y_up,
+                    ),
+                )
+            )
+            logger.info(f"Scene-mesh collision: using wrapped MJCF {_MJCF_PATH}")
+        except Exception as e:
+            logger.warning(
+                f"Failed to bake scene mesh into MJCF: {e}; falling back to bare robot MJCF "
+                f"(visualization will still show the mesh, but physics won't collide with it)"
+            )
+
+# Optional MuJoCo native viewer.  ``MujocoSimModule`` runs MuJoCo on a
+# *worker* thread and on macOS that can't host ``viewer.launch_passive``
+# (glfw needs the main thread).  Spawn a separate process *from the
+# dimos CLI main process*, that subscribes to ``/coordinator/joint_state``
+# + ``/odom`` over LCM and mirrors the live state into its own
+# ``MjData``.  No physics in the viewer — just rendering — so what you
+# see is exactly what dimos's engine is producing.
+#
+# IMPORTANT: this blueprint module is also imported inside dimos worker
+# processes when they look up module classes.  Workers are daemonic
+# (multiprocessing forbids them from spawning children).  Only spawn
+# from MainProcess so worker imports are no-ops here.
+import multiprocessing as _mp
+
+if (
+    os.environ.get("DIMOS_MUJOCO_VIEW", "0") not in ("", "0")
+    and _mp.current_process().name == "MainProcess"
+):
+    import shutil
+    import subprocess
+
+    # ``mujoco.viewer.launch_passive`` checks ``sys.executable`` and
+    # raises on macOS unless it's ``mjpython`` (a glfw-bootstrap launcher
+    # shipped with the mujoco package).  Linux has no such restriction
+    # and runs fine under regular ``python``.
+    if sys.platform == "darwin":
+        _viewer_python = shutil.which("mjpython") or shutil.which("python")
+    else:
+        _viewer_python = sys.executable
+    if _viewer_python is None:
+        logger.warning(
+            "DIMOS_MUJOCO_VIEW=1: couldn't locate mjpython/python on PATH; viewer not launched"
+        )
+    else:
+        _viewer_proc = subprocess.Popen(
+            [
+                _viewer_python,
+                "-m",
+                "dimos.simulation.engines.mujoco_view_subprocess",
+                _MJCF_PATH,
+            ],
+        )
+        logger.info(
+            f"DIMOS_MUJOCO_VIEW=1: MuJoCo viewer subprocess started "
+            f"(pid={_viewer_proc.pid}, executable={_viewer_python}, mjcf={_MJCF_PATH})"
+        )
+
 _g1_coordinator = (
     ControlCoordinator.blueprint(
         tick_rate=500.0,
@@ -235,24 +373,9 @@ except Exception as e:
     logger.warning(f"Splat asset unavailable: {e}; viser viewer + splat camera disabled")
     _splat_path = None
 if _splat_path is not None and _splat_path.exists():
-    # Optional scene mesh (.usdz / .glb / .obj / etc.) — drawn in viser
-    # and used by ``MeshCameraModule`` to ray-cast the head-camera RGB
-    # feed.  Configure via env vars so trying out different downloaded
-    # scenes doesn't require editing the blueprint:
-    #   DIMOS_SCENE_MESH_PATH   = path to .usdz/.glb/.obj/etc.
-    #   DIMOS_SCENE_MESH_SCALE  = e.g. 0.01 if source is centimeters
-    #   DIMOS_SCENE_MESH_TRANSLATION = "x,y,z" world-frame offset
-    #   DIMOS_SCENE_MESH_ROTATION_ZYX_DEG = "z,y,x" extra euler in degrees
-    #   DIMOS_SCENE_MESH_Y_UP   = "0" to disable the y-up→z-up swap
-    _scene_mesh_path = os.environ.get("DIMOS_SCENE_MESH_PATH", "") or None
-    _scene_mesh_scale = float(os.environ.get("DIMOS_SCENE_MESH_SCALE", "1.0"))
-    _scene_mesh_translation = tuple(
-        float(x) for x in os.environ.get("DIMOS_SCENE_MESH_TRANSLATION", "0,0,0").split(",")
-    )
-    _scene_mesh_rotation = tuple(
-        float(x) for x in os.environ.get("DIMOS_SCENE_MESH_ROTATION_ZYX_DEG", "0,0,0").split(",")
-    )
-    _scene_mesh_y_up = os.environ.get("DIMOS_SCENE_MESH_Y_UP", "1") != "0"
+    # Scene-mesh env vars (DIMOS_SCENE_MESH_*) are parsed at module top —
+    # the resulting alignment + path get reused here for the viser viewer
+    # and the mesh-camera module.
 
     # When the user provides their own scene mesh, don't show the unrelated
     # dimos_office splat in the viewer at all — the splat would just confuse
