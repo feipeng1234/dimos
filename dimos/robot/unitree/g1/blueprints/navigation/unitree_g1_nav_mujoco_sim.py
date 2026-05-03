@@ -156,6 +156,10 @@ unitree_g1_nav_mujoco_sim = (
         # changing what the planner sees.  Override with
         # mujoco_kinematic_robot=False to bring the gait back.
         mujoco_kinematic_robot=True,
+        # Top-down view centred on the HSSD house — distance 25 m
+        # frames the whole floor plan, elevation -89° is near-vertical.
+        # Format: lookat_x, lookat_y, lookat_z, distance, azimuth, elevation.
+        mujoco_camera_position="1.5, 9.5, 0.0, 35.0, 90.0, -89.0",
     )
 )
 
