@@ -30,7 +30,12 @@ from dimos.core.coordination.worker_manager_python import WorkerManagerPython
 from dimos.core.global_config import GlobalConfig, global_config
 from dimos.core.module import ModuleBase, ModuleSpec
 from dimos.core.resource import Resource
-from dimos.core.transport import LCMTransport, PubSubTransport, pLCMTransport
+from dimos.core.transport import (
+    LCMTransport,
+    PubSubTransport,
+    pLCMTransport,
+    pSHMTransport,
+)
 from dimos.spec.utils import is_spec, spec_annotation_compliance, spec_structural_compliance
 from dimos.utils.generic import short_id
 from dimos.utils.logging_config import setup_logger
@@ -543,7 +548,12 @@ def _get_transport_for(blueprint: Blueprint, name: str, stream_type: type) -> Pu
 
     use_pickled = getattr(stream_type, "lcm_encode", None) is None
     topic = f"/{name}" if _is_name_unique(blueprint, name) else f"/{short_id()}"
-    transport = pLCMTransport(topic) if use_pickled else LCMTransport(topic, stream_type)
+
+    # macOS LCM is so bad (for a number of reasons like privacy monitoring) that its just unusable
+    if sys.platform == "darwin":
+        transport = pSHMTransport(topic)
+    else:
+        transport = pLCMTransport(topic) if use_pickled else LCMTransport(topic, stream_type)
 
     return transport
 
