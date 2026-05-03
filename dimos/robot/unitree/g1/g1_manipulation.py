@@ -85,6 +85,17 @@ class G1ManipulationModule(PickAndPlaceModule):
         # update on the next plan).
         self._sync_floating_base()
 
+    def _get_default_robot_name(self) -> str | None:
+        # Base picks "single registered robot" else None — which makes every
+        # skill fail with "Multiple robots configured" the moment two arms
+        # are registered.  Prefer left_arm when both are present so the LLM
+        # can call point_at / scan_objects / go_home etc. without having to
+        # know about robot_name.  move_to_pose / point_at do their own
+        # smarter target-side picking before this fallback runs.
+        if "left_arm" in self._robots:
+            return "left_arm"
+        return super()._get_default_robot_name()
+
     def _begin_planning(self, robot_name: Any = None) -> Any:
         self._sync_floating_base()
         return super()._begin_planning(robot_name)

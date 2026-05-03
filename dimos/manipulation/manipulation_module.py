@@ -579,7 +579,17 @@ class ManipulationModule(Module):
                 seed=current,
                 position_tolerance=position_tolerance,
                 angle_tolerance=angle_tolerance,
-                check_collision=True,
+                # point_at is a gesture: ee_pos = anchor + min(reach, dist) *
+                # direction, so the EE deliberately stops short of the
+                # target.  When the target was just registered as an
+                # obstacle by scan_objects/refresh_obstacles, yoloe's
+                # 3D-from-2D bbox is generously inflated and overlaps the
+                # planned arm config — every random seed gets rejected by
+                # the goal-config collision check and IK returns
+                # NO_SOLUTION in ~70ms (10 fast pre-rejects, no SNOPT
+                # iterations).  Skip the goal-config check; the RRT in
+                # the trajectory phase still enforces collision on the path.
+                check_collision=False,
             )
         except Exception as exc:
             logger.exception("solve_pointing raised")
@@ -1325,40 +1335,21 @@ class ManipulationModule(Module):
         if dist < 1e-6:
             return f"Error: target ({x:.3f}, {y:.3f}, {z:.3f}) is at the shoulder anchor"
         direction = delta / dist
-        ext = min(reach, dist)
-        ee_pos = anchor + ext * direction
-
-        # Look-at orientation: align the EE's "forward" axis (the
-        # grasp_offset direction in body frame) with `direction` (world).
-        # Keep the EE's +z roughly aligned with world up so the gesture
-        # looks natural.
-        offset = np.asarray(config.grasp_offset_xyz, dtype=np.float64)
-        if np.linalg.norm(offset) < 1e-6:
-            np.array([1.0, 0.0, 0.0])
-        else:
-            offset / np.linalg.norm(offset)
 
         # Compute world rotation R such that R @ forward_body = direction.
-        # Use a look-at construction: choose a "right" axis perpendicular
-        # to direction using world up as a reference.
+        # Look-at construction: pick a "right" axis perpendicular to
+        # direction using world up as a reference.  Independent of
+        # extension distance, so compute once.
         world_up = np.array([0.0, 0.0, 1.0])
         if abs(float(np.dot(direction, world_up))) > 0.99:
-            # pointing nearly straight up/down — use world +x as up reference
             world_up = np.array([1.0, 0.0, 0.0])
         right_world = np.cross(world_up, direction)
         right_world /= np.linalg.norm(right_world)
         up_world = np.cross(direction, right_world)
 
-        # R_target maps body axes (forward_body, right_body, up_body) to
-        # (direction, right_world, up_world).  Assume body axes are
-        # canonical: forward=+x_body, right=+y_body, up=+z_body. This
-        # ignores the small lateral component of grasp_offset; good enough
-        # for "point at" gestures.
-        R_target = np.column_stack([direction, right_world, up_world])
-
-        # Convert R to quaternion (xyzw).
-        # Shepperd's method for numerical robustness.
-        m = R_target
+        # R_target maps body axes (forward_body=+x, right_body=+y,
+        # up_body=+z) to (direction, right_world, up_world).
+        m = np.column_stack([direction, right_world, up_world])
         trace = m[0, 0] + m[1, 1] + m[2, 2]
         if trace > 0:
             s = 0.5 / float(np.sqrt(trace + 1.0))
@@ -1384,59 +1375,78 @@ class ManipulationModule(Module):
             qx = (m[0, 2] + m[2, 0]) / s
             qy = (m[1, 2] + m[2, 1]) / s
             qz = 0.25 * s
-
-        ee_position = Vector3(float(ee_pos[0]), float(ee_pos[1]), float(ee_pos[2]))
         lookat_quat = Quaternion(float(qx), float(qy), float(qz), float(qw))
 
-        logger.info(
-            f"point_at: target=({x:.3f}, {y:.3f}, {z:.3f}) anchor='{anchor_link}'@"
-            f"({anchor[0]:.3f},{anchor[1]:.3f},{anchor[2]:.3f}) "
-            f"ee_target=({ee_pos[0]:.3f},{ee_pos[1]:.3f},{ee_pos[2]:.3f}) "
-            f"dist={dist:.3f}m extend={ext:.3f}m"
-        )
+        # Try a sequence of extension distances.  The default reach
+        # (0.45 m) puts the EE near the edge of the arm's workspace,
+        # which fails IK whenever the target direction has even a
+        # small "across the body" component (e.g. left arm pointing
+        # forward when the robot has rotated).  Pointing is a gesture —
+        # the direction matters, the exact extension doesn't — so on
+        # failure, retry with a shorter extension that keeps the EE
+        # comfortably inside the workspace.  Min 0.20 m so the arm
+        # actually moves visibly.
+        max_ext = float(min(reach, dist))
+        ext_attempts: list[float] = []
+        for frac in (1.0, 0.8, 0.65, 0.5):
+            candidate = max_ext * frac
+            if candidate < 0.20 and ext_attempts:
+                break
+            ext_attempts.append(max(candidate, 0.20))
 
-        # Preferred path: solve_pointing — Drake IK with an
-        # AngleBetweenVectorsConstraint, leaving the wrist's roll about
-        # the pointing axis free.  Vastly larger feasible set than any
-        # full-pose IK since "point at" only really constrains 5 DOF.
-        if callable(getattr(self._kinematics, "solve_pointing", None)):
-            ok = self.plan_to_pointing(
-                ee_x=float(ee_pos[0]),
-                ee_y=float(ee_pos[1]),
-                ee_z=float(ee_pos[2]),
-                dir_x=float(direction[0]),
-                dir_y=float(direction[1]),
-                dir_z=float(direction[2]),
-                robot_name=rname,
+        last_log_msg = ""
+        for attempt_idx, ext in enumerate(ext_attempts):
+            ee_pos = anchor + ext * direction
+            ee_position = Vector3(float(ee_pos[0]), float(ee_pos[1]), float(ee_pos[2]))
+            logger.info(
+                f"point_at: target=({x:.3f}, {y:.3f}, {z:.3f}) anchor='{anchor_link}'@"
+                f"({anchor[0]:.3f},{anchor[1]:.3f},{anchor[2]:.3f}) "
+                f"ee_target=({ee_pos[0]:.3f},{ee_pos[1]:.3f},{ee_pos[2]:.3f}) "
+                f"dist={dist:.3f}m extend={ext:.3f}m attempt={attempt_idx + 1}/{len(ext_attempts)}"
             )
-            if ok:
-                err = self._preview_execute_wait(robot_name)
-                if err:
-                    return err
-                return f"Pointing at ({x:.3f}, {y:.3f}, {z:.3f}) (soft-pointing)"
-            logger.info("point_at: solve_pointing failed; falling back to look-at IK")
 
-        # Fallback: strict look-at orientation, then preserve-current.
-        # Keeps point_at working when the configured solver doesn't
-        # support solve_pointing.
-        attempts = [("look-at", lookat_quat)]
-        current_ee = self.get_ee_pose(rname)
-        if current_ee is not None:
-            attempts.append(("preserve-orient", current_ee.orientation))
+            # Preferred path: solve_pointing — Drake IK with an
+            # AngleBetweenVectorsConstraint, leaving the wrist's roll
+            # about the pointing axis free.
+            if callable(getattr(self._kinematics, "solve_pointing", None)):
+                ok = self.plan_to_pointing(
+                    ee_x=float(ee_pos[0]),
+                    ee_y=float(ee_pos[1]),
+                    ee_z=float(ee_pos[2]),
+                    dir_x=float(direction[0]),
+                    dir_y=float(direction[1]),
+                    dir_z=float(direction[2]),
+                    robot_name=rname,
+                )
+                if ok:
+                    err = self._preview_execute_wait(robot_name)
+                    if err:
+                        return err
+                    return f"Pointing at ({x:.3f}, {y:.3f}, {z:.3f}) (soft-pointing)"
+                last_log_msg = "point_at: solve_pointing failed at this extension"
+                logger.info(last_log_msg)
 
-        for label, quat in attempts:
-            target_pose = Pose(ee_position, quat)
-            if self.plan_to_pose(target_pose, rname):
-                logger.info(f"point_at: planned with '{label}' orientation")
-                err = self._preview_execute_wait(robot_name)
-                if err:
-                    return err
-                return f"Pointing at ({x:.3f}, {y:.3f}, {z:.3f}) ({label})"
-            logger.info(f"point_at: '{label}' orientation failed IK; trying next")
+            # Fallback: strict look-at orientation, then preserve-current.
+            attempts = [("look-at", lookat_quat)]
+            current_ee = self.get_ee_pose(rname)
+            if current_ee is not None:
+                attempts.append(("preserve-orient", current_ee.orientation))
+            for label, quat in attempts:
+                target_pose = Pose(ee_position, quat)
+                if self.plan_to_pose(target_pose, rname):
+                    logger.info(f"point_at: planned with '{label}' orientation")
+                    err = self._preview_execute_wait(robot_name)
+                    if err:
+                        return err
+                    return f"Pointing at ({x:.3f}, {y:.3f}, {z:.3f}) ({label})"
+                last_log_msg = f"point_at: '{label}' orientation failed at this extension"
+                logger.info(last_log_msg)
 
         return (
             f"Error: Planning failed — could not aim arm at "
-            f"({x:.3f}, {y:.3f}, {z:.3f}). The position may be unreachable."
+            f"({x:.3f}, {y:.3f}, {z:.3f}). Tried {len(ext_attempts)} extensions "
+            f"down to {ext_attempts[-1]:.2f} m; the direction may be in the "
+            f"arm's deadzone (e.g. left arm pointing across the body forward)."
         )
 
     @skill

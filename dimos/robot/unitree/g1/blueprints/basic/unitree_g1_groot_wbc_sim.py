@@ -81,10 +81,7 @@ from dimos.navigation.frontier_exploration.wavefront_frontier_goal_selector impo
 )
 from dimos.navigation.patrolling.module import PatrollingModule
 from dimos.navigation.replanning_a_star.module import ReplanningAStarPlanner
-from dimos.perception.detection.detectors.yoloe import YoloePromptMode
 from dimos.perception.experimental.temporal_memory.temporal_memory import TemporalMemory
-from dimos.perception.object_scene_registration import ObjectSceneRegistrationModule
-from dimos.perception.object_tracker import ObjectTracking
 from dimos.perception.perceive_loop_skill import PerceiveLoopSkill
 from dimos.perception.spatial_perception import SpatialMemory
 from dimos.robot.catalog.g1 import g1_left_arm, g1_right_arm
@@ -493,24 +490,28 @@ _g1_perception_stack = (
         }
     ),
     CostMapper.blueprint(),
-    # On macOS the depth-render-based ``/lidar`` pipeline is silent
-    # (mujoco.Renderer can't build Metal pipeline state in a forkserver
-    # child — see splat_camera.py's MlxBackend for the same XPC issue),
-    # so ``CostMapper`` would sit idle.  Publish a constant all-free
-    # ``OccupancyGrid`` instead so click-to-nav has something to plan
-    # against — correct for the flat-floor MJCF baseline.
-    *((StaticCostmapModule.blueprint(),) if sys.platform == "darwin" else ()),
-    ReplanningAStarPlanner.blueprint(),
-    # Visual perception (object detection + tracking, semantic spatial memory)
-    SpatialMemory.blueprint(),
-    ObjectTracking.blueprint(frame_id="camera_link"),
-    # Episode recording (memory2)
-    G1Memory.blueprint().transports(
-        {
-            ("color_image", Image): LCMTransport("/splat/color_image", Image),
-            ("lidar", PointCloud2): LCMTransport("/lidar", PointCloud2),
-        }
+    # Publish a constant all-free OccupancyGrid alongside CostMapper when:
+    #   * macOS — the depth-render-based ``/lidar`` pipeline is silent
+    #     (mujoco.Renderer can't build Metal pipeline state in a forkserver
+    #     child — see splat_camera.py's MlxBackend for the same XPC issue),
+    #     so CostMapper would sit idle.
+    #   * No scene mesh loaded — the bare g1_gear_wbc.xml has no walls, so
+    #     CostMapper's lidar-built grid stays empty and the planner can't
+    #     find paths beyond the robot's local LOS.  Static all-free map is
+    #     correct for the actual physics (flat floor, nothing to hit).
+    # When a scene mesh IS loaded, skip — CostMapper builds the real
+    # obstacle costmap from lidar hitting walls and we don't want a
+    # second publisher overwriting it.
+    *(
+        (StaticCostmapModule.blueprint(),)
+        if sys.platform == "darwin" or not _scene_mesh_path
+        else ()
     ),
+    ReplanningAStarPlanner.blueprint(),
+    # Visual perception (semantic spatial memory).  Matches Go2 canonical
+    # — ObjectTracking and the G1Memory recorder dropped to keep the
+    # module set close to unitree-go2-temporal-memory.
+    SpatialMemory.blueprint(),
 )
 
 # Agentic stack — Go2 parity minus xArm and minus PersonFollow.
@@ -569,43 +570,12 @@ _g1_agentic_stack = (
             ("odom", PoseStamped): LCMTransport("/odom", PoseStamped),
         }
     ),
-    # Detect-and-pick: YOLO-E 2D detection on the splat-rendered RGB,
-    # back-projected into 3D via the aligned MuJoCo depth + intrinsics.
-    # target_frame="world" matches what MujocoSimModule publishes TF
-    # for (frame_id="world", child=head_color_color_optical_frame);
-    # the default "map" doesn't connect to anything in this stack.
-    # PROMPT mode loads the open-vocab YOLO-E (yoloe-11l-seg.pt) so
-    # the agent's `detect(["red cube"])` sets the classes for the live
-    # detection loop — `scan_objects` then sees whatever was last
-    # detect()'d.  LRPC mode (prompt-free) needs no set_prompts() but
-    # gives garbage labels for non-COCO objects like our cube.
-    ObjectSceneRegistrationModule.blueprint(
-        target_frame="world",
-        prompt_mode=YoloePromptMode.PROMPT,
-    ).transports(
-        {
-            ("color_image", Image): LCMTransport("/splat/color_image", Image),
-            ("depth_image", Image): LCMTransport("/head/depth_image", Image),
-            ("camera_info", CameraInfo): LCMTransport("/head/camera_info", CameraInfo),
-        }
-    ),
     PerceiveLoopSkill.blueprint().transports(
         {
             ("color_image", Image): LCMTransport("/splat/color_image", Image),
         }
     ),
-    TemporalMemory.blueprint(
-        new_memory=global_config.new_memory,
-        # CLIP filter is ~350MB on GPU; gsplat already lives there, and
-        # Qwen-VL is API-based so we don't need a local image encoder.
-        # Disable to keep VRAM headroom.
-        use_clip_filtering=False,
-    ).transports(
-        {
-            ("color_image", Image): LCMTransport("/splat/color_image", Image),
-            ("odom", PoseStamped): LCMTransport("/odom", PoseStamped),
-        }
-    ),
+    TemporalMemory.blueprint(new_memory=global_config.new_memory),
     PatrollingModule.blueprint(),
     WavefrontFrontierExplorer.blueprint(),
 )

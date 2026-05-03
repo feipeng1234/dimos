@@ -300,6 +300,9 @@ sim = [
     "mujoco>=3.3.4",
     "playground>=0.0.5",
     "pygame>=2.6.1",
+    # USD/USDZ scene-mesh loader (used by dimos.mapping.mesh_scene for
+    # MeshCameraModule + bake_scene_mjcf collision wrapping).
+    "usd-core>=24.0",
 ]
 
 # Viser browser viewer + Gaussian splat scene loader.  Opt-in.

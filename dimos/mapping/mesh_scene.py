@@ -301,6 +301,28 @@ def load_scene_mesh(
     suffix = path.suffix.lower()
     if suffix in {".usdz", ".usd", ".usdc", ".usda"}:
         mesh = _load_usd_mesh(path)
+    elif suffix in {".glb", ".gltf"}:
+        # o3d.io can read glTF geometry but drops textures/UVs and
+        # silently re-indexes vertices, so the viser viewer (which only
+        # renders per-vertex colors) shows the mesh as flat grey.  Use
+        # trimesh instead — its PBRMaterial loader plus
+        # ``visual.to_color()`` samples the diffuse texture at each
+        # vertex's UV and gives back a Trimesh with vertex_colors, which
+        # we copy onto the o3d mesh so the rest of the pipeline (bake +
+        # raycast) sees a consistent representation.
+        import trimesh
+
+        tm = trimesh.load(str(path), force="mesh")
+        if len(tm.faces) == 0:
+            raise RuntimeError(f"trimesh.load returned an empty mesh for {path}")
+        color_visual = tm.visual.to_color()
+        vc = getattr(color_visual, "vertex_colors", None)
+        mesh = o3d.geometry.TriangleMesh()
+        mesh.vertices = o3d.utility.Vector3dVector(np.asarray(tm.vertices, dtype=np.float64))
+        mesh.triangles = o3d.utility.Vector3iVector(np.asarray(tm.faces, dtype=np.int32))
+        if vc is not None and len(vc) == len(tm.vertices):
+            rgb = np.asarray(vc, dtype=np.float64)[:, :3] / 255.0
+            mesh.vertex_colors = o3d.utility.Vector3dVector(rgb)
     else:
         mesh = o3d.io.read_triangle_mesh(str(path))
         if len(mesh.triangles) == 0:
