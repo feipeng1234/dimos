@@ -23,6 +23,13 @@ from dimos.msgs.sensor_msgs.Image import Image
 from dimos.utils.data import get_data
 
 
+def _extract_text(content):
+    """Extract text from a message content that may be a string or list of content blocks."""
+    if isinstance(content, list):
+        return " ".join(block.text for block in content if hasattr(block, "text"))
+    return content
+
+
 class Adder(Module):
     @skill
     def add(self, x: int, y: int) -> str:
@@ -37,7 +44,7 @@ def test_can_call_tool(agent_setup):
         messages=[HumanMessage("What is 33333 + 100? Use the tool.")],
     )
 
-    assert "33433" in history[-1].content
+    assert "33433" in _extract_text(history[-1].content)
 
 
 class UserRegistration(Module):
@@ -175,7 +182,7 @@ def test_prompt(agent_setup):
         system_prompt="You are a helpful assistant named Johnny.",
     )
 
-    assert "Johnny" in history[-1].content
+    assert "Johnny" in _extract_text(history[-1].content)
 
 
 class Visualizer(Module):
@@ -199,10 +206,7 @@ def test_image(agent_setup):
         system_prompt="You are a helpful assistant that can use a camera to take pictures.",
     )
 
-    content = history[-1].content
-    if isinstance(content, list):
-        content = " ".join(block.text for block in content if hasattr(block, "text"))
-    response = content.lower()
+    response = _extract_text(history[-1].content).lower()
     assert "cafe" in response
     assert "stadium" not in response
     assert "battleship" not in response
