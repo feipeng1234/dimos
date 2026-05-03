@@ -242,7 +242,8 @@ class WebsocketVisModule(Module):
             # web server is enabled; otherwise redirect to the standalone
             # command center.
             if not (
-                self.config.g.viewer == "rerun" and self.config.g.rerun_open in ("web", "both")
+                self.config.g.viewer == "rerun"
+                and (self.config.g.rerun_open in ("web", "both") or self.config.g.rerun_web)
             ):
                 return RedirectResponse(url="/command-center")
             return FileResponse(_DASHBOARD_HTML, media_type="text/html")
