@@ -283,5 +283,5 @@ class TestDimosSimBasic:
 
     def test_odom_publishes(self, dimos_sim_basic_spy) -> None:
         dimos_sim_basic_spy.wait_for_saved_topic(
-            "/odom#geometry_msgs.PoseStamped", timeout=60.0
+            "/odom#geometry_msgs.PoseStamped", timeout=200.0
         )

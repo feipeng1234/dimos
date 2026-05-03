@@ -177,7 +177,7 @@ class TestSimNav:
 
     def test_odom_publishing(self, spy: LcmSpy) -> None:
         """Verify /odom is publishing with sane values."""
-        spy.wait_for_saved_topic("/odom#geometry_msgs.PoseStamped", timeout=30)
+        spy.wait_for_saved_topic("/odom#geometry_msgs.PoseStamped", timeout=200)
         msgs = spy.messages.get("/odom#geometry_msgs.PoseStamped", [])
         assert len(msgs) > 0, "No odom messages received"
 
@@ -195,7 +195,7 @@ class TestSimNav:
 
     def test_lidar_publishing(self, spy: LcmSpy) -> None:
         """Verify /lidar is publishing with non-empty point cloud."""
-        spy.wait_for_saved_topic("/lidar#sensor_msgs.PointCloud2", timeout=30)
+        spy.wait_for_saved_topic("/lidar#sensor_msgs.PointCloud2", timeout=200)
         msgs = spy.messages.get("/lidar#sensor_msgs.PointCloud2", [])
         assert len(msgs) > 0, "No lidar messages received"
 
@@ -207,7 +207,7 @@ class TestSimNav:
     def test_cmd_vel_moves_robot(self, spy: LcmSpy) -> None:
         """Publish cmd_vel and verify odom position changes."""
         # Record initial position
-        spy.wait_for_saved_topic("/odom#geometry_msgs.PoseStamped", timeout=30)
+        spy.wait_for_saved_topic("/odom#geometry_msgs.PoseStamped", timeout=200)
         initial_msgs = spy.messages.get("/odom#geometry_msgs.PoseStamped", [])
         assert len(initial_msgs) > 0, "No initial odom"
         initial_pose = PoseStamped.lcm_decode(initial_msgs[-1])

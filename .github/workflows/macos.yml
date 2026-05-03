@@ -121,7 +121,14 @@ jobs:
           CI: "1"
         run: |
           source .venv/bin/activate
-          python -m pytest --durations=10 -m 'not (tool or mujoco)' --timeout=120 dimos/
+          # Skip dimsim e2e tests — they already ran in the dedicated step
+          # above with a longer timeout. Re-running them here with --timeout=120
+          # is too tight for the sim_nav fixture cold start (~98s) and SIGTERMs
+          # the dimos subprocess before sensors finish coming up.
+          python -m pytest --durations=10 -m 'not (tool or mujoco)' --timeout=120 \
+            --ignore=dimos/e2e_tests/test_dimsim_pipeline.py \
+            --ignore=dimos/e2e_tests/test_dimsim_nav.py \
+            dimos/
 
       - name: Check disk usage (post-test)
         if: always()
