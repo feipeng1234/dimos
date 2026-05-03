@@ -175,47 +175,88 @@ def _run_simulation(config: GlobalConfig, shm: ShmReader) -> None:
     video_interval = 1.0 / VIDEO_FPS
     lidar_interval = 1.0 / LIDAR_FPS
 
-    # Spawn z (and the kinematic-mode locked z) is set above per robot.
-    spawn_z = z
+    # In kinematic mode we run mj_forward only (no physics on the
+    # robot), so we cache the home joint pose + spawn z and write them
+    # back every tick to keep the robot upright and at floor height.
     home_qpos_robot = np.array(data.qpos[7 : 7 + int(model.nu)]).copy()
+    spawn_base_z = float(data.qpos[2])
     _kin_tick_counter = [0]
     _kin_last_log = [0.0]
+    # Forward margin on the wall ray: just enough that the body's
+    # centre stops before puncturing the wall surface.
+    KIN_WALL_MARGIN = 0.2
+    # Ray height: cast at floor level rather than the body centre
+    # (z≈0.8).  At chest height the ray starts INSIDE the robot's own
+    # waist/chest collision geom and exits at ~0.01 m, blocking every
+    # tick.  At floor level the ray is below the chest geom; the legs/
+    # feet are at the body's lateral offsets (±0.089 m), so a forward
+    # ray cast from the body centre's xy doesn't intersect them either.
+    KIN_RAY_Z = 0.05
+    _kin_geomid_out = np.zeros(1, dtype=np.int32)
 
     def _step_once(m_viewer: Any) -> None:
         nonlocal last_video_time, last_lidar_time
         step_start = time.time()
 
         if config.mujoco_kinematic_robot:
-            # Drive the floating base directly from the latest cmd_vel.
-            # Joints stay frozen at the home pose.  No physics for the
-            # robot — its qpos is set, then mj_forward updates kinematics
-            # so cameras + sensors reflect the new pose.  Walls don't
-            # block motion in this mode (the planner's costmap does).
-            cmd = controller.get_command()  # (vx, vy, wz)
+            # No physics on the robot — we move qpos directly, then
+            # mj_forward updates kinematics so cameras + sensors track
+            # the new pose.  Wall collision is handled by a single
+            # mj_ray cast in the proposed travel direction; if it hits
+            # a static geom (walls, furniture) within step + margin,
+            # we cancel the translation for this tick.
+            cmd = controller.get_command()  # (vx, vy, wz) in robot frame
             vx, vy, wz = float(cmd[0]), float(cmd[1]), float(cmd[2])
-
-            qw, qx, qy, qz = (float(c) for c in data.qpos[3:7])
-            yaw = np.arctan2(2.0 * (qw * qz + qx * qy), 1.0 - 2.0 * (qy * qy + qz * qz))
             dt = float(model.opt.timestep) * float(config.mujoco_steps_per_frame)
 
+            qw, qz = float(data.qpos[3]), float(data.qpos[6])
+            yaw = np.arctan2(2.0 * qw * qz, 1.0 - 2.0 * qz * qz)
             cyaw, syaw = float(np.cos(yaw)), float(np.sin(yaw))
-            data.qpos[0] += dt * (vx * cyaw - vy * syaw)
-            data.qpos[1] += dt * (vx * syaw + vy * cyaw)
-            data.qpos[2] = spawn_z
-            yaw += dt * wz
-            half = yaw * 0.5
-            data.qpos[3] = float(np.cos(half))
+
+            dx = dt * (vx * cyaw - vy * syaw)
+            dy = dt * (vx * syaw + vy * cyaw)
+
+            move_mag = float(np.hypot(dx, dy))
+            blocked = False
+            hit_dist = -1.0
+            if move_mag > 0.0:
+                pnt = np.array(
+                    [float(data.qpos[0]), float(data.qpos[1]), KIN_RAY_Z],
+                    dtype=np.float64,
+                )
+                vec = np.array([dx / move_mag, dy / move_mag, 0.0], dtype=np.float64)
+                # mj_ray with flg_static=1 includes all geoms (static +
+                # dynamic).  We can't simply switch to flg_static=0 — that
+                # would skip wall geoms attached to room bodies.  Instead,
+                # casting at floor level (KIN_RAY_Z) keeps the ray below
+                # the robot's chest/waist geoms, so the ray starts in
+                # free space and properly hits walls.
+                hit_dist = float(mujoco.mj_ray(model, data, pnt, vec, None, 1, -1, _kin_geomid_out))
+                if 0.0 < hit_dist < move_mag + KIN_WALL_MARGIN:
+                    blocked = True
+
+            if not blocked:
+                data.qpos[0] += dx
+                data.qpos[1] += dy
+            data.qpos[2] = spawn_base_z
+            yaw_after = yaw + wz * dt
+            data.qpos[3] = float(np.cos(yaw_after * 0.5))
             data.qpos[4] = 0.0
             data.qpos[5] = 0.0
-            data.qpos[6] = float(np.sin(half))
+            data.qpos[6] = float(np.sin(yaw_after * 0.5))
             data.qpos[7 : 7 + int(model.nu)] = home_qpos_robot
+            data.qvel[:] = 0.0
+
             mujoco.mj_forward(model, data)
+
             _kin_tick_counter[0] += 1
             now = time.time()
             if now - _kin_last_log[0] > 1.0:
                 print(
                     f"kinematic tick={_kin_tick_counter[0]} cmd=({vx:.2f},{vy:.2f},{wz:.2f}) "
-                    f"pos=({data.qpos[0]:.2f},{data.qpos[1]:.2f},{data.qpos[2]:.2f}) yaw={yaw:.2f}",
+                    f"pos=({data.qpos[0]:.2f},{data.qpos[1]:.2f},{data.qpos[2]:.2f}) "
+                    f"yaw={yaw_after:.2f} blocked={blocked} hit_dist={hit_dist:.2f} "
+                    f"geom={int(_kin_geomid_out[0])}",
                     flush=True,
                 )
                 _kin_last_log[0] = now
