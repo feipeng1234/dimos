@@ -199,7 +199,10 @@ def test_image(agent_setup):
         system_prompt="You are a helpful assistant that can use a camera to take pictures.",
     )
 
-    response = history[-1].content.lower()
+    content = history[-1].content
+    if isinstance(content, list):
+        content = " ".join(block.text for block in content if hasattr(block, "text"))
+    response = content.lower()
     assert "cafe" in response
     assert "stadium" not in response
     assert "battleship" not in response
