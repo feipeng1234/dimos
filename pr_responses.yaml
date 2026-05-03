@@ -1,0 +1,71 @@
+- pr: 1943
+  comment_id: 3165278429
+  author: greptile-apps[bot]
+  file: dimos/visualization/rerun/bridge.py
+  line: null
+  problem: "Override cache misses for non-suppressed entities — non-suppressed branch returns a new lambda every time without storing in _override_cache"
+  solution: "Fixed: non-suppressed lookups are now cached in _override_cache"
+  commit: 842726a806bcba634bbf654306f72750a901279f
+
+- pr: 1943
+  comment_id: 3165278470
+  author: greptile-apps[bot]
+  file: dimos/robot/cli/dimos.py
+  line: null
+  problem: "Inconsistent rerun_web default (True in CLI, False in constants.py)"
+  solution: "Intentional: the rerun-bridge CLI command is specifically for running the bridge with web enabled, so defaulting to True is correct for that subcommand. The global default (RERUN_ENABLE_WEB=False) applies to `dimos run`."
+  commit: null
+
+- pr: 1943
+  comment_id: 3165278504
+  author: greptile-apps[bot]
+  file: dimos/visualization/rerun/init.py
+  line: 63
+  problem: "TOCTOU race on gRPC port check — another process could claim port between connect_ex check and serve_grpc call"
+  solution: "Acknowledged but low-risk: the window is sub-millisecond and the fallback is a clear bind error. A try/except wrapper would be cleaner but is a larger refactor outside the scope of this PR."
+  commit: null
+
+- pr: 1943
+  comment_id: 3175285968
+  author: greptile-apps[bot]
+  file: dimos/visualization/rerun/websocket_server.py
+  line: 109
+  problem: "Indefinite deadlock when server port is already in use — _server_ready.wait() has no timeout"
+  solution: "Fixed: start() now uses wait(timeout=10) and raises RuntimeError on expiry. stop() already guards against the case where start never completed."
+  commit: 171f9068e
+
+- pr: 1943
+  comment_id: 3175286009
+  author: greptile-apps[bot]
+  file: dimos/visualization/rerun/constants.py
+  line: 25
+  problem: "Removing rerun-web and rerun-connect from ViewerBackend is a silent breaking change — users with those values get Pydantic validation errors"
+  solution: "Fixed: added field_validator on GlobalConfig.viewer that remaps deprecated values (rerun-web → rerun, rerun-connect → rerun) with a DeprecationWarning"
+  commit: 3bab03ae7
+
+- pr: 1943
+  comment_id: 3175340209
+  author: greptile-apps[bot]
+  file: dimos/visualization/rerun/websocket_server.py
+  line: 104
+  problem: "start() still blocks indefinitely if WebSocket bind fails — _server_ready.wait() has no timeout"
+  solution: "Fixed: start() now uses wait(timeout=10) and raises RuntimeError on expiry"
+  commit: 171f9068e
+
+- pr: 1943
+  comment_id: 3175340246
+  author: greptile-apps[bot]
+  file: dimos/visualization/rerun/bridge.py
+  line: 375
+  problem: "Spawned native viewer receives 0.0.0.0 as the gRPC connect target — not guaranteed to work on all platforms"
+  solution: "Fixed: server_uri is now replaced with 127.0.0.1 when spawning the local native viewer"
+  commit: f62817697
+
+- pr: 1943
+  comment_id: 3175456648
+  author: greptile-apps[bot]
+  file: dimos/web/websocket_vis/websocket_vis_module.py
+  line: 248
+  problem: "Dashboard iframe skipped when rerun_web=True without matching rerun_open — user gets web viewer served but no iframe in dashboard"
+  solution: "Fixed: serve_index condition now also checks config.g.rerun_web to match bridge-side logic"
+  commit: 5bbd25041
