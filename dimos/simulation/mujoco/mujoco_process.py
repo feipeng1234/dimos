@@ -352,8 +352,13 @@ def _run_simulation(config: GlobalConfig, shm: ShmReader) -> None:
 
             last_lidar_time = current_time
 
-        # Control simulation speed
-        time_until_next_step = model.opt.timestep - (time.time() - step_start)
+        # Control simulation speed.  Per-iter physics advance is
+        # `timestep × steps_per_frame` (kinematic integrates that span
+        # directly, policy mode runs that many mj_step calls), so the
+        # wall-clock target is the same span — gives 1× real time and
+        # stops the kinematic loop from spinning at 500 Hz.
+        target_period = model.opt.timestep * float(config.mujoco_steps_per_frame)
+        time_until_next_step = target_period - (time.time() - step_start)
         if time_until_next_step > 0:
             time.sleep(time_until_next_step)
 
