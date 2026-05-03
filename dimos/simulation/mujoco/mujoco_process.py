@@ -175,22 +175,12 @@ def _run_simulation(config: GlobalConfig, shm: ShmReader) -> None:
     video_interval = 1.0 / VIDEO_FPS
     lidar_interval = 1.0 / LIDAR_FPS
 
-    # In kinematic mode we run mj_forward only (no physics on the
-    # robot), so we cache the home joint pose + spawn z and write them
-    # back every tick to keep the robot upright and at floor height.
     home_qpos_robot = np.array(data.qpos[7 : 7 + int(model.nu)]).copy()
     spawn_base_z = float(data.qpos[2])
     _kin_tick_counter = [0]
     _kin_last_log = [0.0]
-    # Forward margin on the wall ray: just enough that the body's
-    # centre stops before puncturing the wall surface.
     KIN_WALL_MARGIN = 0.2
-    # Ray height: cast at floor level rather than the body centre
-    # (z≈0.8).  At chest height the ray starts INSIDE the robot's own
-    # waist/chest collision geom and exits at ~0.01 m, blocking every
-    # tick.  At floor level the ray is below the chest geom; the legs/
-    # feet are at the body's lateral offsets (±0.089 m), so a forward
-    # ray cast from the body centre's xy doesn't intersect them either.
+    # Floor-level — chest height starts inside the robot's own collision geom.
     KIN_RAY_Z = 0.05
     _kin_geomid_out = np.zeros(1, dtype=np.int32)
 
@@ -199,13 +189,7 @@ def _run_simulation(config: GlobalConfig, shm: ShmReader) -> None:
         step_start = time.time()
 
         if config.mujoco_kinematic_robot:
-            # No physics on the robot — we move qpos directly, then
-            # mj_forward updates kinematics so cameras + sensors track
-            # the new pose.  Wall collision is handled by a single
-            # mj_ray cast in the proposed travel direction; if it hits
-            # a static geom (walls, furniture) within step + margin,
-            # we cancel the translation for this tick.
-            cmd = controller.get_command()  # (vx, vy, wz) in robot frame
+            cmd = controller.get_command()
             vx, vy, wz = float(cmd[0]), float(cmd[1]), float(cmd[2])
             dt = float(model.opt.timestep) * float(config.mujoco_steps_per_frame)
 
@@ -225,12 +209,6 @@ def _run_simulation(config: GlobalConfig, shm: ShmReader) -> None:
                     dtype=np.float64,
                 )
                 vec = np.array([dx / move_mag, dy / move_mag, 0.0], dtype=np.float64)
-                # mj_ray with flg_static=1 includes all geoms (static +
-                # dynamic).  We can't simply switch to flg_static=0 — that
-                # would skip wall geoms attached to room bodies.  Instead,
-                # casting at floor level (KIN_RAY_Z) keeps the ray below
-                # the robot's chest/waist geoms, so the ray starts in
-                # free space and properly hits walls.
                 hit_dist = float(mujoco.mj_ray(model, data, pnt, vec, None, 1, -1, _kin_geomid_out))
                 if 0.0 < hit_dist < move_mag + KIN_WALL_MARGIN:
                     blocked = True
@@ -352,11 +330,6 @@ def _run_simulation(config: GlobalConfig, shm: ShmReader) -> None:
 
             last_lidar_time = current_time
 
-        # Control simulation speed.  Per-iter physics advance is
-        # `timestep × steps_per_frame` (kinematic integrates that span
-        # directly, policy mode runs that many mj_step calls), so the
-        # wall-clock target is the same span — gives 1× real time and
-        # stops the kinematic loop from spinning at 500 Hz.
         target_period = model.opt.timestep * float(config.mujoco_steps_per_frame)
         time_until_next_step = target_period - (time.time() - step_start)
         if time_until_next_step > 0:
