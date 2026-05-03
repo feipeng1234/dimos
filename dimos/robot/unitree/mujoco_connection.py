@@ -72,7 +72,7 @@ class MujocoConnection:
         try:
             import mujoco  # noqa: F401
         except ImportError:
-            raise ImportError("'mujoco' is not installed. Use `pip install -e .[sim]`")
+            raise ImportError("'mujoco' is not installed. Use `uv pip install -e .[sim]`")
 
         # Pre-download the mujoco_sim data.
         get_data("mujoco_sim")
