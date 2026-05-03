@@ -13,7 +13,9 @@
 # limitations under the License.
 
 import re
+import warnings
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from dimos.models.vl.types import VlModelName
@@ -42,6 +44,24 @@ class GlobalConfig(BaseSettings):
     viewer: ViewerBackend = "rerun"
     rerun_open: RerunOpenOption = RERUN_OPEN_DEFAULT
     rerun_web: bool = RERUN_ENABLE_WEB
+
+    @field_validator("viewer", mode="before")
+    @classmethod
+    def _remap_deprecated_viewer(cls, v: str) -> str:
+        _DEPRECATED_MAP = {
+            "rerun-web": "rerun",
+            "rerun-connect": "rerun",
+        }
+        if v in _DEPRECATED_MAP:
+            warnings.warn(
+                f"VIEWER={v!r} is deprecated, use VIEWER={_DEPRECATED_MAP[v]!r} "
+                f"with RERUN_OPEN={'web' if v == 'rerun-web' else 'none'} instead",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            return _DEPRECATED_MAP[v]
+        return v
+
     rerun_host: str | None = None
     rerun_websocket_server_port: int = 3030
     n_workers: int = 2
