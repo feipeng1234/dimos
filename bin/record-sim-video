@@ -36,10 +36,7 @@ from dimos.robot.unitree.g1.blueprints.navigation.unitree_g1_nav_mujoco_sim impo
     unitree_g1_nav_mujoco_sim,
 )
 
-
-_SCENE_XML = (
-    Path(__file__).resolve().parents[1] / "data" / "hssd_house" / "scene_hssd_house.xml"
-)
+_SCENE_XML = Path(__file__).resolve().parents[1] / "data" / "hssd_house" / "scene_hssd_house.xml"
 
 _WAYPOINTS = [
     (0.2, -3.2, "dining_room"),
@@ -117,15 +114,38 @@ def main() -> int:
     pump = threading.Thread(target=_lcm_loop, daemon=True)
     pump.start()
 
-    # Wait for first odom, then warm up.
+    # Wait for first odom, then a short settle for PGO/TerrainAnalysis
+    # to consume their first costmap update.
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
         with lock:
             if pose["ts"] != 0 and time.time() - pose["ts"] < 5.0:
                 break
         time.sleep(0.5)
-    print("odom online; warming up 10s…", flush=True)
-    time.sleep(10)
+    print("odom online; settling 3s…", flush=True)
+    time.sleep(3)
+
+    # Pre-warm FAR by publishing the first motion-requiring waypoint as
+    # a goal before the recording loop starts.  FAR builds its
+    # visibility graph incrementally as the robot explores; without a
+    # pre-warm, the planner spends most of the first per-waypoint
+    # budget just discovering doorways out of the spawn room.  Skip
+    # waypoints that are already within 1 m of spawn (they would
+    # auto-pass and FAR wouldn't search at all).
+    with lock:
+        sx, sy = pose["x"], pose["y"]
+    prewarm = next(
+        ((gx, gy, lbl) for (gx, gy, lbl) in _WAYPOINTS if (gx - sx) ** 2 + (gy - sy) ** 2 > 1.0),
+        None,
+    )
+    if prewarm is not None:
+        gx, gy, label = prewarm
+        print(f"prewarming FAR with goal ({gx}, {gy}) for {label}…", flush=True)
+        lcm.publish(
+            "/clicked_point#geometry_msgs.PointStamped",
+            PointStamped(x=gx, y=gy, z=0.0, ts=time.time(), frame_id="map").lcm_encode(),
+        )
+        time.sleep(5)
 
     frames_dir = Path("/tmp/sim_video_frames")
     if frames_dir.exists():
@@ -142,6 +162,7 @@ def main() -> int:
     # vis.global_.fovy — the earlier ad-hoc heuristic was off by ~½ and
     # placed the marker in the wrong room.
     import math as _math
+
     cam.lookat[:] = (1.5, 9.5, 0.0)
     cam.distance = 40.0
     cam.azimuth = 90.0
