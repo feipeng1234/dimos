@@ -69,14 +69,28 @@ def _auto_detect_headless() -> bool:
 
 
 class MockController:
-    """Controller that reads commands from shared memory."""
+    """Controller that reads commands from shared memory.
+
+    Includes a watchdog: if no new command arrives for ``stale_timeout``
+    seconds, the cached command zeroes out.  Without this, a single
+    transient cmd_vel publish (e.g. one stray twist from the dimos-viewer
+    websocket on connect) would persist forever — the SHM cmd buffer
+    only changes when somebody calls ``MujocoConnection.move()`` again,
+    and most twist senders send the moving command once and never
+    follow up with an explicit zero.  In kinematic-robot mode that
+    surfaces as the robot spinning indefinitely.
+    """
+
+    _STALE_TIMEOUT = 0.5  # seconds — half a cmd_vel publish period @ 10 Hz
 
     def __init__(self, shm_interface: ShmReader) -> None:
         self.shm = shm_interface
         self._command = np.zeros(3, dtype=np.float32)
+        self._last_update = 0.0
 
     def get_command(self) -> NDArray[Any]:
         """Get the current movement command."""
+        now = time.time()
         cmd_data = self.shm.read_command()
         if cmd_data is not None:
             linear, angular = cmd_data
@@ -84,6 +98,11 @@ class MockController:
             self._command[0] = linear[0]  # forward/backward
             self._command[1] = linear[1]  # left/right
             self._command[2] = angular[2]  # rotation
+            self._last_update = now
+        elif self._last_update and now - self._last_update > self._STALE_TIMEOUT:
+            # No fresh command for a while — fall back to "stop" so the
+            # kinematic robot doesn't spin forever on a stale wz.
+            self._command[:] = 0.0
         result: NDArray[Any] = self._command.copy()
         return result
 
