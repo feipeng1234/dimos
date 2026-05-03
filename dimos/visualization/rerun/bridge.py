@@ -329,10 +329,13 @@ class RerunBridgeModule(Module):
 
                 # Use --connect so the viewer connects to the bridge's gRPC
                 # server rather than starting its own (which would conflict).
+                # Replace 0.0.0.0 with 127.0.0.1 for local spawn — 0.0.0.0
+                # is valid for binding but not guaranteed to work as connect target.
+                local_uri = server_uri.replace("0.0.0.0", "127.0.0.1")
                 rerun_bindings.spawn(
                     executable_name="dimos-viewer",
                     memory_limit=self.config.memory_limit,
-                    extra_args=["--connect", server_uri],
+                    extra_args=["--connect", local_uri],
                 )
                 spawned = True
             except ImportError:
