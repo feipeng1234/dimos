@@ -149,6 +149,13 @@ unitree_g1_nav_mujoco_sim = (
         # hallway corridor kept landing in wall bands; the dining_room
         # interior is a reliable known-walkable patch.
         mujoco_start_pos="0.2, -3.2",
+        # Skip the ONNX walking policy and integrate cmd_vel directly
+        # into the floating base each tick (joints frozen at the home
+        # pose).  Nav-stack runs are about planner correctness, not
+        # gait fidelity; gait dynamics just slow iteration without
+        # changing what the planner sees.  Override with
+        # mujoco_kinematic_robot=False to bring the gait back.
+        mujoco_kinematic_robot=True,
     )
 )
 
