@@ -111,12 +111,13 @@ class G1MujocoPlanarSimConfig(ModuleConfig):
     box_half_extents: tuple[float, float, float] = _DEFAULT_BOX_HALF_EXTENTS
     sensor_z_offset: float = _DEFAULT_SENSOR_Z_OFFSET
     physics_dt: float = 0.002
-    # Lidar runs at 1 Hz with 5k points/scan -- well under the raycast cost
-    # against the dense HSSD mesh (~170ms / 20k rays). Bump these together
-    # if the nav stack needs higher resolution.
-    lidar_hz: float = 1.0
+    # Lidar tuning: 10 Hz x 20k points/scan = 200k pts/s (matches Mid-360
+    # spec). ~170 ms per scan against the dense HSSD mesh -> sim runs at
+    # ~6 Hz lidar effective. Worth it for SimplePlanner's costmap to see
+    # narrow HSSD doorways.
+    lidar_hz: float = 10.0
     odom_hz: float = 50.0
-    lidar_points_per_scan: int = 5_000
+    lidar_points_per_scan: int = 20_000
     lidar_range_min: float = _MID360_RANGE_MIN_M
     lidar_range_max: float = _MID360_RANGE_MAX_M
     fov_h_deg: float = _MID360_FOV_H_DEG
@@ -124,6 +125,14 @@ class G1MujocoPlanarSimConfig(ModuleConfig):
     fov_v_max_deg: float = _MID360_V_MAX_DEG
     velocity_kv: float = 200.0
     box_mass: float = 35.0
+    # HSSD scene's default geom mask is contype=8/conaffinity=4. The box
+    # geom uses the matching pair so it collides with walls + floor (and,
+    # by default, furniture). When ``disable_furniture_collision`` is true,
+    # we zero out contype/conaffinity on every geom whose body name does
+    # not start with "room_geometry" so the box is only blocked by walls.
+    box_contype: int = 4
+    box_conaffinity: int = 8
+    disable_furniture_collision: bool = True
     # Frames default to the nav_stack convention: PGO publishes (map, odom),
     # this sim publishes (odom, base_link), giving the planner a complete
     # map -> odom -> base_link chain through the TF tree.
@@ -201,20 +210,24 @@ class G1MujocoPlanarSim(Module):
 
         bx, by, bz = cfg.box_half_extents
         spawn_z = bz + 0.01  # avoid initial floor penetration
-        # Wrapper MJCF lives next to the scene so include + relative asset paths
-        # resolve against the same directory as the original scene file.
+        # Body anchored at world origin; the slide joints carry the spawn
+        # offset so qpos[slide_x] reads the actual world x. Putting the
+        # spawn into the body's `pos=` instead would leave the planar joints
+        # at zero -- _publish_odom would publish (0, 0) regardless of where
+        # the robot actually is.
         wrapper_xml = (
             f'<?xml version="1.0"?>\n'
             f'<mujoco model="g1_planar_sim_wrapper">\n'
             f'  <include file="{scene_path.name}"/>\n'
             f'  <option timestep="{cfg.physics_dt}"/>\n'
             f"  <worldbody>\n"
-            f'    <body name="planar_robot" pos="{cfg.spawn_x} {cfg.spawn_y} {spawn_z}">\n'
+            f'    <body name="planar_robot" pos="0 0 {spawn_z}">\n'
             f'      <joint name="slide_x" type="slide" axis="1 0 0" limited="false"/>\n'
             f'      <joint name="slide_y" type="slide" axis="0 1 0" limited="false"/>\n'
             f'      <joint name="hinge_yaw" type="hinge" axis="0 0 1" limited="false"/>\n'
             f'      <geom name="planar_robot_box" type="box"'
-            f' size="{bx} {by} {bz}" rgba="0.2 0.4 0.9 1" mass="{cfg.box_mass}"/>\n'
+            f' size="{bx} {by} {bz}" rgba="0.2 0.4 0.9 1" mass="{cfg.box_mass}"'
+            f' contype="{cfg.box_contype}" conaffinity="{cfg.box_conaffinity}"/>\n'
             f'      <site name="lidar" pos="0 0 {cfg.sensor_z_offset}"'
             f' euler="{_PI} 0 0"/>\n'
             f"    </body>\n"
@@ -250,6 +263,26 @@ class G1MujocoPlanarSim(Module):
         if self._robot_body_id < 0 or self._lidar_site_id < 0:
             raise RuntimeError("planar_robot body or lidar site missing in compiled model")
 
+        # Disable collision on every geom that does not belong to a room
+        # (i.e. furniture: lamps, console tables, paintings, mirrors, etc).
+        # Lidar still sees them via raycast (alpha unchanged), so the
+        # planner avoids them via the costmap; but the box doesn't get
+        # physically stuck on every kitchen counter.
+        if cfg.disable_furniture_collision:
+            for geom_id in range(model.ngeom):
+                body_id = int(model.geom_bodyid[geom_id])
+                body_name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, body_id) or ""
+                if (
+                    body_id == 0
+                    or body_name.startswith("room_geometry")
+                    or body_id == self._robot_body_id
+                ):
+                    continue
+                model.geom_contype[geom_id] = 0
+                model.geom_conaffinity[geom_id] = 0
+
+        data.qpos[self._slide_x_qpos] = cfg.spawn_x
+        data.qpos[self._slide_y_qpos] = cfg.spawn_y
         data.qpos[self._yaw_qpos] = cfg.spawn_yaw
         mujoco.mj_forward(model, data)
 
