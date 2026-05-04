@@ -26,16 +26,17 @@ We negate vy and wz when sending to the hardware.
 
 from __future__ import annotations
 
-import logging
 import threading
 from typing import TYPE_CHECKING
 
 import numpy as np
 
+from dimos.utils.logging_config import setup_logger
+
 if TYPE_CHECKING:
     from dimos.hardware.drive_trains.registry import TwistBaseAdapterRegistry
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 
 class FlowBaseAdapter:
@@ -65,7 +66,7 @@ class FlowBaseAdapter:
     def connect(self) -> bool:
         """Connect to FlowBase controller via Portal RPC."""
         try:
-            import portal  # type: ignore[import-untyped]
+            import portal
 
             self._client = portal.Client(self._address)
             self._connected = True

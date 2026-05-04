@@ -178,8 +178,8 @@ class MyModuleConfig(ModuleConfig):
     frame_id: str = "sensor_link"
     frame_id_prefix: str | None = None
 
-class MySensorModule(Module[MyModuleConfig]):
-    default_config = MyModuleConfig
+class MySensorModule(Module):
+    config: MyModuleConfig
 
 # With default config:
 sensor = MySensorModule()
@@ -241,7 +241,7 @@ class RobotBaseModule(Module):
             )
             self.tf.publish(robot_pose)
 
-        self._disposables.add(
+        self.register_disposable(
             rx.interval(0.1).subscribe(publish_pose)
         )
 
@@ -268,7 +268,7 @@ class CameraModule(Module):
             )
             self.tf.publish(camera_mount, optical_frame)
 
-        self._disposables.add(
+        self.register_disposable(
             rx.interval(0.1).subscribe(publish_transforms)
         )
 

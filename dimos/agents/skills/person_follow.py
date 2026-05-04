@@ -17,13 +17,12 @@ from threading import Event, RLock, Thread
 import time
 from typing import Any
 
-from langchain_core.messages import HumanMessage
 import numpy as np
 from reactivex.disposable import Disposable
 from turbojpeg import TurboJPEG
 
-from dimos.agents.agent_spec import AgentSpec
 from dimos.agents.annotation import skill
+from dimos.constants import DEFAULT_THREAD_JOIN_TIMEOUT
 from dimos.core.core import rpc
 from dimos.core.module import Module, ModuleConfig
 from dimos.core.stream import In, Out
@@ -49,7 +48,7 @@ class Config(ModuleConfig):
     use_3d_navigation: bool = False
 
 
-class PersonFollowSkillContainer(Module[Config]):
+class PersonFollowSkillContainer(Module):
     """Skill container for following a person.
 
     This skill uses:
@@ -59,13 +58,12 @@ class PersonFollowSkillContainer(Module[Config]):
     - Does not do obstacle avoidance; assumes a clear path.
     """
 
-    default_config = Config
+    config: Config
 
     color_image: In[Image]
     global_map: In[PointCloud2]
     cmd_vel: Out[Twist]
 
-    _agent_spec: AgentSpec
     _frequency: float = 20.0  # Hz - control loop frequency
     _max_lost_frames: int = 15  # number of frames to wait before declaring person lost
     _patrolling_module_spec: PatrollingModuleSpec
@@ -74,7 +72,7 @@ class PersonFollowSkillContainer(Module[Config]):
         super().__init__(**kwargs)
         self._latest_image: Image | None = None
         self._latest_pointcloud: PointCloud2 | None = None
-        self._vl_model: VlModel[Any] = create("qwen")
+        self._vl_model: VlModel = create("qwen")
         self._tracker: EdgeTAMProcessor | None = None
         self._thread: Thread | None = None
         self._should_stop: Event = Event()
@@ -93,13 +91,18 @@ class PersonFollowSkillContainer(Module[Config]):
     @rpc
     def start(self) -> None:
         super().start()
-        self._disposables.add(Disposable(self.color_image.subscribe(self._on_color_image)))
+        self.register_disposable(Disposable(self.color_image.subscribe(self._on_color_image)))
         if self.config.use_3d_navigation:
-            self._disposables.add(Disposable(self.global_map.subscribe(self._on_pointcloud)))
+            self.register_disposable(Disposable(self.global_map.subscribe(self._on_pointcloud)))
 
     @rpc
     def stop(self) -> None:
         self._stop_following()
+
+        thread = self._thread
+        if thread is not None:
+            thread.join(timeout=DEFAULT_THREAD_JOIN_TIMEOUT)
+            self._thread = None
 
         with self._lock:
             if self._tracker is not None:
@@ -139,6 +142,10 @@ class PersonFollowSkillContainer(Module[Config]):
         """
 
         self._stop_following()
+
+        if self._thread is not None:
+            self._thread.join(timeout=DEFAULT_THREAD_JOIN_TIMEOUT)
+            self._thread = None
 
         self._should_stop.clear()
 
@@ -182,7 +189,7 @@ class PersonFollowSkillContainer(Module[Config]):
         self.cmd_vel.publish(Twist.zero())
 
         if self._thread is not None:
-            self._thread.join(timeout=2)
+            self._thread.join(timeout=DEFAULT_THREAD_JOIN_TIMEOUT)
             self._thread = None
 
         return "Stopped following."
@@ -227,12 +234,13 @@ class PersonFollowSkillContainer(Module[Config]):
 
         logger.info(f"EdgeTAM initialized with {len(initial_detections)} detections")
 
+        self.start_tool("follow_person")
         self._thread = Thread(target=self._follow_loop, args=(tracker, query), daemon=True)
         self._thread.start()
 
         message = (
             "Found the person. Starting to follow. You can stop following by calling "
-            "the 'stop_following' tool."
+            "the 'stop_following' tool. You will receive streaming updates."
         )
 
         if self._patrolling_module_spec.is_patrolling():
@@ -303,8 +311,11 @@ class PersonFollowSkillContainer(Module[Config]):
 
     def _send_stop_reason(self, query: str, reason: str) -> None:
         self.cmd_vel.publish(Twist.zero())
-        message = f"Person follow stopped for '{query}'. Reason: {reason}."
-        self._agent_spec.add_message(HumanMessage(message))
+        self.tool_update(
+            "follow_person",
+            f"Person follow stopped for '{query}'. Reason: {reason}.",
+        )
+        self.stop_tool("follow_person")
         logger.info("Person follow stopped", query=query, reason=reason)
 
 
