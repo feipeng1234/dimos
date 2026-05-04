@@ -45,16 +45,13 @@ from __future__ import annotations
 from typing import Any
 
 from dimos.core.coordination.blueprints import autoconnect
-from dimos.core.global_config import global_config
 from dimos.navigation.movement_manager.movement_manager import MovementManager
-from dimos.navigation.nav_stack.main import create_nav_stack, nav_stack_rerun_config
+from dimos.navigation.nav_stack.main import create_nav_stack
 from dimos.robot.unitree.g1.blueprints.navigation._mujoco_pose_adapter import (
     MujocoPoseToOdometryAdapter,
 )
 from dimos.robot.unitree.g1.config import G1_LOCAL_PLANNER_PRECOMPUTED_PATHS, G1_VEHICLE_HEIGHT
-from dimos.robot.unitree.g1.g1_rerun import g1_mujoco_sensor_tf_override, g1_static_robot
 from dimos.robot.unitree.g1.mujoco_sim import G1SimConnection
-from dimos.visualization.vis_module import vis_module
 
 
 def _rerun_blueprint() -> Any:
@@ -81,8 +78,9 @@ unitree_g1_nav_mujoco_sim = (
         G1SimConnection.blueprint(),
         MujocoPoseToOdometryAdapter.blueprint(),
         create_nav_stack(
-            use_simple_planner=False,
+            use_simple_planner=True,
             vehicle_height=G1_VEHICLE_HEIGHT,
+            simple_planner={"body_frame": "base_link"},
             terrain_analysis={
                 "obstacle_height_threshold": 0.1,
                 "ground_height_threshold": 0.05,
@@ -109,22 +107,22 @@ unitree_g1_nav_mujoco_sim = (
             },
         ),
         MovementManager.blueprint(),
-        vis_module(
-            viewer_backend=global_config.viewer,
-            rerun_config=nav_stack_rerun_config(
-                {
-                    "blueprint": _rerun_blueprint,
-                    # Update tf#/sensor each tick from the live odometry so
-                    # the static robot wireframe (parent_frame=tf#/sensor)
-                    # tracks the robot in the scene instead of staying at
-                    # the world origin (z=0).
-                    "visual_override": {"world/odometry": g1_mujoco_sensor_tf_override},
-                    "static": {
-                        "world/tf/robot": g1_static_robot,
-                    },
-                }
-            ),
-        ),
+        # vis_module(
+        #     viewer_backend=global_config.viewer,
+        #     rerun_config=nav_stack_rerun_config(
+        #         {
+        #             "blueprint": _rerun_blueprint,
+        #             # Update tf#/sensor each tick from the live odometry so
+        #             # the static robot wireframe (parent_frame=tf#/sensor)
+        #             # tracks the robot in the scene instead of staying at
+        #             # the world origin (z=0).
+        #             "visual_override": {"world/odometry": g1_mujoco_sensor_tf_override},
+        #             "static": {
+        #                 "world/tf/robot": g1_static_robot,
+        #             },
+        #         }
+        #     ),
+        # ),
     )
     .remappings(
         [
@@ -156,9 +154,6 @@ unitree_g1_nav_mujoco_sim = (
         # changing what the planner sees.  Override with
         # mujoco_kinematic_robot=False to bring the gait back.
         mujoco_kinematic_robot=True,
-        # Top-down view centred on the HSSD house — distance 25 m
-        # frames the whole floor plan, elevation -89° is near-vertical.
-        # Format: lookat_x, lookat_y, lookat_z, distance, azimuth, elevation.
         mujoco_camera_position="1.5, 9.5, 0.0, 35.0, 90.0, -89.0",
     )
 )
