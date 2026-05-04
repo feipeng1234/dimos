@@ -26,6 +26,7 @@ import lcm as lcm_mod
 from dimos.constants import DEFAULT_THREAD_JOIN_TIMEOUT
 from dimos.protocol.service.spec import BaseConfig, Service
 from dimos.protocol.service.system_configurator.base import configure_system
+from dimos.protocol.service.system_configurator.lcm import probe_max_rcvbuf
 from dimos.protocol.service.system_configurator.lcm_config import lcm_configurators
 from dimos.utils.logging_config import setup_logger
 
@@ -33,10 +34,22 @@ logger = setup_logger()
 
 _DEFAULT_LCM_HOST = "239.255.76.67"
 _DEFAULT_LCM_PORT = "7667"
-# LCM_DEFAULT_URL is used by LCM (we didn't pick that env var name)
-_DEFAULT_LCM_URL = os.getenv(
-    "LCM_DEFAULT_URL", f"udpm://{_DEFAULT_LCM_HOST}:{_DEFAULT_LCM_PORT}?ttl=0"
-)
+
+
+def _build_default_lcm_url() -> str:
+    # LCM hardcodes a 2 MB SO_RCVBUF in lcm_udpm.c if recv_buf_size is unset;
+    # on macOS that's the dominant cause of "datagrams dropped due to full
+    # socket buffers". Probe the kernel's actual ceiling so LCM doesn't warn
+    # about a value the kernel was never going to grant (macOS caps
+    # kern.ipc.maxsockbuf at a hardware/version limit sysctl can't raise).
+    env_override = os.getenv("LCM_DEFAULT_URL")
+    if env_override:
+        return env_override
+    rcvbuf = probe_max_rcvbuf()
+    return f"udpm://{_DEFAULT_LCM_HOST}:{_DEFAULT_LCM_PORT}?ttl=0&recv_buf_size={rcvbuf}"
+
+
+_DEFAULT_LCM_URL = _build_default_lcm_url()
 
 
 def autoconf(check_only: bool = False) -> None:

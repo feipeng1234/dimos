@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import re
 import resource
+import socket
 import subprocess
 
 from dimos.constants import STATE_DIR
@@ -153,6 +154,7 @@ class MulticastConfiguratorMacOS(SystemConfigurator):
 
     def __init__(self, loopback_interface: str = "lo0") -> None:
         self.loopback_interface = loopback_interface
+        self.competing_routes: list[str] = []
         self.add_route_cmd = [
             "route",
             "add",
@@ -166,17 +168,35 @@ class MulticastConfiguratorMacOS(SystemConfigurator):
         # `netstat -nr` shows the routing table. We search for a 224/4 route entry
         # that points to the loopback interface (lo0). The route often exists on
         # en0 (WiFi/Ethernet), which causes cross-process LCM communication to fail.
+        self.competing_routes = []
         try:
             result = subprocess.run(["netstat", "-nr"], capture_output=True, text=True)
             if result.returncode != 0:
                 print(f"ERROR: `netstat -nr` rc={result.returncode} stderr={result.stderr!r}")
                 return False
 
+            lo_match = False
             for line in result.stdout.splitlines():
-                if "224.0.0.0/4" in line or "224.0.0/4" in line:
-                    if self.loopback_interface in line:
-                        return True
-            return False
+                if "224.0.0.0/4" not in line and "224.0.0/4" not in line:
+                    continue
+                if self.loopback_interface in line.split():
+                    lo_match = True
+                else:
+                    # VPN/tunnel/Ethernet interfaces commonly add their own 224/4 route
+                    # (e.g. utun*, tailscale*, en*); these can win route selection over
+                    # lo0 when brought up later, breaking local LCM.
+                    self.competing_routes.append(line.strip())
+
+            if self.competing_routes:
+                print(
+                    f"WARNING: {len(self.competing_routes)} competing 224/4 route(s) "
+                    f"alongside {self.loopback_interface}; LCM may flap when these "
+                    f"interfaces come up:"
+                )
+                for route in self.competing_routes:
+                    print(f"  {route}")
+
+            return lo_match
         except Exception as error:
             print(f"ERROR: failed checking multicast route via netstat: {error}")
             return False
@@ -202,6 +222,38 @@ class MulticastConfiguratorMacOS(SystemConfigurator):
 # specific checks: buffers
 
 IDEAL_RMEM_SIZE = 67_108_864  # 64MB
+_LCM_DEFAULT_RCVBUF = 2 * 1024 * 1024  # matches the hardcoded default in lcm_udpm.c
+_PROBE_SIZES_MB = (64, 48, 32, 24, 16, 8, 4)
+
+
+def probe_max_rcvbuf() -> int:
+    """Largest SO_RCVBUF the running kernel will actually grant a UDP socket.
+
+    macOS's kern.ipc.maxsockbuf has a kernel-baked ceiling (often 32 MB on
+    Apple Silicon) that `sudo sysctl` cannot exceed. Asking LCM for a value
+    above that ceiling makes lcm_udpm.c print a noisy warning on every
+    socket open. Probe instead so we ask for what the kernel will give.
+    """
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    except OSError:
+        return _LCM_DEFAULT_RCVBUF
+    try:
+        for size_mb in _PROBE_SIZES_MB:
+            target = size_mb * 1024 * 1024
+            try:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, target)
+            except OSError:
+                continue
+            # Linux silently caps at rmem_max and returns 2× the granted size
+            # (kernel bookkeeping); macOS returns the requested size when
+            # setsockopt didn't fail. `actual >= target` covers both.
+            actual = sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
+            if actual >= target:
+                return target
+        return _LCM_DEFAULT_RCVBUF
+    finally:
+        sock.close()
 
 
 class BufferConfiguratorLinux(SystemConfigurator):
