@@ -103,7 +103,7 @@ class ContourPolygons3D(Timestamped):
         self,
         z_offset: float = 1.5,
     ) -> Archetype:
-        """Render polygon outlines as ``rr.LineStrips3D`` — pink closed loops."""
+        """Render polygon outlines as ``rr.LineStrips3D`` — red closed loops."""
         import rerun as rr
 
         pts = self._parse_xyzi()
@@ -129,8 +129,8 @@ class ContourPolygons3D(Timestamped):
 
         return rr.LineStrips3D(
             strips,
-            colors=[(255, 50, 200, 255)] * len(strips),  # bright pink
-            radii=[0.15] * len(strips),  # thick lines
+            colors=[(255, 32, 32, 255)] * len(strips),
+            radii=[0.15] * len(strips),
         )
 
     def __str__(self) -> str:
