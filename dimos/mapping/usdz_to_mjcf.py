@@ -178,12 +178,15 @@ def bake_scene_mjcf(
     prims = load_scene_prims(scene_mesh_path, alignment=align)
     logger.info(f"bake_scene_mjcf: {len(prims)} prims to bake")
 
-    # Convex decomposition.  Per-prim splitting alone isn't enough —
-    # Sketchfab USDZs often have a few large *structural* prims (whole
-    # map's floor, room shells) whose convex hulls are basically the
-    # map's bounding box.  ``trimesh.Trimesh.convex_decomposition()``
-    # (CoACD under the hood) chops each non-convex prim into a small
-    # set of convex pieces; convex prims come back as one hull.
+    # Per-prim convex hull.  Per-prim splitting + one-hull-per-prim is
+    # enough for a static scene populated by furniture-sized objects
+    # (chair, sofa, wall, table-top): the robot bumps into the bounding
+    # convex shape, which is what we want — fine-grained concavity
+    # decomposition (VHACD/CoACD per prim) costs minutes-to-hours on
+    # large multi-prim scenes (1000+ prims) and only buys the ability to
+    # navigate *inside* a chair's frame, which we don't need.  For
+    # large structural prims (one prim covering an entire room shell)
+    # the user should split them in the source asset before export.
     import trimesh
 
     asset_lines: list[str] = []
@@ -193,7 +196,7 @@ def bake_scene_mjcf(
     n_hulls = 0
     # 1 mm — anything thinner is coplanar for qhull's purposes.
     _DEGENERATE_EPS = 1e-3
-    logger.info(f"bake_scene_mjcf: convex-decomposing {len(prims)} prims (one-time)…")
+    logger.info(f"bake_scene_mjcf: per-prim convex-hulling {len(prims)} prims (one-time)…")
     for prim in prims:
         tm = trimesh.Trimesh(
             vertices=prim.vertices.astype(np.float64),
@@ -201,10 +204,10 @@ def bake_scene_mjcf(
             process=False,
         )
         try:
-            hulls = tm.convex_decomposition()
-        except Exception as e:
-            logger.warning(f"  decomposition failed for {prim.name}: {e}; using whole prim")
             hulls = [tm.convex_hull]
+        except Exception as e:
+            logger.warning(f"  convex_hull failed for {prim.name}: {e}; skipping")
+            continue
 
         for j, hull in enumerate(hulls):
             v = np.asarray(hull.vertices, dtype=np.float32)

@@ -315,7 +315,11 @@ def load_scene_mesh(
         tm = trimesh.load(str(path), force="mesh")
         if len(tm.faces) == 0:
             raise RuntimeError(f"trimesh.load returned an empty mesh for {path}")
-        color_visual = tm.visual.to_color()
+        # ``to_color`` only exists on ``TextureVisuals`` — when ``force="mesh"``
+        # merges across multiple PBR materials trimesh hands back ``ColorVisuals``
+        # (already in color form) which has no ``to_color`` method.
+        visual = tm.visual
+        color_visual = visual.to_color() if hasattr(visual, "to_color") else visual
         vc = getattr(color_visual, "vertex_colors", None)
         mesh = o3d.geometry.TriangleMesh()
         mesh.vertices = o3d.utility.Vector3dVector(np.asarray(tm.vertices, dtype=np.float64))
@@ -371,6 +375,73 @@ class ScenePrimMesh:
     """``(M, 3)`` int32 vertex indices."""
 
 
+def _load_glb_prims(path: Path, alignment: SceneMeshAlignment) -> list[ScenePrimMesh]:
+    """Enumerate per-instance prims from a glTF/GLB.
+
+    ``trimesh.load(file.glb)`` returns a ``Scene`` whose ``graph`` records
+    the world transform for every geometry instance.  Iterating
+    ``graph.nodes_geometry`` is the trimesh equivalent of USD's
+    ``stage.Traverse()`` — it yields one entry per instance, even when
+    multiple instances share the same underlying mesh (typical for chairs,
+    cabinets, etc.).  Without this enumeration, ``trimesh.load(... force="mesh")``
+    collapses the whole scene to one mesh and CoACD produces a single coarse
+    decomposition, which is essentially useless for collision against
+    multi-object scenes.
+    """
+    import trimesh
+
+    loaded = trimesh.load(str(path))
+    R = _world_rotation(alignment)
+    T = np.asarray(alignment.translation, dtype=np.float64)
+    s = float(alignment.scale)
+
+    if isinstance(loaded, trimesh.Trimesh):
+        # Single-mesh GLB (no scene graph).  Treat as one prim.
+        pts = np.asarray(loaded.vertices, dtype=np.float64)
+        faces = np.asarray(loaded.faces, dtype=np.int32)
+        if len(faces) == 0:
+            return []
+        pts_world = (R @ (s * pts).T).T + T
+        return [
+            ScenePrimMesh(
+                name="scene",
+                vertices=pts_world.astype(np.float32),
+                triangles=faces,
+            )
+        ]
+
+    scene = loaded
+    prims: list[ScenePrimMesh] = []
+    for node_name in scene.graph.nodes_geometry:
+        xform, geom_name = scene.graph[node_name]
+        geom = scene.geometry.get(geom_name)
+        if geom is None or not isinstance(geom, trimesh.Trimesh):
+            continue
+        if len(geom.faces) == 0:
+            continue
+
+        pts_local = np.asarray(geom.vertices, dtype=np.float64)
+        faces = np.asarray(geom.faces, dtype=np.int32)
+
+        # Local → scene-root via the instance transform.
+        m = np.asarray(xform, dtype=np.float64)
+        pts_h = np.hstack([pts_local, np.ones((len(pts_local), 1), dtype=np.float64)])
+        pts_stage = (m @ pts_h.T).T[:, :3]
+
+        # Scene-root → dimos world via SceneMeshAlignment.
+        pts_world = (R @ (s * pts_stage).T).T + T
+
+        clean = "".join(c if c.isalnum() else "_" for c in str(node_name))
+        prims.append(
+            ScenePrimMesh(
+                name=f"{clean}__{len(prims)}",
+                vertices=pts_world.astype(np.float32),
+                triangles=faces,
+            )
+        )
+    return prims
+
+
 def load_scene_prims(
     path: str | Path,
     alignment: SceneMeshAlignment | None = None,
@@ -389,8 +460,11 @@ def load_scene_prims(
     align = alignment or SceneMeshAlignment()
     suffix = path.suffix.lower()
 
+    if suffix in {".glb", ".gltf"}:
+        return _load_glb_prims(path, align)
+
     if suffix not in {".usdz", ".usd", ".usdc", ".usda"}:
-        # Non-USD: one part, whole mesh.
+        # Non-USD, non-glTF (e.g. .obj/.ply/.stl): one part, whole mesh.
         whole = load_scene_mesh(path, alignment=align)
         return [
             ScenePrimMesh(

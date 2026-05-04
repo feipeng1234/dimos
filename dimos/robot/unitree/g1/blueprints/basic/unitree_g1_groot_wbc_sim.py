@@ -122,38 +122,61 @@ class G1Memory(Recorder):
 # subprocess (and now the in-process MujocoEngine) computes PD itself.
 _MJCF_PATH = "data/mujoco_sim/g1_gear_wbc.xml"
 
-# Optional scene mesh (.usdz / .glb / .obj / etc.) — used by:
+# Scene mesh — used by:
 #   * viser viewer (renders the colored mesh in the browser)
 #   * MeshCameraModule (ray-casts the head-camera RGB feed)
-#   * MuJoCo physics (when DIMOS_SCENE_MESH_COLLISION=1, the default
-#     when a path is provided — the mesh is baked into a wrapped MJCF
-#     and added as a static collidable so the robot can't phase
-#     through walls).
-# Configure via env vars so trying different downloaded scenes doesn't
-# require editing the blueprint:
+#   * MuJoCo physics (when DIMOS_SCENE_MESH_COLLISION=1, the default —
+#     the mesh is baked into a wrapped MJCF and added as a static
+#     collidable so the robot can't phase through walls).
+#
+# Default: an artist-built mesh of the dimos_office, shipped via Git-LFS
+# (``data/.lfs/dimos_office_mesh.tar.gz``).  The artist used
+# ``data/dimos_office/dimos_office.ply`` as their world-origin reference,
+# so the mesh sits in splat-native coordinates and the same alignment
+# YAML (``data/dimos_office/dimos_office.yaml``) places mesh + splat in
+# the same dimos-world frame.  Run ``dimos run unitree-g1-groot-wbc-sim``
+# with no env vars and the mesh + splat overlay correctly.
+#
+# Override via env vars to swap in a different scene (e.g. a Sketchfab
+# USDZ) — when DIMOS_SCENE_MESH_PATH is set explicitly, the alignment
+# defaults below revert to scale=0.05 / zero translation+rotation
+# (typical Sketchfab USDZ in centimeters); set the rest as needed:
 #   DIMOS_SCENE_MESH_PATH   = path to .usdz/.glb/.obj/etc.
-#   DIMOS_SCENE_MESH_SCALE  = e.g. 0.01 if source is centimeters
+#   DIMOS_SCENE_MESH_SCALE  = float
 #   DIMOS_SCENE_MESH_TRANSLATION = "x,y,z" world-frame offset
 #   DIMOS_SCENE_MESH_ROTATION_ZYX_DEG = "z,y,x" extra euler in degrees
 #   DIMOS_SCENE_MESH_Y_UP   = "0" to disable the y-up→z-up swap
 #   DIMOS_SCENE_MESH_COLLISION = "0" to skip baking + use the bare
-#       robot MJCF (visualization-only).  Default: bake when path set.
+#       robot MJCF (visualization-only).  Default: bake.
 #   DIMOS_SCENE_MESH_AUTO_GROUND = "1" to auto-translate the scene so
 #       the *first* surface a ray-down at origin hits lands at world
 #       z=0.  Off by default — for multi-story scenes the first hit is
 #       usually a ceiling / upper floor, not the ground.  Use only when
 #       you know origin is over the surface you want to stand on.
-_scene_mesh_path = os.environ.get("DIMOS_SCENE_MESH_PATH", "") or None
-# Default scale 0.05 targets Sketchfab USDZ exports (typically in cm
-# with maps designed for ~30×60 m FPS arenas).  Override for meshes
-# already authored in meters.
-_scene_mesh_scale = float(os.environ.get("DIMOS_SCENE_MESH_SCALE", "0.05"))
-_scene_mesh_translation = tuple(
-    float(x) for x in os.environ.get("DIMOS_SCENE_MESH_TRANSLATION", "0,0,0").split(",")
-)
-_scene_mesh_rotation = tuple(
-    float(x) for x in os.environ.get("DIMOS_SCENE_MESH_ROTATION_ZYX_DEG", "0,0,0").split(",")
-)
+_scene_mesh_path_override = os.environ.get("DIMOS_SCENE_MESH_PATH") or None
+if _scene_mesh_path_override:
+    # User-supplied scene; keep historical Sketchfab-cm defaults so old
+    # invocations continue to work.
+    _scene_mesh_path = _scene_mesh_path_override
+    _scene_mesh_scale = float(os.environ.get("DIMOS_SCENE_MESH_SCALE", "0.05"))
+    _scene_mesh_translation = tuple(
+        float(x) for x in os.environ.get("DIMOS_SCENE_MESH_TRANSLATION", "0,0,0").split(",")
+    )
+    _scene_mesh_rotation = tuple(
+        float(x) for x in os.environ.get("DIMOS_SCENE_MESH_ROTATION_ZYX_DEG", "0,0,0").split(",")
+    )
+else:
+    # Default: Git-LFS-shipped artist mesh + the splat's alignment YAML.
+    _scene_mesh_path = str(get_data("dimos_office_mesh") / "dimos_office_mesh.glb")
+    _scene_mesh_scale = float(os.environ.get("DIMOS_SCENE_MESH_SCALE", "2.0"))
+    _scene_mesh_translation = tuple(
+        float(x)
+        for x in os.environ.get("DIMOS_SCENE_MESH_TRANSLATION", "-1.72,-0.11,1.436").split(",")
+    )
+    _scene_mesh_rotation = tuple(
+        float(x)
+        for x in os.environ.get("DIMOS_SCENE_MESH_ROTATION_ZYX_DEG", "0.0,0.13,-5.63").split(",")
+    )
 _scene_mesh_y_up = os.environ.get("DIMOS_SCENE_MESH_Y_UP", "1") != "0"
 _scene_mesh_collision = os.environ.get("DIMOS_SCENE_MESH_COLLISION", "1") not in ("", "0")
 _scene_mesh_auto_ground = os.environ.get("DIMOS_SCENE_MESH_AUTO_GROUND", "0") not in ("", "0")
