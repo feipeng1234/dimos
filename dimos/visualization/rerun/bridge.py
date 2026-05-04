@@ -389,8 +389,9 @@ class RerunBridgeModule(Module):
     def _log_connect_hints(self, grpc_port: int) -> None:
         """Log CLI commands for connecting a viewer to this bridge."""
         local_ips = get_local_ips()
-        local_grpc = f"rerun+http://{self.host}:{grpc_port}/proxy"
-        local_ws = f"ws://{self.host}:{self.config.g.rerun_websocket_server_port}/ws"
+        connect_host = "127.0.0.1" if self.host == "0.0.0.0" else self.host
+        local_grpc = f"rerun+http://{connect_host}:{grpc_port}/proxy"
+        local_ws = f"ws://{connect_host}:{self.config.g.rerun_websocket_server_port}/ws"
         hostname = socket.gethostname()
 
         columns = 60
