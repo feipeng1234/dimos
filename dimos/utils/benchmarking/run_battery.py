@@ -30,12 +30,13 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
-import subprocess
 from collections.abc import Callable
 from dataclasses import asdict
+import json
 from pathlib import Path
+import subprocess
 
+from dimos.control.tasks.feedforward_gain_compensator import FeedforwardGainConfig
 from dimos.control.tasks.velocity_tracking_pid import (
     VelocityPIDConfig,
     VelocityTrackingConfig,
@@ -45,36 +46,67 @@ from dimos.utils.benchmarking.paths import (
     multi_trajectory_to_svg,
     trajectory_to_svg,
 )
-from dimos.utils.benchmarking.runner import run_baseline_sim, run_lyapunov_sim
+from dimos.utils.benchmarking.runner import (
+    run_baseline_sim,
+    run_lyapunov_sim,
+    run_pure_pursuit_sim,
+    run_rpp_sim,
+)
 from dimos.utils.benchmarking.scoring import ExecutedTrajectory, score_run
 
 # Session 3 wz PI gains, from
 # ~/char_runs/session_20260425-131525/modeling/tuning/tuning_summary.json
 SESSION3_WZ_PID = VelocityPIDConfig(
-    kp=0.346, ki=1.343, kd=0.0, max_integral=0.5, output_min=-1.5, output_max=1.5,
+    kp=0.346,
+    ki=1.343,
+    kd=0.0,
+    max_integral=0.5,
+    output_min=-1.5,
+    output_max=1.5,
 )
 PASSTHROUGH_PID = VelocityPIDConfig(kp=0.0, ki=0.0)
 SESSION3_VELOCITY_TRACKING = VelocityTrackingConfig(
-    vx=PASSTHROUGH_PID, vy=PASSTHROUGH_PID, wz=SESSION3_WZ_PID, dt=0.1,
+    vx=PASSTHROUGH_PID,
+    vy=PASSTHROUGH_PID,
+    wz=SESSION3_WZ_PID,
+    dt=0.1,
 )
+
+# Strategy B: static plant-gain feedforward. Numbers from
+# dimos.utils.benchmarking.plant_models (Session 3 fitted Go2 K values).
+GO2_FF = FeedforwardGainConfig(K_vx=1.008, K_vy=1.008, K_wz=2.175)
 
 
 COHORTS: dict[str, Callable[[Path, float], ExecutedTrajectory]] = {
-    "baseline_k0.5":         lambda p, t: run_baseline_sim(p, timeout_s=t, k_angular=0.5),
-    "baseline_k1.0_tuned":   lambda p, t: run_baseline_sim(p, timeout_s=t, k_angular=1.0),
-    "baseline_k0.5_pi":      lambda p, t: run_baseline_sim(p, timeout_s=t, k_angular=0.5,
-                                                            pid_config=SESSION3_VELOCITY_TRACKING),
-    "lyapunov":              lambda p, t: run_lyapunov_sim(p, timeout_s=t),
-    "lyapunov_pi":           lambda p, t: run_lyapunov_sim(p, timeout_s=t,
-                                                            pid_config=SESSION3_VELOCITY_TRACKING),
+    # Baseline P-controller cohorts (production LocalPlanner algorithm)
+    "baseline_k0.5": lambda p, t: run_baseline_sim(p, timeout_s=t, k_angular=0.5),
+    "baseline_k1.0_tuned": lambda p, t: run_baseline_sim(p, timeout_s=t, k_angular=1.0),
+    "baseline_k0.5_pi": lambda p, t: run_baseline_sim(
+        p, timeout_s=t, k_angular=0.5, pid_config=SESSION3_VELOCITY_TRACKING
+    ),
+    "baseline_k0.5_ff": lambda p, t: run_baseline_sim(
+        p, timeout_s=t, k_angular=0.5, ff_config=GO2_FF
+    ),
+    # Classic Pure Pursuit
+    "pure_pursuit": lambda p, t: run_pure_pursuit_sim(p, timeout_s=t),
+    "pure_pursuit_ff": lambda p, t: run_pure_pursuit_sim(p, timeout_s=t, ff_config=GO2_FF),
+    # Regulated Pure Pursuit (existing PathFollowerTask: PP + adaptive lookahead +
+    # curvature speed reg + cross-track PID)
+    "rpp": lambda p, t: run_rpp_sim(p, timeout_s=t),
+    "rpp_ff": lambda p, t: run_rpp_sim(p, timeout_s=t, ff_config=GO2_FF),
+    # Lyapunov reactive
+    "lyapunov": lambda p, t: run_lyapunov_sim(p, timeout_s=t),
+    "lyapunov_pi": lambda p, t: run_lyapunov_sim(
+        p, timeout_s=t, pid_config=SESSION3_VELOCITY_TRACKING
+    ),
+    # MPC stub (raises NotImplementedError; included to reserve the cohort slot)
+    # "mpc":                 lambda p, t: run_mpc_sim(p, timeout_s=t),
 }
 
 
 def _git_short_sha() -> str:
     try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"], text=True
-        ).strip()
+        return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
     except Exception:
         return "unknown"
 
@@ -108,14 +140,13 @@ def main() -> None:
             score = score_run(path, traj)
             last = traj.ticks[-1] if traj.ticks else None
             tail = (
-                f"  arrived={score.arrived}  ticks={score.n_ticks}  "
-                f"t={score.time_to_complete:.2f}s"
+                f"  arrived={score.arrived}  ticks={score.n_ticks}  t={score.time_to_complete:.2f}s"
             )
             if last is not None:
                 tail += f"  last=({last.pose.position.x:.2f},{last.pose.position.y:.2f})"
             print(tail)
             print(
-                f"  CTE rms={score.cte_rms*100:.1f}cm max={score.cte_max*100:.1f}cm  "
+                f"  CTE rms={score.cte_rms * 100:.1f}cm max={score.cte_max * 100:.1f}cm  "
                 f"head_err rms={score.heading_err_rms:.3f}rad  "
                 f"v_lin_rms={score.linear_speed_rms:.2f}m/s  "
                 f"smoothness(Σ|Δcmd|)={score.cmd_rate_integral:.2f}"
@@ -131,10 +162,7 @@ def main() -> None:
     composite_dir = out / "composite"
     composite_dir.mkdir(parents=True, exist_ok=True)
     for path_name, path in battery.items():
-        title_lines = [
-            f"{c}: {all_results[c][path_name]['cte_rms']*100:.1f}cm rms"
-            for c in COHORTS
-        ]
+        [f"{c}: {all_results[c][path_name]['cte_rms'] * 100:.1f}cm rms" for c in COHORTS]
         svg = multi_trajectory_to_svg(
             path,
             per_path_executed[path_name],
@@ -165,9 +193,7 @@ def main() -> None:
         html_parts.append(f"<tr><td>{path_name}</td>")
         for c in COHORTS:
             r = all_results[c][path_name]
-            html_parts.append(
-                f"<td>{r['cte_rms']*100:.1f} / {r['time_to_complete']:.1f}s</td>"
-            )
+            html_parts.append(f"<td>{r['cte_rms'] * 100:.1f} / {r['time_to_complete']:.1f}s</td>")
         html_parts.append("</tr>")
     html_parts.append("</tbody></table>")
 
@@ -196,7 +222,7 @@ def main() -> None:
         row = [path_name]
         for c in cohort_names:
             r = all_results[c][path_name]
-            row.append(f"{r['cte_rms']*100:5.1f}cm/{r['time_to_complete']:5.1f}s")
+            row.append(f"{r['cte_rms'] * 100:5.1f}cm/{r['time_to_complete']:5.1f}s")
         print(f"{row[0]:<22}  " + "  ".join(f"{r:>20}" for r in row[1:]))
 
 
