@@ -41,6 +41,26 @@ if TYPE_CHECKING:
 
 T = TypeVar("T")
 
+
+def _qualname(cls: type) -> str:
+    """Fully-qualified name suitable for round-tripping through resolve_msg_type."""
+    return f"{cls.__module__}.{cls.__qualname__}"
+
+
+def _resolve_type(qualname: str) -> type | None:
+    """Inverse of _qualname; returns None if the type cannot be imported."""
+    import importlib
+
+    module_path, _, class_name = qualname.rpartition(".")
+    if not module_path:
+        return None
+    try:
+        module = importlib.import_module(module_path)
+    except ImportError:
+        return None
+    return getattr(module, class_name, None)
+
+
 # TODO
 # Transports need to be rewritten and simplified,
 #
@@ -86,6 +106,9 @@ class pLCMTransport(PubSubTransport[T]):
     def __reduce__(self):  # type: ignore[no-untyped-def]
         return (pLCMTransport, (self.topic,))
 
+    def __getstate__(self) -> dict[str, Any]:
+        return {"kind": "plcm", "topic": self.topic}
+
     def broadcast(self, _: Out[T] | None, msg: T) -> None:
         if not self._started:
             self.start()
@@ -127,6 +150,13 @@ class LCMTransport(PubSubTransport[T]):
     def __reduce__(self):  # type: ignore[no-untyped-def]
         return (LCMTransport, (self.topic.topic, self.topic.lcm_type))
 
+    def __getstate__(self) -> dict[str, Any]:
+        return {
+            "kind": "lcm",
+            "topic": self.topic.topic,
+            "lcm_type": _qualname(self.topic.lcm_type) if self.topic.lcm_type else None,
+        }
+
     def broadcast(self, _, msg) -> None:  # type: ignore[no-untyped-def]
         if not self._started:
             self.start()
@@ -151,6 +181,13 @@ class JpegLcmTransport(LCMTransport):  # type: ignore[type-arg]
     def __reduce__(self):  # type: ignore[no-untyped-def]
         return (JpegLcmTransport, (self.topic.topic, self.topic.lcm_type))
 
+    def __getstate__(self) -> dict[str, Any]:
+        return {
+            "kind": "jpeg_lcm",
+            "topic": self.topic.topic,
+            "lcm_type": _qualname(self.topic.lcm_type) if self.topic.lcm_type else None,
+        }
+
     def start(self) -> None:
         self.lcm.start()
         self._started = True
@@ -163,12 +200,21 @@ class JpegLcmTransport(LCMTransport):  # type: ignore[type-arg]
 class pSHMTransport(PubSubTransport[T]):
     _started: bool = False
 
-    def __init__(self, topic: str, **kwargs) -> None:  # type: ignore[no-untyped-def]
+    def __init__(self, topic: str, default_capacity: int | None = None, **kwargs) -> None:  # type: ignore[no-untyped-def]
         super().__init__(topic)
+        if default_capacity is not None:
+            kwargs["default_capacity"] = default_capacity
         self.shm = PickleSharedMemory(**kwargs)
 
     def __reduce__(self):  # type: ignore[no-untyped-def]
-        return (pSHMTransport, (self.topic,))
+        return (pSHMTransport, (self.topic, self.shm.config.default_capacity))
+
+    def __getstate__(self) -> dict[str, Any]:
+        return {
+            "kind": "pshm",
+            "topic": self.topic,
+            "capacity": self.shm.config.default_capacity,
+        }
 
     def broadcast(self, _, msg) -> None:  # type: ignore[no-untyped-def]
         if not self._started:
@@ -193,12 +239,21 @@ class pSHMTransport(PubSubTransport[T]):
 class SHMTransport(PubSubTransport[T]):
     _started: bool = False
 
-    def __init__(self, topic: str, **kwargs) -> None:  # type: ignore[no-untyped-def]
+    def __init__(self, topic: str, default_capacity: int | None = None, **kwargs) -> None:  # type: ignore[no-untyped-def]
         super().__init__(topic)
+        if default_capacity is not None:
+            kwargs["default_capacity"] = default_capacity
         self.shm = BytesSharedMemory(**kwargs)
 
     def __reduce__(self):  # type: ignore[no-untyped-def]
-        return (SHMTransport, (self.topic,))
+        return (SHMTransport, (self.topic, self.shm.config.default_capacity))
+
+    def __getstate__(self) -> dict[str, Any]:
+        return {
+            "kind": "shm",
+            "topic": self.topic,
+            "capacity": self.shm.config.default_capacity,
+        }
 
     def broadcast(self, _, msg) -> None:  # type: ignore[no-untyped-def]
         if not self._started:
@@ -223,17 +278,36 @@ class SHMTransport(PubSubTransport[T]):
 class JpegShmTransport(PubSubTransport[T]):
     _started: bool = False
 
-    def __init__(self, topic: str, quality: int = 75, **kwargs) -> None:  # type: ignore[no-untyped-def]
+    def __init__(  # type: ignore[no-untyped-def]
+        self,
+        topic: str,
+        quality: int = 75,
+        default_capacity: int | None = None,
+        **kwargs,
+    ) -> None:
         super().__init__(topic)
         from dimos.protocol.pubsub.impl.jpeg_shm import (
             JpegSharedMemory,
         )  # deferred to avoid pulling in Image/cv2/rerun
 
+        if default_capacity is not None:
+            kwargs["default_capacity"] = default_capacity
         self.shm = JpegSharedMemory(quality=quality, **kwargs)
         self.quality = quality
 
     def __reduce__(self):  # type: ignore[no-untyped-def]
-        return (JpegShmTransport, (self.topic, self.quality))
+        return (
+            JpegShmTransport,
+            (self.topic, self.quality, self.shm.config.default_capacity),
+        )
+
+    def __getstate__(self) -> dict[str, Any]:
+        return {
+            "kind": "jpeg_shm",
+            "topic": self.topic,
+            "quality": self.quality,
+            "capacity": self.shm.config.default_capacity,
+        }
 
     def broadcast(self, _, msg) -> None:  # type: ignore[no-untyped-def]
         if not self._started:
@@ -264,6 +338,13 @@ class ROSTransport(PubSubTransport[DimosMsg]):
 
     def __reduce__(self) -> tuple[Any, ...]:
         return (ROSTransport, (self.topic.topic, self.topic.msg_type))
+
+    def __getstate__(self) -> dict[str, Any]:
+        return {
+            "kind": "ros",
+            "topic": self.topic.topic,
+            "msg_type": _qualname(self.topic.msg_type),
+        }
 
     def broadcast(self, _: Out[DimosMsg], msg: DimosMsg) -> None:
         if self._ros is None:
@@ -300,6 +381,13 @@ if DDS_AVAILABLE:
             self._started: bool = False
             self._start_lock = threading.RLock()
 
+        def __getstate__(self) -> dict[str, Any]:
+            return {
+                "kind": "dds",
+                "topic": self.topic.topic,
+                "type": _qualname(self.topic.type),
+            }
+
         def start(self) -> None:
             with self._start_lock:
                 if not self._started:
@@ -328,3 +416,45 @@ if DDS_AVAILABLE:
 
 
 class ZenohTransport(PubSubTransport[T]): ...
+
+
+def deserialize_transport(state: dict[str, Any]) -> PubSubTransport[Any] | None:
+    """Inverse of `transport.__getstate__()`.
+
+    Returns None if the state cannot be reconstructed (e.g. msg type can no longer
+    be imported, or the kind is unknown). Caller is responsible for handling None.
+    """
+    kind = state.get("kind")
+    if kind == "plcm":
+        return pLCMTransport(state["topic"])
+    if kind == "lcm":
+        msg_type = _resolve_type(state["lcm_type"]) if state.get("lcm_type") else None
+        if msg_type is None:
+            return None
+        return LCMTransport(state["topic"], msg_type)
+    if kind == "jpeg_lcm":
+        msg_type = _resolve_type(state["lcm_type"]) if state.get("lcm_type") else None
+        if msg_type is None:
+            return None
+        return JpegLcmTransport(state["topic"], msg_type)
+    if kind == "pshm":
+        return pSHMTransport(state["topic"], default_capacity=state["capacity"])
+    if kind == "shm":
+        return SHMTransport(state["topic"], default_capacity=state["capacity"])
+    if kind == "jpeg_shm":
+        return JpegShmTransport(
+            state["topic"],
+            quality=state["quality"],
+            default_capacity=state["capacity"],
+        )
+    if kind == "ros":
+        msg_type = _resolve_type(state["msg_type"])
+        if msg_type is None:
+            return None
+        return ROSTransport(state["topic"], msg_type)
+    if kind == "dds" and DDS_AVAILABLE:
+        msg_type = _resolve_type(state["type"])
+        if msg_type is None:
+            return None
+        return DDSTransport(state["topic"], msg_type)  # type: ignore[name-defined]
+    return None

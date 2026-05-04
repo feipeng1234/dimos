@@ -41,6 +41,7 @@ from toolz import pipe  # type: ignore[import-untyped]
 
 from dimos.core.core import rpc
 from dimos.core.module import Module, ModuleConfig
+from dimos.core.transport import deserialize_transport
 from dimos.protocol.pubsub.impl.lcmpubsub import LCM
 from dimos.protocol.pubsub.patterns import Glob, pattern_matches
 from dimos.protocol.pubsub.spec import SubscribeAllCapable
@@ -204,10 +205,20 @@ class RerunBridgeModule(Module):
     MODULE_RADIUS = 20.0
     CHANNEL_RADIUS = 12.0
 
+    # Subscribed-transport keys ((kind, topic)) seen so far, used by
+    # on_system_modules to avoid re-subscribing on subsequent fires
+    # (load_blueprint / restart_module re-trigger the hook).
+    _subscribed_transports: set[tuple[str, str]]
+
+    # Kinds the bridge subscribes to via on_system_modules. LCM-family kinds are
+    # already covered by the regex catch-all in `Config.pubsubs`.
+    _DYNAMIC_TRANSPORTS: frozenset[str] = frozenset({"shm", "pshm", "jpeg_shm"})
+
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._last_log = {}
         self._override_cache: dict[str, Callable[[Any], RerunData | None]] = {}
+        self._subscribed_transports = set()
 
     @property
     def host(self) -> str:
@@ -488,6 +499,34 @@ class RerunBridgeModule(Module):
             rr.GraphEdges(edges=edges, graph_type="directed"),
             static=True,
         )
+
+    @rpc
+    def on_system_modules(self, modules: list[Any]) -> None:
+        """Subscribe to transports the LCM regex catch-all can't see.
+
+        Each peer carries a `transports` dict (populated host-side by
+        `_attach_transport_state` during `_connect_streams`). We deserialize the
+        SHM-family entries into transport instances and subscribe per-topic.
+        Idempotent across re-fires (load_blueprint / restart_module).
+        """
+        for peer in modules:
+            peer_transports = getattr(peer, "transports", None) or {}
+            for state in peer_transports.values():
+                kind = state.get("kind")
+                if kind not in self._DYNAMIC_TRANSPORTS:
+                    continue
+                key = (kind, state.get("topic"))
+                if key in self._subscribed_transports:
+                    continue
+                transport = deserialize_transport(state)
+                if transport is None:
+                    logger.warning("Could not reconstruct transport from state", state=state)
+                    continue
+                self._subscribed_transports.add(key)
+                topic = transport.topic
+                logger.info("bridge subscribing to peer transport", kind=kind, topic=str(topic))
+                unsub = transport.subscribe(lambda msg, t=topic: self._on_message(msg, t))
+                self.register_disposable(Disposable(unsub))
 
     @rpc
     def stop(self) -> None:

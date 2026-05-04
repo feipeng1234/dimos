@@ -31,7 +31,7 @@ from dimos.visualization.vis_module import vis_module
 # TODO need a global transport toggle on blueprints/global config
 _mac_transports: dict[tuple[str, type], pSHMTransport[Image]] = {
     ("color_image", Image): pSHMTransport(
-        "color_image", default_capacity=DEFAULT_CAPACITY_COLOR_IMAGE
+        "/color_image", default_capacity=DEFAULT_CAPACITY_COLOR_IMAGE
     ),
 }
 

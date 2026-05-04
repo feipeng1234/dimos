@@ -95,6 +95,12 @@ class ModuleProxyProtocol(Protocol):
 
 
 class RPCClient:
+    # Plain-data view of each stream's transport, keyed by stream name. Populated
+    # by ModuleCoordinator._connect_streams as it wires transports onto modules.
+    # Survives pickling so peer modules receiving this proxy via on_system_modules
+    # can read the wired transports without a coordinator round-trip.
+    transports: dict[str, dict[str, Any]]
+
     def __init__(self, actor_instance, actor_class) -> None:  # type: ignore[no-untyped-def]
         self.rpc = LCMRPC()
         self.actor_class = actor_class
@@ -103,6 +109,7 @@ class RPCClient:
         self.rpcs = actor_class.rpcs.keys()
         self.rpc.start()
         self._unsub_fns = []  # type: ignore[var-annotated]
+        self.transports = {}
 
     def stop_rpc_client(self) -> None:
         for unsub in self._unsub_fns:
@@ -118,10 +125,13 @@ class RPCClient:
             self.rpc = None  # type: ignore[assignment]
 
     def __reduce__(self):  # type: ignore[no-untyped-def]
-        # Return the class and the arguments needed to reconstruct the object
+        # 3-tuple form: (cls, args, state). Default unpickling calls cls(*args)
+        # then updates __dict__ with state, so the transports map carries across
+        # the pipe boundary even though it isn't a constructor argument.
         return (
             self.__class__,
             (self.actor_instance, self.actor_class),
+            {"transports": self.transports},
         )
 
     # passthrough

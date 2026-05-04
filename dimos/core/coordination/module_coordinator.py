@@ -240,6 +240,7 @@ class ModuleCoordinator(Resource):
                 instance = self.get_instance(module)  # type: ignore[assignment]
                 instance.set_transport(original_name, transport)  # type: ignore[union-attr]
                 self._module_transports.setdefault(module, {})[original_name] = transport
+                _attach_transport_state(instance, original_name, transport)
                 logger.info(
                     "Transport",
                     name=remapped_name,
@@ -490,6 +491,7 @@ class ModuleCoordinator(Resource):
             transport = saved_transports.get(stream_ref.name)
             if transport is not None:
                 new_proxy.set_transport(stream_ref.name, transport)
+                _attach_transport_state(new_proxy, stream_ref.name, transport)
         self._module_transports[new_class] = {
             s.name: t for s in new_atom.streams if (t := saved_transports.get(s.name)) is not None
         }
@@ -527,6 +529,31 @@ class ModuleCoordinator(Resource):
             self.stop()
 
 
+def _attach_transport_state(
+    instance: ModuleProxyProtocol, stream_name: str, transport: PubSubTransport[Any]
+) -> None:
+    """Mirror `transport.__getstate__()` onto the proxy's `transports` dict.
+
+    Lets peers receiving this proxy via `on_system_modules` introspect the wired
+    wired transports without an extra RPC. Tolerant of proxy classes that don't pre-init
+    the dict (e.g. DockerModuleProxy).
+    """
+    transports = getattr(instance, "transports", None)
+    if transports is None:
+        try:
+            instance.transports = transports = {}  # type: ignore[attr-defined]
+        except (AttributeError, TypeError):
+            return
+    try:
+        transports[stream_name] = transport.__getstate__()
+    except Exception:
+        logger.exception(
+            "Failed to serialize transport state",
+            stream=stream_name,
+            transport=type(transport).__name__,
+        )
+
+
 def _all_name_types(blueprint: Blueprint) -> set[tuple[str, type]]:
     result = set()
     for bp in blueprint.active_blueprints:
@@ -541,6 +568,18 @@ def _is_name_unique(blueprint: Blueprint, name: str) -> bool:
     return sum(1 for n, _ in _all_name_types(blueprint) if n == name) == 1
 
 
+def _topic_has_native_endpoint(blueprint: Blueprint, name: str, stream_type: type) -> bool:
+    from dimos.core.native_module import NativeModule
+
+    for bp in blueprint.active_blueprints:
+        for conn in bp.streams:
+            remapped = blueprint.remapping_map.get((bp.module, conn.name), conn.name)
+            if remapped == name and conn.type == stream_type:
+                if isinstance(bp.module, type) and issubclass(bp.module, NativeModule):
+                    return True
+    return False
+
+
 def _get_transport_for(blueprint: Blueprint, name: str, stream_type: type) -> PubSubTransport[Any]:
     transport = blueprint.transport_map.get((name, stream_type), None)
     if transport:
@@ -549,8 +588,8 @@ def _get_transport_for(blueprint: Blueprint, name: str, stream_type: type) -> Pu
     use_pickled = getattr(stream_type, "lcm_encode", None) is None
     topic = f"/{name}" if _is_name_unique(blueprint, name) else f"/{short_id()}"
 
-    # macOS LCM is so bad (for a number of reasons like privacy monitoring) that its just unusable
-    if sys.platform == "darwin":
+    # NativeModule subprocesses only speak LCM; SHM here would silently drop.
+    if sys.platform == "darwin" and not _topic_has_native_endpoint(blueprint, name, stream_type):
         transport = pSHMTransport(topic)
     else:
         transport = pLCMTransport(topic) if use_pickled else LCMTransport(topic, stream_type)
