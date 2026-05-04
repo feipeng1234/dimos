@@ -26,9 +26,11 @@ last few hundred lines on disk.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 
@@ -85,6 +87,32 @@ def launch_with_streaming_log(
     t.start()
 
     return proc, log_path
+
+
+def wait_for_log_pattern(
+    log_path: Path, pattern: str, *, timeout: float = 600.0
+) -> bool:
+    """Tail the streamed log file until a line matching `pattern` appears.
+
+    Used to gate fixture setup on a real subprocess milestone (e.g. Rapier
+    snapshot fully restored, server physics active) instead of a wall-clock
+    sleep. Polls the file every 0.5s and re-reads only the appended portion.
+    """
+    regex = re.compile(pattern)
+    deadline = time.time() + timeout
+    pos = 0
+    while time.time() < deadline:
+        try:
+            with log_path.open("r", errors="replace") as f:
+                f.seek(pos)
+                chunk = f.read()
+                pos = f.tell()
+                if regex.search(chunk):
+                    return True
+        except FileNotFoundError:
+            pass
+        time.sleep(0.5)
+    return False
 
 
 def dump_log(label: str, log_path: Path, *, max_bytes: int = 50_000) -> None:

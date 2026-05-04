@@ -31,7 +31,11 @@ import time
 
 import pytest
 
-from dimos.e2e_tests._subprocess_log import dump_log, launch_with_streaming_log
+from dimos.e2e_tests._subprocess_log import (
+    dump_log,
+    launch_with_streaming_log,
+    wait_for_log_pattern,
+)
 from dimos.e2e_tests.dimos_cli_call import DimosCliCall
 from dimos.e2e_tests.lcm_spy import LcmSpy
 from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
@@ -118,6 +122,16 @@ def sim_nav():
         if not _wait_for_port(BRIDGE_PORT, timeout=120):
             dump_log("dimos sim-nav", log_path)
             pytest.fail(f"Bridge not ready on port {BRIDGE_PORT}")
+        # Gate on actual server-side physics activation. The "Sensor publishing
+        # active" log line lies — it only means the WS is connected. Physics-
+        # driven topics (/odom, /lidar) can't publish until the browser ships
+        # the 26MB Rapier snapshot to the bridge AND it's restored. Locally
+        # this takes ~60s; on the CI runner under load it can take much longer.
+        if not wait_for_log_pattern(
+            log_path, r"Rapier snapshot restored", timeout=600.0
+        ):
+            dump_log("dimos sim-nav", log_path)
+            pytest.fail("Rapier snapshot never restored — server physics dead")
         yield call
     finally:
         call.stop()

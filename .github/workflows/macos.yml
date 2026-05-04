@@ -108,7 +108,7 @@ jobs:
         continue-on-error: true
         run: |
           source .venv/bin/activate
-          python -m pytest --timeout=300 -v \
+          python -m pytest --timeout=900 -v \
             dimos/e2e_tests/test_dimsim_pipeline.py \
             dimos/e2e_tests/test_dimsim_nav.py
 
