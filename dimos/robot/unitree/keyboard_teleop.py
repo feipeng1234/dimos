@@ -174,15 +174,19 @@ class KeyboardTeleop(Module):
             # held if configured to coexist with another /cmd_vel publisher.
             if self.publish_only_when_active:
                 motion_keys = {
-                    pygame.K_w, pygame.K_s, pygame.K_q, pygame.K_e,
-                    pygame.K_a, pygame.K_d,
+                    pygame.K_w,
+                    pygame.K_s,
+                    pygame.K_q,
+                    pygame.K_e,
+                    pygame.K_a,
+                    pygame.K_d,
                 }
                 if not (self._keys_held & motion_keys):
                     # Update the display + maintain rate, but don't publish.
                     self._update_display(twist)
                     self._clock.tick(50)
                     continue
-            self.tele_cmd_vel.publish(twist)
+            self.cmd_vel.publish(twist)
 
             self._update_display(twist)
 
