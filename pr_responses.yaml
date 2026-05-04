@@ -96,3 +96,12 @@
   problem: "Dev pre-release pin dimos-viewer==0.30.0a6.dev99 will break installs — .dev suffix not normally installable and exact wheel unlikely on PyPI"
   solution: "Fixed: relaxed pin from ==0.30.0a6.dev99 to >=0.30.0a6, updated uv.lock accordingly"
   commit: 8f0f9ac3b
+
+- pr: 1943
+  comment_id: 3182488943
+  author: greptile-apps[bot]
+  file: dimos/visualization/rerun/bridge.py
+  line: 393
+  problem: "Local connection hint prints 0.0.0.0 as the connect target — _log_connect_hints uses self.host directly for local URIs, but 0.0.0.0 is a bind address, not a valid viewer connect target"
+  solution: "Fixed: added connect_host substitution (0.0.0.0 → 127.0.0.1) in _log_connect_hints, matching the existing pattern used for the spawned viewer"
+  commit: 33b32ee9b
