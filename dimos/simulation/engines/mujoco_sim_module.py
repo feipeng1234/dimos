@@ -34,6 +34,7 @@ from typing import Any
 
 import mujoco
 import numpy as np
+import open3d as o3d  # type: ignore[import-untyped]
 from pydantic import Field
 import reactivex as rx
 from scipy.spatial.transform import Rotation as R
@@ -107,6 +108,20 @@ class MujocoSimModuleConfig(ModuleConfig, DepthCameraConfig):
     enable_pointcloud: bool = False
     pointcloud_fps: float = 5.0
     camera_info_fps: float = 1.0
+    # Multi-camera lidar fusion.  When non-empty, each camera in the
+    # list is rendered as a depth image, back-projected to world-frame
+    # points via depth_image_to_point_cloud(), and the union is
+    # voxel-downsampled before being published on `pointcloud`.  This
+    # mirrors the legacy out-of-process mujoco_process.py behavior the
+    # Go2 sim has used since #862 — three 160°-FOV cameras stitched
+    # to a 360° scan so VoxelGridMapper's column-carving actually
+    # sees the same XY columns each frame and stops accumulating
+    # phantom obstacles behind a moving robot.  When empty the
+    # original single-camera path runs unchanged.
+    lidar_camera_names: list[str] = Field(default_factory=list)
+    lidar_camera_width: int = 640
+    lidar_camera_height: int = 360
+    lidar_voxel_size: float = 0.05
     # Inject menagerie/dimos-bundled mesh bytes (via
     # dimos.simulation.mujoco.model.get_assets) into MjModel.from_xml_string.
     # MJCFs that reference meshes by bare filename (G1 GR00T, Go2) need this;
@@ -217,17 +232,45 @@ class MujocoSimModule(
             from dimos.simulation.mujoco.model import get_assets
 
             engine_assets = get_assets()
-        self._engine = MujocoEngine(
-            config_path=Path(self.config.address),
-            headless=self.config.headless,
-            cameras=[
+        # Compose the camera list.  Each registered camera blocks the
+        # sim thread inside _step_once (mujoco_engine._render_cameras
+        # does update_scene + GPU render synchronously between physics
+        # steps — typically 5-30 ms per camera), so registering a camera
+        # nobody consumes burns the 500 Hz tick deadline for nothing.
+        # Skip the primary camera entirely when none of color / depth /
+        # pointcloud is enabled.  Lidar cameras still register when
+        # `lidar_camera_names` is set.
+        cameras: list[CameraConfig] = []
+        primary_needed = (
+            self.config.enable_color
+            or self.config.enable_depth
+            or (self.config.enable_pointcloud and not self.config.lidar_camera_names)
+        )
+        if primary_needed:
+            cameras.append(
                 CameraConfig(
                     name=self.config.camera_name,
                     width=self.config.width,
                     height=self.config.height,
                     fps=float(self.config.fps),
                 )
-            ],
+            )
+        for lidar_name in self.config.lidar_camera_names:
+            if lidar_name == self.config.camera_name and primary_needed:
+                continue  # already registered as the RGBD camera
+            cameras.append(
+                CameraConfig(
+                    name=lidar_name,
+                    width=self.config.lidar_camera_width,
+                    height=self.config.lidar_camera_height,
+                    fps=float(self.config.pointcloud_fps),
+                )
+            )
+
+        self._engine = MujocoEngine(
+            config_path=Path(self.config.address),
+            headless=self.config.headless,
+            cameras=cameras,
             on_before_step=self._apply_shm_commands,
             on_after_step=self._publish_shm_state,
             assets=engine_assets,
@@ -637,7 +680,55 @@ class MujocoSimModule(
         )
 
     def _generate_pointcloud(self) -> None:
-        if self._engine is None or self._camera_info_base is None:
+        if self._engine is None:
+            return
+        # Multi-camera lidar fusion: render every named lidar camera,
+        # back-project each depth image into world frame, concatenate,
+        # and voxel-downsample.  The result is a single 360° point cloud
+        # with `frame_id="world"`, which is what VoxelGridMapper expects
+        # ("Assumes input clouds are already in world frame.").  This
+        # matches the legacy mujoco_process.py behavior the Go2 sim has
+        # always used.
+        if self.config.lidar_camera_names:
+            try:
+                from dimos.simulation.mujoco.depth_camera import depth_image_to_point_cloud
+
+                all_points: list[np.ndarray] = []
+                latest_ts: float = 0.0
+                for cam_name in self.config.lidar_camera_names:
+                    frame = self._engine.read_camera(cam_name)
+                    if frame is None:
+                        continue
+                    # ``mj_data.cam_xmat`` is stored flat; the helper wants
+                    # a 3x3.  Don't .copy() — the engine already gave us a
+                    # snapshot, just view it as the right shape.
+                    cam_mat3 = np.asarray(frame.cam_mat, dtype=np.float64).reshape(3, 3)
+                    pts = depth_image_to_point_cloud(
+                        frame.depth,
+                        frame.cam_pos,
+                        cam_mat3,
+                        fov_degrees=frame.fovy,
+                    )
+                    if pts.size > 0:
+                        all_points.append(pts)
+                    latest_ts = max(latest_ts, frame.timestamp)
+                if not all_points:
+                    return
+                combined = np.vstack(all_points)
+                pcd_o3d = o3d.geometry.PointCloud()
+                pcd_o3d.points = o3d.utility.Vector3dVector(combined)
+                pcd_o3d = pcd_o3d.voxel_down_sample(self.config.lidar_voxel_size)
+                self.pointcloud.publish(
+                    PointCloud2(pointcloud=pcd_o3d, ts=latest_ts or time.time(), frame_id="world")
+                )
+            except Exception as exc:
+                logger.error("Multi-camera lidar fusion error", error=str(exc))
+            return
+
+        # Single-camera fallback: produce a camera-frame pointcloud from
+        # the primary RGBD camera.  Kept for manipulation-style sims that
+        # want a head-camera depth feed instead of a 360° lidar.
+        if self._camera_info_base is None:
             return
         frame = self._engine.read_camera(self.config.camera_name)
         if frame is None:

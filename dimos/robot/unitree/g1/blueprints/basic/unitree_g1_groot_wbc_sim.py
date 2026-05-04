@@ -157,6 +157,12 @@ _scene_mesh_rotation = tuple(
 _scene_mesh_y_up = os.environ.get("DIMOS_SCENE_MESH_Y_UP", "1") != "0"
 _scene_mesh_collision = os.environ.get("DIMOS_SCENE_MESH_COLLISION", "1") not in ("", "0")
 _scene_mesh_auto_ground = os.environ.get("DIMOS_SCENE_MESH_AUTO_GROUND", "0") not in ("", "0")
+# Perf knob: kill the entire lidar/voxel/costmap pipeline.  When set, the
+# 3-camera depth render in MujocoSimModule, VoxelGridMapper, and CostMapper
+# all skip — StaticCostmapModule fills in with an all-free 50x50m grid so
+# click-to-nav still works against open space.  Useful for isolating
+# locomotion / control-loop perf from the perception firehose.
+_disable_lidar = os.environ.get("DIMOS_DISABLE_LIDAR", "0") not in ("", "0")
 
 if _scene_mesh_path:
     from dimos.mapping.mesh_scene import SceneMeshAlignment, floor_z_under_origin
@@ -276,7 +282,13 @@ _g1_right_arm_cfg = g1_right_arm()
 
 _g1_coordinator = (
     ControlCoordinator.blueprint(
-        tick_rate=500.0,
+        # 50 Hz control loop — matches upstream GR00T-WBC's
+        # `control_frequency=50` (decoupled_wbc/control/envs/g1/utils/
+        # joint_safety.py:38).  The policy was trained at this rate;
+        # running it faster doesn't make the robot smarter, just burns
+        # CPU on redundant inference.  Combined with the 200 Hz physics
+        # in g1_gear_wbc.xml, gives the upstream 4:1 sim/control ratio.
+        tick_rate=50.0,
         publish_joint_state=True,
         joint_state_frame_id="coordinator",
         hardware=[
@@ -308,6 +320,13 @@ _g1_coordinator = (
                 auto_arm=True,
                 auto_dry_run=False,
                 default_ramp_seconds=0.0,
+                # Coordinator runs at 50 Hz (TickLoop), so decimation=1
+                # gives the policy 50 Hz inference — matches the rate
+                # the model was trained at.  GrootWBCTaskConfig's own
+                # default is 10 (paired with the legacy 500 Hz tick);
+                # leaving it at 10 with our 50 Hz tick produces 5 Hz
+                # policy and the robot tips over.
+                decimation=1,
             ),
             # Per-arm trajectory followers driven by ManipulationModule.
             # When idle the arms dangle under the WBC's kp/kd damping; when
@@ -342,7 +361,14 @@ _g1_coordinator = (
 # torso lidar instead — a separate splat camera handles RGB perception.
 _g1_engine = MujocoSimModule.blueprint(
     address=_MJCF_PATH,
-    headless=sys.platform == "darwin",
+    # Always headless.  The integrated `viewer.launch_passive` calls
+    # `m_viewer.sync()` from inside `_step_once` every physics tick and
+    # measures 8.4ms/call on Linux — that's a hard ceiling of ~119 Hz
+    # regardless of the MJCF timestep target.  The viser viewer at
+    # :8082 is the canonical 3D view; the native MuJoCo window is
+    # available via DIMOS_MUJOCO_VIEW=1 which spawns a *separate*
+    # process that mirrors live state without blocking the engine.
+    headless=True,
     dof=29,
     # SplatCameraModule is the canonical RGB source for this sim; suppress
     # MujocoSimModule's own RGB to keep /splat/color_image single-publisher
@@ -350,17 +376,40 @@ _g1_engine = MujocoSimModule.blueprint(
     # channel, so per-module transports can't separate them — must gate
     # the publish itself).
     enable_color=False,
-    enable_depth=True,
-    enable_pointcloud=True,
+    # head_color depth is unused now that ObjectSceneRegistration is out
+    # of the stack (MeshCameraModule does its own ray-cast for color and
+    # the lidar pipeline below uses the 3 torso lidar cameras instead).
+    # Leaving it on registers head_color with the engine, which then
+    # blocks the 500 Hz sim thread inside _step_once doing GPU renders
+    # nobody consumes.  Re-enable when wiring back ObjectSceneRegistration.
+    enable_depth=False,
+    enable_pointcloud=not _disable_lidar,
     pointcloud_fps=2.0,
     # head_color camera in the MJCF mirrors g1_d435_default's pose
-    # (torso-mounted, 47.6° downward pitch) so MuJoCo's depth aligns
-    # pixel-for-pixel with the splat-rendered RGB.  ObjectSceneRegistration
-    # consumes (color_image, depth_image, camera_info) and they must
-    # match in pose + intrinsics + resolution.
+    # (torso-mounted, 47.6° downward pitch) so MuJoCo's depth would align
+    # pixel-for-pixel with the splat-rendered RGB if anything were
+    # consuming it.
     camera_name="head_color",
     width=320,
     height=180,
+    # Multi-camera 360° lidar — three 160°-FOV depth cameras on the torso
+    # (defined in g1_gear_wbc.xml) rendered + back-projected + stitched
+    # into a single world-frame pointcloud per scan.  This is what the
+    # legacy mujoco_process.py has done for the Go2 sim since #862; without
+    # it, VoxelGridMapper's column-carving only sees the forward cone, leaves
+    # phantom obstacles behind a moving robot, and A* fails after a while.
+    lidar_camera_names=(
+        []
+        if _disable_lidar
+        else [
+            "lidar_front_camera",
+            "lidar_left_camera",
+            "lidar_right_camera",
+        ]
+    ),
+    lidar_camera_width=640,
+    lidar_camera_height=360,
+    lidar_voxel_size=0.05,
     # G1 GR00T MJCF references meshes by bare filename (menagerie convention);
     # without the legacy asset injection MjModel.from_xml_path can't find them.
     inject_legacy_assets=True,
@@ -429,6 +478,10 @@ if _splat_path is not None and _splat_path.exists():
         {
             ("joint_state", JointState): LCMTransport("/coordinator/joint_state", JointState),
             ("odom", PoseStamped): LCMTransport("/odom", PoseStamped),
+            # Lidar overlay — toggle via the "Show lidar pointcloud" checkbox
+            # in the viser UI panel.  The 360° fused cloud comes from the
+            # MujocoSimModule's `lidar_camera_names` setup above.
+            ("lidar", PointCloud2): LCMTransport("/lidar", PointCloud2),
         },
     )
     # Camera publisher.  When the user provided their own scene mesh we
@@ -483,13 +536,20 @@ if _splat_path is not None and _splat_path.exists():
 # transports above) and color_image → /splat/color_image; downstream
 # subscribers bind to those topics by name.
 _g1_perception_stack = (
-    # Mapping + planning
-    VoxelGridMapper.blueprint().transports(
-        {
-            ("lidar", PointCloud2): LCMTransport("/lidar", PointCloud2),
-        }
+    # Lidar-driven occupancy pipeline.  Skipped entirely when
+    # DIMOS_DISABLE_LIDAR=1 — useful for measuring locomotion + agent
+    # CPU without VoxelGrid + CostMapper running.  StaticCostmapModule
+    # below picks up the slack (planner still gets an all-free grid).
+    *(
+        ()
+        if _disable_lidar
+        else (
+            VoxelGridMapper.blueprint().transports(
+                {("lidar", PointCloud2): LCMTransport("/lidar", PointCloud2)}
+            ),
+            CostMapper.blueprint(),
+        )
     ),
-    CostMapper.blueprint(),
     # Publish a constant all-free OccupancyGrid alongside CostMapper when:
     #   * macOS — the depth-render-based ``/lidar`` pipeline is silent
     #     (mujoco.Renderer can't build Metal pipeline state in a forkserver
@@ -499,12 +559,14 @@ _g1_perception_stack = (
     #     CostMapper's lidar-built grid stays empty and the planner can't
     #     find paths beyond the robot's local LOS.  Static all-free map is
     #     correct for the actual physics (flat floor, nothing to hit).
-    # When a scene mesh IS loaded, skip — CostMapper builds the real
-    # obstacle costmap from lidar hitting walls and we don't want a
-    # second publisher overwriting it.
+    #   * DIMOS_DISABLE_LIDAR=1 — CostMapper isn't running, planner
+    #     would have no costmap source at all.
+    # When a scene mesh IS loaded AND lidar is enabled, skip — CostMapper
+    # builds the real obstacle costmap from lidar hitting walls and we
+    # don't want a second publisher overwriting it.
     *(
         (StaticCostmapModule.blueprint(),)
-        if sys.platform == "darwin" or not _scene_mesh_path
+        if sys.platform == "darwin" or not _scene_mesh_path or _disable_lidar
         else ()
     ),
     ReplanningAStarPlanner.blueprint(),

@@ -41,6 +41,7 @@ from dimos.msgs.geometry_msgs.PointStamped import PointStamped
 from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
 from dimos.msgs.nav_msgs.Path import Path as PathMsg
 from dimos.msgs.sensor_msgs.JointState import JointState
+from dimos.msgs.sensor_msgs.PointCloud2 import PointCloud2
 from dimos.utils.logging_config import setup_logger
 from dimos.visualization.viser.camera import CameraSpec, g1_d435_default, world_pose
 from dimos.visualization.viser.robot_meshes import (
@@ -66,6 +67,10 @@ class ViserRenderModule(Module):
     joint_state: In[JointState]
     odom: In[PoseStamped]
     path: In[PathMsg]
+    # Optional lidar pointcloud overlay.  Subscribers that don't have a
+    # /lidar publisher in their stack (e.g. real-Go2 builds going through
+    # WebRTC) will simply never receive a message and the overlay stays empty.
+    lidar: In[PointCloud2]
     clicked_point: Out[PointStamped]
 
     def __init__(
@@ -118,6 +123,14 @@ class ViserRenderModule(Module):
         self._render_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._path_handle: Any = None
+        # Lidar overlay state.  GUI checkbox toggles visibility; the
+        # handle holds the most recently uploaded scene element so we
+        # can replace it on the next /lidar message instead of
+        # accumulating cloud-on-cloud.  `_lidar_visible` is read by
+        # the In subscriber so toggling off skips the upload entirely.
+        self._lidar_handle: Any = None
+        self._lidar_visible: bool = True
+        self._lidar_checkbox: Any = None
 
     @rpc
     def start(self) -> None:
@@ -264,6 +277,19 @@ class ViserRenderModule(Module):
 
             _apply_view_mode("Mesh")
 
+        # Lidar overlay toggle.  Shown unconditionally — when no /lidar
+        # publisher is connected the cloud just stays empty, but the
+        # checkbox makes it discoverable that the overlay exists.
+        self._lidar_checkbox = self._server.gui.add_checkbox(
+            "Show lidar pointcloud", initial_value=self._lidar_visible
+        )
+
+        @self._lidar_checkbox.on_update
+        def _on_lidar_toggle(_: Any) -> None:
+            self._lidar_visible = bool(self._lidar_checkbox.value)
+            if self._lidar_handle is not None:
+                self._lidar_handle.visible = self._lidar_visible
+
             @view_mode_dropdown.on_update
             def _on_view_mode(_event: Any) -> None:
                 _apply_view_mode(view_mode_dropdown.value)
@@ -347,6 +373,12 @@ class ViserRenderModule(Module):
             self.register_disposable(Disposable(unsub))
         except Exception as e:
             logger.warning(f"Viser: path subscribe failed: {e}")
+
+        try:
+            unsub = self.lidar.subscribe(self._on_lidar)
+            self.register_disposable(Disposable(unsub))
+        except Exception as e:
+            logger.warning(f"Viser: lidar subscribe failed: {e}")
 
         try:
             unsub = self.joint_state.subscribe(self._on_joint_state)
@@ -441,6 +473,38 @@ class ViserRenderModule(Module):
             )
         except Exception as e:
             logger.debug(f"Viser nav-path render failed: {e}")
+
+    def _on_lidar(self, msg: PointCloud2) -> None:
+        """Replace the lidar overlay in viser with the latest pointcloud.
+
+        The publisher hands us an ``open3d`` PointCloud whose points are
+        already in the world frame (this is what ``VoxelGridMapper``
+        consumes too — see its docstring).  We pass the (N, 3) array to
+        viser's ``add_point_cloud``; the previous handle is overwritten
+        in-place so we don't accumulate cloud-on-cloud across frames.
+        """
+        if not self._lidar_visible or self._server is None:
+            return
+        try:
+            pcd = msg.pointcloud
+            pts = np.asarray(pcd.points, dtype=np.float32)
+            if pts.size == 0:
+                return
+            # Color choice: subtle teal so the cloud is visible against
+            # both the dark mesh background and the light splat.  Per-point
+            # colors would be nicer but the lidar source doesn't carry
+            # them and viser's add_point_cloud accepts a single uniform
+            # color that broadcasts across all points.
+            colors = np.broadcast_to(np.array([0, 200, 255], dtype=np.uint8), pts.shape).copy()
+            self._lidar_handle = self._server.scene.add_point_cloud(
+                "/lidar_overlay",
+                points=pts,
+                colors=colors,
+                point_size=0.02,
+            )
+            self._lidar_handle.visible = self._lidar_visible
+        except Exception as e:
+            logger.debug(f"Viser lidar overlay update failed: {e}")
 
     def _on_joint_state(self, msg: JointState) -> None:
         names = list(msg.name)

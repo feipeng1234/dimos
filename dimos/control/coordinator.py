@@ -123,6 +123,14 @@ class TaskConfig:
     # explicit argument — applies to tasks that interpolate from the
     # current pose toward a default on arming.
     default_ramp_seconds: float = 10.0
+    # GR00T WBC only: run policy inference every N coordinator ticks.
+    # Effective policy rate = ``tick_rate / decimation``.  The model was
+    # trained at 50 Hz, so the original convention was tick_rate=500 +
+    # decimation=10.  At tick_rate=50 set decimation=1 (matches upstream
+    # `run_g1_control_loop.py` which spins the policy directly at 50 Hz).
+    # Mismatched rates make the policy hold actions for too long and
+    # the robot tips over.  ``None`` keeps the task's own default (10).
+    decimation: int | None = None
 
 
 class ControlCoordinatorConfig(ModuleConfig):
@@ -435,18 +443,21 @@ class ControlCoordinator(Module):
                 )
 
             model_dir = Path(cfg.model_path)
+            wbc_kwargs: dict[str, Any] = dict(
+                balance_onnx=model_dir / "balance.onnx",
+                walk_onnx=model_dir / "walk.onnx",
+                joint_names=cfg.joint_names,
+                all_joint_names=hw.joint_names,
+                priority=cfg.priority,
+                auto_arm=cfg.auto_arm,
+                auto_dry_run=cfg.auto_dry_run,
+                default_ramp_seconds=cfg.default_ramp_seconds,
+            )
+            if cfg.decimation is not None:
+                wbc_kwargs["decimation"] = cfg.decimation
             return GrootWBCTask(
                 cfg.name,
-                GrootWBCTaskConfig(
-                    balance_onnx=model_dir / "balance.onnx",
-                    walk_onnx=model_dir / "walk.onnx",
-                    joint_names=cfg.joint_names,
-                    all_joint_names=hw.joint_names,
-                    priority=cfg.priority,
-                    auto_arm=cfg.auto_arm,
-                    auto_dry_run=cfg.auto_dry_run,
-                    default_ramp_seconds=cfg.default_ramp_seconds,
-                ),
+                GrootWBCTaskConfig(**wbc_kwargs),
                 adapter=hw.adapter,
             )
 
