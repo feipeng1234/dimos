@@ -84,6 +84,10 @@ class FarPlannerConfig(NativeModuleConfig):
     new_point_counter: int = 10
     obs_inflate_size: int = 2
     visualize_ratio: float = 0.4
+    # 0 → republish way_point every cycle (matches OG ros-nav behaviour).
+    # The C++ default suppresses way_point updates until the goal moves by
+    # this many metres, which makes the live sim feel stuck.
+    wp_churn_dist: float = 0.0
 
 
 class FarPlanner(NativeModule):
