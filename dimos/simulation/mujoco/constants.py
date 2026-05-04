@@ -26,10 +26,10 @@ MIN_RANGE = 0.2
 MAX_HEIGHT = 1.2
 
 # Lidar constants
-LIDAR_RESOLUTION = 0.05
+LIDAR_RESOLUTION = 0.10
 
 # Simulation timing constants
 VIDEO_FPS = 20
-LIDAR_FPS = 2
+LIDAR_FPS = 1
 
 LAUNCHER_PATH = Path(__file__).parent / "mujoco_process.py"

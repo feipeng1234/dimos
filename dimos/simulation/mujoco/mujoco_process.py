@@ -41,7 +41,6 @@ from numpy.typing import NDArray
 # loaded mujoco's GLFW first.
 from dimos.core.global_config import GlobalConfig
 from dimos.simulation.mujoco.constants import (
-    DEPTH_CAMERA_FOV,
     LIDAR_FPS,
     LIDAR_RESOLUTION,
     VIDEO_FPS,
@@ -131,10 +130,23 @@ def _run_simulation(config: GlobalConfig, shm: ShmReader) -> None:
     match robot_name:
         case "unitree_go1":
             z = 0.3
+            lidar_max_range = 3.0
+            lidar_max_height = 1.2
+            lidar_fov_degrees = 160.0
         case "unitree_g1":
             z = 0.8
+            # G1 carries a Mid-360; sim caps were tuned for Go2 hardware.
+            # 30 m matches FAR's --sensor_range and is well within Mid-360 real range.
+            lidar_max_range = 30.0
+            lidar_max_height = 50.0
+            # 160° fovy was producing peripheral streaks (pinhole back-projection
+            # can't accurately recover 3D from depth pixels at extreme angles).
+            lidar_fov_degrees = 120.0
         case _:
             z = 0
+            lidar_max_range = 3.0
+            lidar_max_height = 1.2
+            lidar_fov_degrees = 160.0
 
     pos = config.mujoco_start_pos_float
 
@@ -168,6 +180,11 @@ def _run_simulation(config: GlobalConfig, shm: ShmReader) -> None:
     depth_right_renderer.enable_depth_rendering()
 
     scene_option = mujoco.MjvOption()
+    # Lidar-only scene option: enable group 3 so collision-box walls are
+    # rendered even when the .obj visual meshes are single-sided and would
+    # appear transparent from the back face.
+    lidar_scene_option = mujoco.MjvOption()
+    lidar_scene_option.geomgroup[3] = 1
 
     # Timing control
     last_video_time = 0.0
@@ -179,6 +196,7 @@ def _run_simulation(config: GlobalConfig, shm: ShmReader) -> None:
     spawn_base_z = float(data.qpos[2])
     _kin_tick_counter = [0]
     _kin_last_log = [0.0]
+    _kin_last_step_t = [time.time()]
     KIN_WALL_MARGIN = 0.2
     # Floor-level — chest height starts inside the robot's own collision geom.
     KIN_RAY_Z = 0.05
@@ -191,7 +209,9 @@ def _run_simulation(config: GlobalConfig, shm: ShmReader) -> None:
         if config.mujoco_kinematic_robot:
             cmd = controller.get_command()
             vx, vy, wz = float(cmd[0]), float(cmd[1]), float(cmd[2])
-            dt = float(model.opt.timestep) * float(config.mujoco_steps_per_frame)
+            now_t = time.time()
+            dt = now_t - _kin_last_step_t[0]
+            _kin_last_step_t[0] = now_t
 
             qw, qz = float(data.qpos[3]), float(data.qpos[6])
             yaw = np.arctan2(2.0 * qw * qz, 1.0 - 2.0 * qz * qz)
@@ -265,16 +285,18 @@ def _run_simulation(config: GlobalConfig, shm: ShmReader) -> None:
         # Lidar/depth rendering
         if current_time - last_lidar_time >= lidar_interval:
             # Render all depth cameras
-            depth_renderer.update_scene(data, camera=lidar_camera_id, scene_option=scene_option)
+            depth_renderer.update_scene(
+                data, camera=lidar_camera_id, scene_option=lidar_scene_option
+            )
             depth_front = depth_renderer.render()
 
             depth_left_renderer.update_scene(
-                data, camera=lidar_left_camera_id, scene_option=scene_option
+                data, camera=lidar_left_camera_id, scene_option=lidar_scene_option
             )
             depth_left = depth_left_renderer.render()
 
             depth_right_renderer.update_scene(
-                data, camera=lidar_right_camera_id, scene_option=scene_option
+                data, camera=lidar_right_camera_id, scene_option=lidar_scene_option
             )
             depth_right = depth_right_renderer.render()
 
@@ -305,7 +327,12 @@ def _run_simulation(config: GlobalConfig, shm: ShmReader) -> None:
 
             for depth_image, camera_pos, camera_mat in cameras_data:
                 points = depth_image_to_point_cloud(
-                    depth_image, camera_pos, camera_mat, fov_degrees=DEPTH_CAMERA_FOV
+                    depth_image,
+                    camera_pos,
+                    camera_mat,
+                    fov_degrees=lidar_fov_degrees,
+                    max_range=lidar_max_range,
+                    max_height=lidar_max_height,
                 )
                 if points.size > 0:
                     all_points.append(points)
