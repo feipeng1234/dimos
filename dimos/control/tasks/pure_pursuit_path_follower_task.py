@@ -12,16 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Baseline path-follower ControlTask: production LocalPlanner algorithm,
-unwrapped from its daemon thread and rebuilt as a passive ControlTask.
+"""Classic Pure Pursuit path-follower as a passive ControlTask.
 
-Algorithm is a faithful port of
-:class:`dimos.navigation.replanning_a_star.local_planner.LocalPlanner`:
-PController + 0.5 m fixed lookahead + rotate-then-drive heuristic +
-state machine (initial_rotation → path_following → final_rotation → arrived).
+Geometric controller: find a fixed-distance lookahead point on the path,
+compute the arc curvature κ to reach it, output ``(vx = target_speed,
+wz = vx · κ)``. No adaptive lookahead, no curvature-based speed
+regulation, no cross-track PID — that's :mod:`path_follower_task`
+(Regulated Pure Pursuit).
 
-Costmap / obstacle-clearance plumbing is intentionally omitted — the
-benchmark battery is obstacle-free.
+For ``Pure Pursuit + FF`` cohort, supply ``ff_config`` — the static
+plant-gain compensator divides cmd by ``K_plant`` before output.
 """
 
 from __future__ import annotations
@@ -42,12 +42,8 @@ from dimos.control.tasks.feedforward_gain_compensator import (
     FeedforwardGainCompensator,
     FeedforwardGainConfig,
 )
-from dimos.control.tasks.velocity_tracking_pid import (
-    VelocityTrackingConfig,
-    VelocityTrackingPID,
-)
-from dimos.navigation.replanning_a_star.controllers import PController
-from dimos.navigation.replanning_a_star.path_distancer import PathDistancer
+from dimos.control.tasks.path_controllers import PurePursuitController
+from dimos.control.tasks.path_distancer import PathDistancer
 from dimos.utils.logging_config import setup_logger
 from dimos.utils.trigonometry import angle_diff
 
@@ -58,43 +54,39 @@ if TYPE_CHECKING:
 
 logger = setup_logger()
 
-BaselineState = Literal[
+PurePursuitState = Literal[
     "idle", "initial_rotation", "path_following", "final_rotation", "arrived", "aborted"
 ]
 
 
 @dataclass
-class BaselinePathFollowerTaskConfig:
+class PurePursuitPathFollowerTaskConfig:
     joint_names: list[str] = field(default_factory=lambda: ["base/vx", "base/vy", "base/wz"])
     priority: int = 20
-    speed: float = 0.55
+    target_speed: float = 0.55
+    lookahead_distance: float = 0.5  # constant; classic PP
     control_frequency: float = 10.0
+    k_angular: float = 0.6  # heading-correction term in PurePursuitController
+    max_angular_velocity: float = 1.5
     goal_tolerance: float = 0.2
     orientation_tolerance: float = 0.35
-    # PController outer-loop angular gain. Default 0.5 matches production
-    # LocalPlanner; sweep on circle_R1.0 found 1.0 gives ~9× lower CTE.
-    k_angular: float = 0.5
-    # Optional inner-loop velocity-tracking PID. None ⟹ no closed loop.
-    # Mutually exclusive with ff_config (PI takes precedence if both set).
-    pid_config: VelocityTrackingConfig | None = None
-    # Optional static feedforward plant-gain compensator (Strategy B).
-    # cmd_to_robot = controller_cmd / K_plant. No actual feedback needed.
     ff_config: FeedforwardGainConfig | None = None
 
 
-class BaselinePathFollowerTask(BaseControlTask):
-    """Production LocalPlanner algorithm as a passive ControlTask."""
+class PurePursuitPathFollowerTask(BaseControlTask):
+    """Classic Pure Pursuit. State machine mirrors BaselinePathFollowerTask
+    so this slots into the same benchmark harness."""
 
     def __init__(
         self,
         name: str,
-        config: BaselinePathFollowerTaskConfig,
+        config: PurePursuitPathFollowerTaskConfig,
         global_config: GlobalConfig,
     ) -> None:
         if len(config.joint_names) != 3:
             raise ValueError(
-                f"BaselinePathFollowerTask '{name}' needs 3 joints (vx, vy, wz), "
-                f"got {len(config.joint_names)}"
+                f"PurePursuitPathFollowerTask '{name}' needs 3 joints "
+                f"(vx, vy, wz), got {len(config.joint_names)}"
             )
 
         self._name = name
@@ -102,22 +94,24 @@ class BaselinePathFollowerTask(BaseControlTask):
         self._joint_names_list = list(config.joint_names)
         self._joint_names = frozenset(config.joint_names)
 
-        self._controller = PController(global_config, config.speed, config.control_frequency)
-        # Override the class-level _k_angular for this instance only.
-        self._controller._k_angular = config.k_angular
-        self._pid: VelocityTrackingPID | None = (
-            VelocityTrackingPID(config.pid_config) if config.pid_config else None
+        self._controller = PurePursuitController(
+            global_config,
+            control_frequency=config.control_frequency,
+            min_lookahead=config.lookahead_distance,
+            max_lookahead=config.lookahead_distance,  # constant ⟹ classic PP
+            lookahead_gain=0.0,  # don't scale with speed
+            max_linear_speed=config.target_speed,
+            k_angular=config.k_angular,
+            max_angular_velocity=config.max_angular_velocity,
         )
         self._ff: FeedforwardGainCompensator | None = (
             FeedforwardGainCompensator(config.ff_config) if config.ff_config else None
         )
 
-        self._state: BaselineState = "idle"
+        self._state: PurePursuitState = "idle"
         self._path: Path | None = None
         self._distancer: PathDistancer | None = None
         self._current_odom: PoseStamped | None = None
-        # Closed-path gate: track the furthest-along path index reached so
-        # that closed paths (where goal==start) don't trip arrival on tick 1.
         self._max_progress_idx: int = 0
 
     # ------------------------------------------------------------------
@@ -154,14 +148,7 @@ class BaselinePathFollowerTask(BaseControlTask):
             case _:
                 return None
 
-        # Inner-loop options (mutually exclusive — PI wins if both set).
-        if self._pid is not None:
-            actual_vx = state.joints.joint_velocities.get(self._joint_names_list[0], 0.0)
-            actual_vy = state.joints.joint_velocities.get(self._joint_names_list[1], 0.0)
-            actual_wz = state.joints.joint_velocities.get(self._joint_names_list[2], 0.0)
-            vx, vy, wz = self._pid.compute(vx, vy, wz, actual_vx, actual_vy, actual_wz)
-        elif self._ff is not None:
-            # Static gain compensation: cmd_to_robot = controller_cmd / K_plant
+        if self._ff is not None:
             vx, vy, wz = self._ff.compute(vx, vy, wz)
 
         return JointCommandOutput(
@@ -172,32 +159,14 @@ class BaselinePathFollowerTask(BaseControlTask):
 
     def on_preempted(self, by_task: str, joints: frozenset[str]) -> None:
         if joints & self._joint_names and self.is_active():
-            logger.warning(f"BaselinePathFollowerTask '{self._name}' preempted by {by_task}")
+            logger.warning(f"PurePursuitPathFollowerTask '{self._name}' preempted by {by_task}")
             self._state = "aborted"
 
     # ------------------------------------------------------------------
-    # State-machine bodies (mirrors LocalPlanner._compute_*)
+    # State-machine bodies
     # ------------------------------------------------------------------
 
-    def _step_initial_rotation(self) -> tuple[float, float, float]:
-        assert self._path is not None and self._current_odom is not None
-        first_yaw = self._path.poses[0].orientation.euler[2]
-        robot_yaw = self._current_odom.orientation.euler[2]
-        yaw_err = angle_diff(first_yaw, robot_yaw)
-
-        if abs(yaw_err) < self._config.orientation_tolerance:
-            self._state = "path_following"
-            return self._step_path_following()
-
-        twist = self._controller.rotate(yaw_err)
-        return float(twist.linear.x), float(twist.linear.y), float(twist.angular.z)
-
     def _windowed_closest(self, pos: np.ndarray, window: int = 20) -> int:
-        """Closest path index searched only in a forward window from
-        ``_max_progress_idx``. Prevents wrap-around matches on closed paths
-        (e.g. circle where path[0] == path[-1] would otherwise let argmin
-        return the last index on tick 1 → spurious 'arrived').
-        """
         assert self._path is not None
         n = len(self._path.poses)
         lo = self._max_progress_idx
@@ -212,6 +181,19 @@ class BaselinePathFollowerTask(BaseControlTask):
                 best_idx = i
         return best_idx
 
+    def _step_initial_rotation(self) -> tuple[float, float, float]:
+        assert self._path is not None and self._current_odom is not None
+        first_yaw = self._path.poses[0].orientation.euler[2]
+        robot_yaw = self._current_odom.orientation.euler[2]
+        yaw_err = angle_diff(first_yaw, robot_yaw)
+
+        if abs(yaw_err) < self._config.orientation_tolerance:
+            self._state = "path_following"
+            return self._step_path_following()
+
+        twist = self._controller.rotate(yaw_err)
+        return float(twist.linear.x), float(twist.linear.y), float(twist.angular.z)
+
     def _step_path_following(self) -> tuple[float, float, float]:
         assert self._path is not None
         assert self._distancer is not None
@@ -223,8 +205,8 @@ class BaselinePathFollowerTask(BaseControlTask):
         if closest > self._max_progress_idx:
             self._max_progress_idx = closest
 
-        # Arrival is only valid AFTER we've traversed enough of the path.
-        # Otherwise closed paths (goal==start) would arrive on tick 1.
+        # Closed-path arrival gate: require traversal of >= 70% of path
+        # before allowing arrival, otherwise circle/figure-8 trip on tick 1.
         progress_threshold = max(1, int(0.7 * (len(self._path.poses) - 1)))
         if (
             self._max_progress_idx >= progress_threshold
@@ -234,7 +216,12 @@ class BaselinePathFollowerTask(BaseControlTask):
             return self._step_final_rotation()
 
         lookahead = self._distancer.find_lookahead_point(closest)
-        twist = self._controller.advance(lookahead, self._current_odom)
+        twist = self._controller.advance(
+            lookahead,
+            self._current_odom,
+            current_speed=self._config.target_speed,
+            path_curvature=None,  # classic PP: no curvature-based speed limit
+        )
         return float(twist.linear.x), float(twist.linear.y), float(twist.angular.z)
 
     def _step_final_rotation(self) -> tuple[float, float, float]:
@@ -245,46 +232,38 @@ class BaselinePathFollowerTask(BaseControlTask):
 
         if abs(yaw_err) < self._config.orientation_tolerance:
             self._state = "arrived"
-            logger.info(f"BaselinePathFollowerTask '{self._name}' arrived")
+            logger.info(f"PurePursuitPathFollowerTask '{self._name}' arrived")
             return 0.0, 0.0, 0.0
 
         twist = self._controller.rotate(yaw_err)
         return float(twist.linear.x), float(twist.linear.y), float(twist.angular.z)
 
     # ------------------------------------------------------------------
-    # Public API (called by runner)
+    # Public API
     # ------------------------------------------------------------------
 
     def start_path(self, path: Path, current_odom: PoseStamped) -> bool:
         if path is None or len(path.poses) < 2:
-            logger.warning(f"BaselinePathFollowerTask '{self._name}': invalid path")
+            logger.warning(f"PurePursuitPathFollowerTask '{self._name}': invalid path")
             return False
         self._path = path
         self._distancer = PathDistancer(path)
         self._current_odom = current_odom
         self._max_progress_idx = 0
-        self._controller.reset_errors()
-        if self._pid is not None:
-            self._pid.reset()
         if self._ff is not None:
             self._ff.reset()
 
         first_yaw = path.poses[0].orientation.euler[2]
         robot_yaw = current_odom.orientation.euler[2]
         yaw_err = angle_diff(first_yaw, robot_yaw)
-        self._controller.reset_yaw_error(yaw_err)
-
-        if abs(yaw_err) < self._config.orientation_tolerance:
-            # Note: production LocalPlanner transitions to "final_rotation" when
-            # the robot is exactly at path[0] (pos_d < 0.01). That's broken for
-            # open paths — we'd snap to "arrived" immediately. Always start in
-            # path_following when aligned; arrival is detected by distance_to_goal.
-            self._state = "path_following"
-        else:
-            self._state = "initial_rotation"
+        self._state = (
+            "initial_rotation"
+            if abs(yaw_err) >= self._config.orientation_tolerance
+            else "path_following"
+        )
 
         logger.info(
-            f"BaselinePathFollowerTask '{self._name}' started "
+            f"PurePursuitPathFollowerTask '{self._name}' started "
             f"({len(path.poses)} poses, initial state={self._state})"
         )
         return True
@@ -305,13 +284,14 @@ class BaselinePathFollowerTask(BaseControlTask):
         self._path = None
         self._distancer = None
         self._current_odom = None
+        self._max_progress_idx = 0
         return True
 
-    def get_state(self) -> BaselineState:
+    def get_state(self) -> PurePursuitState:
         return self._state
 
 
 __all__ = [
-    "BaselinePathFollowerTask",
-    "BaselinePathFollowerTaskConfig",
+    "PurePursuitPathFollowerTask",
+    "PurePursuitPathFollowerTaskConfig",
 ]

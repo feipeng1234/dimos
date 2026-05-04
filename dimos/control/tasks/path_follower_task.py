@@ -53,6 +53,10 @@ from dimos.control.task import (
     JointCommandOutput,
     ResourceClaim,
 )
+from dimos.control.tasks.feedforward_gain_compensator import (
+    FeedforwardGainCompensator,
+    FeedforwardGainConfig,
+)
 from dimos.control.tasks.path_controllers import (
     PIDCrossTrackController,
     PurePursuitController,
@@ -104,6 +108,10 @@ class PathFollowerTaskConfig:
     goal_tolerance: float = 0.2
     orientation_tolerance: float = 0.15
 
+    # Optional static feedforward plant-gain compensator (Strategy B).
+    # cmd_to_robot = controller_cmd / K_plant. No actual feedback needed.
+    ff_config: FeedforwardGainConfig | None = None
+
 
 class PathFollowerTask(BaseControlTask):
     """ControlTask that follows a nav_msgs/Path using PurePursuit + PID."""
@@ -135,6 +143,10 @@ class PathFollowerTask(BaseControlTask):
         self._velocity_profiler: VelocityProfiler | None = None
         self._current_odom: PoseStamped | None = None
         self._closest_index: int = 0
+        # Closed-path arrival gate: track furthest-along path index visited.
+        # Without this, paths where start == goal (circle, figure-8, square)
+        # trip the arrival check on tick 1.
+        self._max_progress_idx: int = 0
 
         # Controllers
         self._controller = PurePursuitController(
@@ -154,6 +166,9 @@ class PathFollowerTask(BaseControlTask):
             k_d=config.ct_kd,
             max_correction=config.ct_max_correction,
             max_integral=config.ct_max_integral,
+        )
+        self._ff: FeedforwardGainCompensator | None = (
+            FeedforwardGainCompensator(config.ff_config) if config.ff_config else None
         )
 
         # 10 Hz decimation state
@@ -203,6 +218,18 @@ class PathFollowerTask(BaseControlTask):
 
         self._last_compute_time = state.t_now
         output = self._compute_control()
+
+        # Optional static feedforward plant-gain compensation.
+        if self._ff is not None and output.velocities is not None:
+            adj_vx, adj_vy, adj_wz = self._ff.compute(
+                output.velocities[0], output.velocities[1], output.velocities[2]
+            )
+            output = JointCommandOutput(
+                joint_names=self._joint_names_list,
+                velocities=[adj_vx, adj_vy, adj_wz],
+                mode=ControlMode.VELOCITY,
+            )
+
         self._cached_output = output
         return output
 
@@ -228,8 +255,18 @@ class PathFollowerTask(BaseControlTask):
         current_pos = np.array([odom.position.x, odom.position.y])
         distance_to_goal = distancer.distance_to_goal(current_pos)
 
-        # ---- Final rotation mode ----
-        if distance_to_goal < self._config.goal_tolerance and len(self._path.poses) > 0:
+        # Track furthest-along path index for closed-path arrival gate.
+        closest_now = distancer.find_closest_point_index(current_pos)
+        if closest_now > self._max_progress_idx:
+            self._max_progress_idx = closest_now
+        progress_threshold = max(1, int(0.7 * (len(self._path.poses) - 1)))
+
+        # ---- Final rotation mode (gated on having traversed enough of path) ----
+        if (
+            self._max_progress_idx >= progress_threshold
+            and distance_to_goal < self._config.goal_tolerance
+            and len(self._path.poses) > 0
+        ):
             goal_yaw = self._path.poses[-1].orientation.euler[2]
             robot_yaw = odom.orientation.euler[2]
             yaw_err = angle_diff(goal_yaw, robot_yaw)
@@ -298,6 +335,7 @@ class PathFollowerTask(BaseControlTask):
             logger.warning(f"PathFollowerTask '{self._name}': invalid path (need >= 2 poses)")
             return False
 
+        self._max_progress_idx = 0
         self._path = path
         self._path_distancer = PathDistancer(path)
         self._velocity_profiler = VelocityProfiler(
@@ -318,9 +356,7 @@ class PathFollowerTask(BaseControlTask):
         self._cached_output = None
         self._last_compute_time = 0.0
 
-        logger.info(
-            f"PathFollowerTask '{self._name}' started ({len(path.poses)} poses)"
-        )
+        logger.info(f"PathFollowerTask '{self._name}' started ({len(path.poses)} poses)")
         return True
 
     def update_odom(self, odom: PoseStamped) -> None:

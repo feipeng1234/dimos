@@ -44,6 +44,10 @@ from dimos.control.task import (
     JointCommandOutput,
     ResourceClaim,
 )
+from dimos.control.tasks.feedforward_gain_compensator import (
+    FeedforwardGainCompensator,
+    FeedforwardGainConfig,
+)
 from dimos.control.tasks.lyapunov_path_controller import (
     LyapunovPathController,
     LyapunovPathControllerConfig,
@@ -80,8 +84,11 @@ class ReactivePathFollowerTaskConfig:
     # Lyapunov controller config (all reactive gains)
     controller: LyapunovPathControllerConfig = field(default_factory=LyapunovPathControllerConfig)
 
-    # Optional inner-loop velocity-tracking PID
+    # Optional inner-loop velocity-tracking PID (Strategy D — closed loop)
     pid_config: VelocityTrackingConfig | None = None
+    # Optional static plant-gain feedforward (Strategy B — divide cmd by K).
+    # Mutually exclusive with pid_config; PI wins if both set.
+    ff_config: FeedforwardGainConfig | None = None
 
 
 class ReactivePathFollowerTask(BaseControlTask):
@@ -119,6 +126,9 @@ class ReactivePathFollowerTask(BaseControlTask):
         self._controller = LyapunovPathController(config.controller)
         self._pid: VelocityTrackingPID | None = (
             VelocityTrackingPID(config.pid_config) if config.pid_config else None
+        )
+        self._ff: FeedforwardGainCompensator | None = (
+            FeedforwardGainCompensator(config.ff_config) if config.ff_config else None
         )
         self._max_progress_idx: int = 0
 
@@ -164,14 +174,27 @@ class ReactivePathFollowerTask(BaseControlTask):
         self._last_compute_time = state.t_now
         output = self._compute_control()
 
-        # Optional inner-loop PI velocity tracking
+        # Inner-loop options (mutually exclusive — PI wins if both set).
         if self._pid is not None and output.velocities is not None:
             actual_vx = state.joints.joint_velocities.get(self._joint_names_list[0], 0.0)
             actual_vy = state.joints.joint_velocities.get(self._joint_names_list[1], 0.0)
             actual_wz = state.joints.joint_velocities.get(self._joint_names_list[2], 0.0)
             adj_vx, adj_vy, adj_wz = self._pid.compute(
-                output.velocities[0], output.velocities[1], output.velocities[2],
-                actual_vx, actual_vy, actual_wz,
+                output.velocities[0],
+                output.velocities[1],
+                output.velocities[2],
+                actual_vx,
+                actual_vy,
+                actual_wz,
+            )
+            output = JointCommandOutput(
+                joint_names=self._joint_names_list,
+                velocities=[adj_vx, adj_vy, adj_wz],
+                mode=ControlMode.VELOCITY,
+            )
+        elif self._ff is not None and output.velocities is not None:
+            adj_vx, adj_vy, adj_wz = self._ff.compute(
+                output.velocities[0], output.velocities[1], output.velocities[2]
             )
             output = JointCommandOutput(
                 joint_names=self._joint_names_list,
@@ -192,6 +215,24 @@ class ReactivePathFollowerTask(BaseControlTask):
     # Control computation
     # ------------------------------------------------------------------
 
+    def _windowed_closest(self, pos: np.ndarray, window: int = 20) -> int:
+        """Closest path index searched only forward from ``_max_progress_idx``.
+        Prevents wrap-around matches on closed paths.
+        """
+        assert self._path is not None
+        n = len(self._path.poses)
+        lo = self._max_progress_idx
+        hi = min(n, lo + window + 1)
+        best_idx = lo
+        best_d_sq = float("inf")
+        for i in range(lo, hi):
+            p = self._path.poses[i].position
+            d_sq = (p.x - pos[0]) ** 2 + (p.y - pos[1]) ** 2
+            if d_sq < best_d_sq:
+                best_d_sq = d_sq
+                best_idx = i
+        return best_idx
+
     def _compute_control(self) -> JointCommandOutput:
         assert self._path is not None
         assert self._path_distancer is not None
@@ -202,9 +243,10 @@ class ReactivePathFollowerTask(BaseControlTask):
         current_pos = np.array([odom.position.x, odom.position.y])
         distance_to_goal = distancer.distance_to_goal(current_pos)
 
-        # Track furthest-along path index so closed paths (goal == start)
-        # don't trip arrival on tick 1.
-        closest = distancer.find_closest_point_index(current_pos)
+        # Monotonic windowed search prevents wrap-around match on closed
+        # paths (where path[0]==path[-1]) which would let argmin return the
+        # last index on tick 1 → spurious 'completed'.
+        closest = self._windowed_closest(current_pos)
         if closest > self._max_progress_idx:
             self._max_progress_idx = closest
         progress_threshold = max(1, int(0.7 * (len(self._path.poses) - 1)))
@@ -226,11 +268,13 @@ class ReactivePathFollowerTask(BaseControlTask):
 
             # Final rotation: use heading-only control
             cfg = self._config.controller
-            wz = float(np.clip(
-                cfg.k_theta * np.sin(yaw_err),
-                -cfg.wz_max,
-                cfg.wz_max,
-            ))
+            wz = float(
+                np.clip(
+                    cfg.k_theta * np.sin(yaw_err),
+                    -cfg.wz_max,
+                    cfg.wz_max,
+                )
+            )
             return JointCommandOutput(
                 joint_names=self._joint_names_list,
                 velocities=[0.0, 0.0, wz],
@@ -259,7 +303,9 @@ class ReactivePathFollowerTask(BaseControlTask):
 
     def start_path(self, path: Path, current_odom: PoseStamped) -> bool:
         if path is None or len(path.poses) < 2:
-            logger.warning(f"ReactivePathFollowerTask '{self._name}': invalid path (need >= 2 poses)")
+            logger.warning(
+                f"ReactivePathFollowerTask '{self._name}': invalid path (need >= 2 poses)"
+            )
             return False
 
         self._path = path
