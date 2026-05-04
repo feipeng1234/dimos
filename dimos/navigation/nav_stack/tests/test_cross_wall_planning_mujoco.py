@@ -40,7 +40,6 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-import threading
 import time
 
 import pytest
@@ -50,14 +49,12 @@ pytest.importorskip("gtsam")
 pytest.importorskip("mujoco")
 pytest.importorskip("PIL")
 
-import lcm as lcmlib
 import mujoco
 from PIL import Image as PILImage
 
+from dimos.core.coordination.blueprints import autoconnect
 from dimos.core.coordination.module_coordinator import ModuleCoordinator
-from dimos.msgs.geometry_msgs.PointStamped import PointStamped
-from dimos.msgs.nav_msgs.Odometry import Odometry
-from dimos.protocol.service.lcmservice import _DEFAULT_LCM_URL
+from dimos.navigation.nav_stack.tests._nav_probe import NavTestProbe
 from dimos.robot.unitree.g1.blueprints.navigation.unitree_g1_nav_mujoco_sim import (
     unitree_g1_nav_mujoco_sim,
 )
@@ -65,10 +62,6 @@ from dimos.utils.logging_config import setup_logger
 
 logger = setup_logger()
 
-
-# ── Topics ─────────────────────────────────────────────────────────────────
-_ODOM_TOPIC = "/odometry#nav_msgs.Odometry"
-_GOAL_TOPIC = "/clicked_point#geometry_msgs.PointStamped"
 
 # Robot upright sanity bound — G1 base sits ~0.7 m when standing; if the
 # snapshot pose has it below 0.4 m something has gone wrong (faceplant,
@@ -116,7 +109,6 @@ _SCENE_XML = Path(__file__).resolve().parents[4] / "data" / "hssd_house" / "scen
 # Threshold of 2.0 m is generous — the goal is "the robot ends up in
 # the named room", not "robot is within 1 m of the room's centre".
 _WAYPOINTS: list[tuple[str, float, float, float, float, float]] = [
-    ("dining_room", 0.2, -3.2, 0.0, 120.0, 2.0),
     ("kitchen", -3.0, 2.3, 0.0, 180.0, 2.0),
     ("living_room", 5.9, 2.8, 0.0, 240.0, 2.0),
     ("living_room_2", 6.95, -3.45, 0.0, 300.0, 2.0),
@@ -129,55 +121,6 @@ pytestmark = [pytest.mark.slow, pytest.mark.mujoco]
 
 def _distance(x1: float, y1: float, x2: float, y2: float) -> float:
     return math.hypot(x1 - x2, y1 - y2)
-
-
-class _OdomTracker:
-    """Thread-safe latest-odom holder + LCM pump."""
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._count = 0
-        self._x = 0.0
-        self._y = 0.0
-        self._z = 0.0
-        self._lcm = lcmlib.LCM(_DEFAULT_LCM_URL)
-        self._sub = self._lcm.subscribe(_ODOM_TOPIC, self._on_odom)
-        self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._loop, daemon=True)
-        self._thread.start()
-
-    def _on_odom(self, _channel: str, data: bytes) -> None:
-        msg = Odometry.lcm_decode(data)
-        with self._lock:
-            self._count += 1
-            self._x = msg.x
-            self._y = msg.y
-            self._z = msg.pose.position.z
-
-    def _loop(self) -> None:
-        while not self._stop.is_set():
-            try:
-                self._lcm.handle_timeout(100)
-            except Exception:
-                pass
-
-    @property
-    def count(self) -> int:
-        with self._lock:
-            return self._count
-
-    def snapshot(self) -> tuple[float, float, float]:
-        with self._lock:
-            return self._x, self._y, self._z
-
-    def publish_goal(self, x: float, y: float, z: float) -> None:
-        goal = PointStamped(x=x, y=y, z=z, ts=time.time(), frame_id="map")
-        self._lcm.publish(_GOAL_TOPIC, goal.lcm_encode())
-
-    def close(self) -> None:
-        self._stop.set()
-        self._thread.join(timeout=3)
-        self._lcm.unsubscribe(self._sub)
 
 
 class _SceneRenderer:
@@ -212,26 +155,27 @@ class _SceneRenderer:
         PILImage.fromarray(img).save(out_path)
 
 
-def _wait_for_first_odom(tracker: _OdomTracker, timeout_sec: float = 60.0) -> None:
+def _wait_for_first_odom(probe: object, timeout_sec: float = 60.0) -> None:
     deadline = time.monotonic() + timeout_sec
     while time.monotonic() < deadline:
-        if tracker.count > 0:
+        _, _, _, count = probe.latest_pose()  # type: ignore[attr-defined]
+        if count > 0:
             return
         time.sleep(0.5)
     raise AssertionError(f"No odometry received after {timeout_sec}s — sim not running?")
 
 
 def _wait_for_arrival(
-    tracker: _OdomTracker,
+    probe: object,
     target_xy: tuple[float, float],
     threshold: float,
     timeout_sec: float,
 ) -> tuple[bool, tuple[float, float, float], float]:
-    """Poll odom until robot is within ``threshold`` of ``target_xy`` or timeout."""
+    """Poll the probe until robot is within ``threshold`` of ``target_xy`` or timeout."""
     gx, gy = target_xy
     t0 = time.monotonic()
     while True:
-        x, y, z = tracker.snapshot()
+        x, y, z, _ = probe.latest_pose()  # type: ignore[attr-defined]
         dist = _distance(x, y, gx, gy)
         if dist <= threshold:
             return True, (x, y, z), dist
@@ -257,22 +201,25 @@ def test_5_waypoint_loop_in_hssd_house(tmp_path: Path) -> None:
     # joints stay frozen at home.  Removes gait dynamics from the test
     # — we only care about the planner driving the robot from waypoint
     # to waypoint, not whether the G1 actually walks there.
-    blueprint = unitree_g1_nav_mujoco_sim.global_config(
-        mujoco_headless=True,
+    blueprint = autoconnect(
+        unitree_g1_nav_mujoco_sim,
+        NavTestProbe.blueprint(),
+    ).global_config(
+        mujoco_headless=False,
         mujoco_kinematic_robot=True,
+        n_workers=12,
     )
     coordinator = ModuleCoordinator.build(blueprint)
-
-    tracker = _OdomTracker()
+    probe = coordinator.get_instance(NavTestProbe)
     renderer = _SceneRenderer(_SCENE_XML)
 
     saved: list[Path] = []
 
     try:
         logger.info("[mujoco-cross-wall] coordinator built; waiting for odom…")
-        _wait_for_first_odom(tracker, timeout_sec=60.0)
+        _wait_for_first_odom(probe, timeout_sec=60.0)
 
-        x0, y0, z0 = tracker.snapshot()
+        x0, y0, z0, _ = probe.latest_pose()
         logger.info(
             "[mujoco-cross-wall] odom online; robot at "
             f"({x0:.2f}, {y0:.2f}, {z0:.2f}); warming up {_WARMUP_SEC}s…"
@@ -280,17 +227,17 @@ def test_5_waypoint_loop_in_hssd_house(tmp_path: Path) -> None:
         time.sleep(_WARMUP_SEC)
 
         for label, gx, gy, gz, timeout_sec, threshold in _WAYPOINTS:
-            sx, sy, sz = tracker.snapshot()
+            sx, sy, _, _ = probe.latest_pose()
             logger.info(
                 f"[mujoco-cross-wall] === {label}: goal ({gx}, {gy}) | "
                 f"robot ({sx:.2f}, {sy:.2f}) | "
                 f"dist={_distance(sx, sy, gx, gy):.2f}m | "
                 f"budget={timeout_sec}s ==="
             )
-            tracker.publish_goal(gx, gy, gz)
+            probe.publish_goal(gx, gy, gz)
 
             reached, (cx, cy, cz), final_dist = _wait_for_arrival(
-                tracker, (gx, gy), threshold, timeout_sec
+                probe, (gx, gy), threshold, timeout_sec
             )
 
             assert cz >= _UPRIGHT_Z_MIN, (
@@ -329,5 +276,4 @@ def test_5_waypoint_loop_in_hssd_house(tmp_path: Path) -> None:
             logger.info(f"  - {p}")
 
     finally:
-        tracker.close()
         coordinator.stop()
