@@ -130,17 +130,20 @@ _MJCF_PATH = "data/mujoco_sim/g1_gear_wbc.xml"
 #     collidable so the robot can't phase through walls).
 #
 # Default: an artist-built mesh of the dimos_office, shipped via Git-LFS
-# (``data/.lfs/dimos_office_mesh.tar.gz``).  The artist used
-# ``data/dimos_office/dimos_office.ply`` as their world-origin reference,
-# so the mesh sits in splat-native coordinates and the same alignment
-# YAML (``data/dimos_office/dimos_office.yaml``) places mesh + splat in
-# the same dimos-world frame.  Run ``dimos run unitree-g1-groot-wbc-sim``
-# with no env vars and the mesh + splat overlay correctly.
+# (``data/.lfs/dimos_office_mesh.tar.gz``).  Despite using the splat
+# point cloud as a Reference object in Blender, the artist worked in
+# Blender's native Z-up at metric meters — the mesh's aggregate world
+# bbox is 11.3m x 7.9m x 3.0m with floor at z=0, ceiling at z=3.0m.
+# The .blend's Reference cloud sits at a totally different scale (vertex
+# spans of 2300+ units), so the splat-alignment YAML does NOT apply to
+# the mesh; the GLB is exported with ``export_yup=False`` to preserve
+# Z-up, and dimos loads it with identity alignment.  Run with no env
+# vars and the mesh lands directly in dimos world.
 #
 # Override via env vars to swap in a different scene (e.g. a Sketchfab
 # USDZ) — when DIMOS_SCENE_MESH_PATH is set explicitly, the alignment
-# defaults below revert to scale=0.05 / zero translation+rotation
-# (typical Sketchfab USDZ in centimeters); set the rest as needed:
+# defaults below revert to scale=0.05 / zero translation+rotation /
+# y_up=true (typical Sketchfab USDZ in centimeters):
 #   DIMOS_SCENE_MESH_PATH   = path to .usdz/.glb/.obj/etc.
 #   DIMOS_SCENE_MESH_SCALE  = float
 #   DIMOS_SCENE_MESH_TRANSLATION = "x,y,z" world-frame offset
@@ -165,19 +168,19 @@ if _scene_mesh_path_override:
     _scene_mesh_rotation = tuple(
         float(x) for x in os.environ.get("DIMOS_SCENE_MESH_ROTATION_ZYX_DEG", "0,0,0").split(",")
     )
+    _scene_mesh_y_up = os.environ.get("DIMOS_SCENE_MESH_Y_UP", "1") != "0"
 else:
-    # Default: Git-LFS-shipped artist mesh + the splat's alignment YAML.
+    # Default: Git-LFS-shipped artist mesh, identity alignment (mesh is
+    # already in dimos-world meters with floor at z=0, exported Z-up).
     _scene_mesh_path = str(get_data("dimos_office_mesh") / "dimos_office_mesh.glb")
-    _scene_mesh_scale = float(os.environ.get("DIMOS_SCENE_MESH_SCALE", "2.0"))
+    _scene_mesh_scale = float(os.environ.get("DIMOS_SCENE_MESH_SCALE", "1.0"))
     _scene_mesh_translation = tuple(
-        float(x)
-        for x in os.environ.get("DIMOS_SCENE_MESH_TRANSLATION", "-1.72,-0.11,1.436").split(",")
+        float(x) for x in os.environ.get("DIMOS_SCENE_MESH_TRANSLATION", "0,0,0").split(",")
     )
     _scene_mesh_rotation = tuple(
-        float(x)
-        for x in os.environ.get("DIMOS_SCENE_MESH_ROTATION_ZYX_DEG", "0.0,0.13,-5.63").split(",")
+        float(x) for x in os.environ.get("DIMOS_SCENE_MESH_ROTATION_ZYX_DEG", "0,0,0").split(",")
     )
-_scene_mesh_y_up = os.environ.get("DIMOS_SCENE_MESH_Y_UP", "1") != "0"
+    _scene_mesh_y_up = os.environ.get("DIMOS_SCENE_MESH_Y_UP", "0") != "0"
 _scene_mesh_collision = os.environ.get("DIMOS_SCENE_MESH_COLLISION", "1") not in ("", "0")
 _scene_mesh_auto_ground = os.environ.get("DIMOS_SCENE_MESH_AUTO_GROUND", "0") not in ("", "0")
 # Perf knob: kill the entire lidar/voxel/costmap pipeline.  When set, the
@@ -482,11 +485,13 @@ if _splat_path is not None and _splat_path.exists():
     # the resulting alignment + path get reused here for the viser viewer
     # and the mesh-camera module.
 
-    # When the user provides their own scene mesh, don't show the unrelated
-    # dimos_office splat in the viewer at all — the splat would just confuse
-    # the picture.  The SplatCameraModule below still uses the splat for the
-    # head-camera feed (separate concern, still publishes ``/splat/color_image``).
-    _viser_splat_path = None if _scene_mesh_path else str(_splat_path)
+    # Show the splat alongside the mesh when we're using the default office
+    # mesh (so the user can visually compare both in the same world frame).
+    # When the user provides their *own* scene mesh, hide the splat — it's
+    # unrelated geometry that just confuses the picture.  The
+    # SplatCameraModule below still uses the splat for the head-camera feed
+    # in either case.
+    _viser_splat_path = None if _scene_mesh_path_override else str(_splat_path)
     _g1_viser = ViserRenderModule.blueprint(
         splat_path=_viser_splat_path,
         mjcf_path=_MJCF_PATH,
