@@ -87,3 +87,12 @@
   problem: "Second RerunBridgeModule hardcodes rerun_open='native', ignoring CLI flags"
   solution: "Fixed: rerun_config is now built via _build_rerun_config() which reads global_config.rerun_open and global_config.rerun_web, matching the pattern used in vis_module."
   commit: c6130a606
+
+- pr: 1943
+  comment_id: 3179262972
+  author: greptile-apps[bot]
+  file: pyproject.toml
+  line: 85
+  problem: "Dev pre-release pin dimos-viewer==0.30.0a6.dev99 will break installs — .dev suffix not normally installable and exact wheel unlikely on PyPI"
+  solution: "Fixed: relaxed pin from ==0.30.0a6.dev99 to >=0.30.0a6, updated uv.lock accordingly"
+  commit: 8f0f9ac3b
