@@ -79,5 +79,5 @@ htmlcov/
 .coverage
 .coverage.*
 
-# Memory2 autorecord
-recording*.db
+# Created from simulation
+MUJOCO_LOG.TXT

@@ -13,8 +13,8 @@
 # limitations under the License.
 
 
-import asyncio
-from collections.abc import AsyncGenerator
+import threading
+import time
 
 from dimos_lcm.std_msgs import Bool
 
@@ -116,4 +116,24 @@ class PatrollingModule(Module):
 
             self._goal_reached_event.clear()
             self.goal_request.publish(goal)
-            await self._goal_reached_event.wait()
+
+            # Wait until goal is reached or stop is requested.
+            self._goal_or_stop_event.wait()
+            self._goal_or_stop_event.clear()
+
+    def _stop_patrolling(self) -> None:
+        self._stop_event.set()
+        self._goal_or_stop_event.set()
+        self._planner_spec.set_replanning_enabled(True)
+        self._planner_spec.reset_safe_goal_clearance()
+
+        # Publish current position as goal to cancel in-progress navigation.
+        pose = self._latest_pose
+        if pose is not None:
+            # We want to update timestamps, otherwise recordings etc. would fail
+            pose.ts = time.time()
+            self.goal_request.publish(pose)
+        with self._patrol_lock:
+            if self._patrol_thread is not None:
+                self._patrol_thread.join(DEFAULT_THREAD_JOIN_TIMEOUT)
+                self._patrol_thread = None
