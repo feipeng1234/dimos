@@ -99,7 +99,13 @@ CROSS_WALL_PATH_FOLLOWER = {
 }
 
 
-def run_cross_wall_test(blueprint: Blueprint, *, label: str, max_z: float | None = None) -> None:
+def run_cross_wall_test(
+    blueprint: Blueprint,
+    *,
+    label: str,
+    max_z: float | None = None,
+    waypoints: list[tuple[str, float, float, float, float, float]] | None = None,
+) -> None:
     """Build the coordinator, drive the cross-wall waypoint sequence, tear down.
 
     Args:
@@ -107,7 +113,11 @@ def run_cross_wall_test(blueprint: Blueprint, *, label: str, max_z: float | None
         label: Short tag used in log lines so far/simple runs are distinguishable.
         max_z: If set, asserts the robot's z never exceeds this (catches the
             robot climbing geometry / passing through the ceiling).
+        waypoints: Optional waypoint sequence to drive.  Defaults to
+            ``CROSS_WALL_WAYPOINTS`` (Unity ``home_building_1`` scene).
+            Provide a scene-specific list for non-Unity sims.
     """
+    waypoints = waypoints if waypoints is not None else CROSS_WALL_WAYPOINTS
     _clear_precomputed_paths()
 
     coordinator = ModuleCoordinator.build(blueprint)
@@ -164,7 +174,7 @@ def run_cross_wall_test(blueprint: Blueprint, *, label: str, max_z: float | None
         logger.info(f"[{label}] Warming up for {WARMUP_SEC}s…")
         time.sleep(WARMUP_SEC)
 
-        for name, gx, gy, gz, timeout_sec, threshold in CROSS_WALL_WAYPOINTS:
+        for name, gx, gy, gz, timeout_sec, threshold in waypoints:
             with lock:
                 sx, sy = robot_x, robot_y
 
