@@ -255,6 +255,23 @@ class MujocoSimModule(
                     fps=float(self.config.fps),
                 )
             )
+        # Self-occlusion filter for the lidar cameras: only render the
+        # static scene mesh (group 3) and the floor (group 2 — see
+        # comment in g1_gear_wbc.xml) — hide the robot's own collision
+        # (group 0) and visual (group 1) meshes.  Without this the
+        # lidar back-projects the robot's hands / torso / arms from the
+        # 3 torso-mounted cameras' POVs into the global voxel map,
+        # leaving a robot-shaped halo of phantom obstacles that travels
+        # with the robot and blocks A* from finding any path out.
+        lidar_scene_option = mujoco.MjvOption()
+        # MjvOption.geomgroup is a 6-byte array; default is all visible.
+        lidar_scene_option.geomgroup[0] = 0  # robot collision meshes
+        lidar_scene_option.geomgroup[1] = 0  # robot visual meshes
+        lidar_scene_option.geomgroup[2] = 1  # floor (kept visible)
+        lidar_scene_option.geomgroup[3] = 1  # scene-mesh convex hulls
+        lidar_scene_option.geomgroup[4] = 0
+        lidar_scene_option.geomgroup[5] = 0
+
         for lidar_name in self.config.lidar_camera_names:
             if lidar_name == self.config.camera_name and primary_needed:
                 continue  # already registered as the RGBD camera
@@ -264,6 +281,7 @@ class MujocoSimModule(
                     width=self.config.lidar_camera_width,
                     height=self.config.lidar_camera_height,
                     fps=float(self.config.pointcloud_fps),
+                    scene_option=lidar_scene_option,
                 )
             )
 
@@ -347,8 +365,14 @@ class MujocoSimModule(
             )
         )
 
-        # Optional pointcloud generation.
-        if self.config.enable_pointcloud and self.config.enable_depth:
+        # Optional pointcloud generation.  Two source modes:
+        #   * Multi-camera lidar fusion (`lidar_camera_names` set) — each
+        #     listed camera renders its own depth in the engine; we don't
+        #     need `enable_depth` on the primary RGBD camera at all.
+        #   * Single-camera fallback — back-projects the primary camera's
+        #     depth image, so `enable_depth=True` IS required there.
+        _has_pointcloud_source = self.config.enable_depth or bool(self.config.lidar_camera_names)
+        if self.config.enable_pointcloud and _has_pointcloud_source:
             pc_interval = 1.0 / self.config.pointcloud_fps
             self.register_disposable(
                 rx.interval(pc_interval).subscribe(

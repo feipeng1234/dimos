@@ -48,6 +48,13 @@ class CameraConfig:
     width: int = 640
     height: int = 480
     fps: float = 15.0
+    # Per-camera ``mjvOption`` applied during ``update_scene``.  Lets a
+    # caller render the same scene through different geom-group masks
+    # — e.g. lidar cameras that should only see the static scene mesh
+    # (group 3) and ignore the robot (groups 0-2), so the lidar
+    # pointcloud doesn't pick up the robot's own hands/torso/legs as
+    # phantom obstacles.  ``None`` keeps MuJoCo's default (all groups).
+    scene_option: mujoco.MjvOption | None = None
 
 
 @dataclass
@@ -259,11 +266,21 @@ class MujocoEngine(SimulationEngine):
                 continue
             state.last_render_time = now
 
-            state.rgb_renderer.update_scene(self._data, camera=state.cam_id)
-            rgb = state.rgb_renderer.render().copy()
-
-            state.depth_renderer.update_scene(self._data, camera=state.cam_id)
-            depth = state.depth_renderer.render().copy()
+            scene_option = state.cfg.scene_option
+            if scene_option is not None:
+                state.rgb_renderer.update_scene(
+                    self._data, camera=state.cam_id, scene_option=scene_option
+                )
+                rgb = state.rgb_renderer.render().copy()
+                state.depth_renderer.update_scene(
+                    self._data, camera=state.cam_id, scene_option=scene_option
+                )
+                depth = state.depth_renderer.render().copy()
+            else:
+                state.rgb_renderer.update_scene(self._data, camera=state.cam_id)
+                rgb = state.rgb_renderer.render().copy()
+                state.depth_renderer.update_scene(self._data, camera=state.cam_id)
+                depth = state.depth_renderer.render().copy()
 
             frame = CameraFrame(
                 rgb=rgb,

@@ -67,10 +67,15 @@ class ViserRenderModule(Module):
     joint_state: In[JointState]
     odom: In[PoseStamped]
     path: In[PathMsg]
-    # Optional lidar pointcloud overlay.  Subscribers that don't have a
-    # /lidar publisher in their stack (e.g. real-Go2 builds going through
-    # WebRTC) will simply never receive a message and the overlay stays empty.
-    lidar: In[PointCloud2]
+    # Optional pointcloud overlay.  Named distinctly (not `lidar`) so the
+    # global transport map doesn't collide with VoxelGridMapper's `lidar`
+    # In port — the coordinator keys transports by (port_name, type) and
+    # the last-registered module wins, so a name clash silently overrides
+    # whichever transport was registered first.  Blueprints typically
+    # wire this to /global_map (accumulated voxel cloud) for a persistent
+    # obstacle-memory overlay; /lidar (per-scan, transient) also works
+    # if the latest sweep is what you want.
+    pointcloud_overlay: In[PointCloud2]
     clicked_point: Out[PointStamped]
 
     def __init__(
@@ -131,6 +136,12 @@ class ViserRenderModule(Module):
         self._lidar_handle: Any = None
         self._lidar_visible: bool = True
         self._lidar_checkbox: Any = None
+        # Independent scene-mesh visibility toggle.  Lets a viewer hide
+        # the loaded `.usdz`/`.glb` mesh while keeping the lidar
+        # overlay visible — useful for sanity-checking what the lidar
+        # actually sees vs what the scene "should" look like.
+        self._scene_mesh_visible: bool = True
+        self._scene_mesh_checkbox: Any = None
 
     @rpc
     def start(self) -> None:
@@ -277,7 +288,7 @@ class ViserRenderModule(Module):
 
             _apply_view_mode("Mesh")
 
-        # Lidar overlay toggle.  Shown unconditionally — when no /lidar
+        # Lidar overlay toggle.  Shown unconditionally — when no
         # publisher is connected the cloud just stays empty, but the
         # checkbox makes it discoverable that the overlay exists.
         self._lidar_checkbox = self._server.gui.add_checkbox(
@@ -289,6 +300,26 @@ class ViserRenderModule(Module):
             self._lidar_visible = bool(self._lidar_checkbox.value)
             if self._lidar_handle is not None:
                 self._lidar_handle.visible = self._lidar_visible
+
+        # Scene-mesh visibility toggle (only when a mesh is loaded).
+        # Independent of the splat-vs-mesh `view_mode_dropdown` above,
+        # which only appears when *both* are loaded.  Useful for
+        # inspecting the lidar overlay without the mesh occluding it.
+        if self._scene_mesh_handle is not None:
+            self._scene_mesh_checkbox = self._server.gui.add_checkbox(
+                "Show scene mesh", initial_value=self._scene_mesh_visible
+            )
+
+            @self._scene_mesh_checkbox.on_update
+            def _on_scene_mesh_toggle(_: Any) -> None:
+                self._scene_mesh_visible = bool(self._scene_mesh_checkbox.value)
+                if self._scene_mesh_handle is not None:
+                    self._scene_mesh_handle.visible = self._scene_mesh_visible
+
+        # Wire the splat<->mesh dropdown only when both backdrops are
+        # loaded (matches the conditional above where view_mode_dropdown
+        # is created — referencing it outside that branch is a NameError).
+        if self._splat_handle is not None and self._scene_mesh_handle is not None:
 
             @view_mode_dropdown.on_update
             def _on_view_mode(_event: Any) -> None:
@@ -375,7 +406,7 @@ class ViserRenderModule(Module):
             logger.warning(f"Viser: path subscribe failed: {e}")
 
         try:
-            unsub = self.lidar.subscribe(self._on_lidar)
+            unsub = self.pointcloud_overlay.subscribe(self._on_lidar)
             self.register_disposable(Disposable(unsub))
         except Exception as e:
             logger.warning(f"Viser: lidar subscribe failed: {e}")

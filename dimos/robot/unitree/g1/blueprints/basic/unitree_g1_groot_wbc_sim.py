@@ -478,10 +478,15 @@ if _splat_path is not None and _splat_path.exists():
         {
             ("joint_state", JointState): LCMTransport("/coordinator/joint_state", JointState),
             ("odom", PoseStamped): LCMTransport("/odom", PoseStamped),
-            # Lidar overlay — toggle via the "Show lidar pointcloud" checkbox
-            # in the viser UI panel.  The 360° fused cloud comes from the
-            # MujocoSimModule's `lidar_camera_names` setup above.
-            ("lidar", PointCloud2): LCMTransport("/lidar", PointCloud2),
+            # Pointcloud overlay — toggle via "Show lidar pointcloud" in
+            # the viser UI panel.  Subscribed to /global_map (the
+            # accumulated voxel cloud after column-carving) instead of
+            # /lidar (per-scan, transient) so the overlay shows the
+            # robot's full obstacle memory rather than just the most
+            # recent sweep.  Port is named pointcloud_overlay (not
+            # lidar) to dodge the (port_name, type) transport-map
+            # collision with VoxelGridMapper.lidar.
+            ("pointcloud_overlay", PointCloud2): LCMTransport("/global_map", PointCloud2),
         },
     )
     # Camera publisher.  When the user provided their own scene mesh we
