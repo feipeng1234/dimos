@@ -110,9 +110,12 @@ class G1MujocoPlanarSimConfig(ModuleConfig):
     box_half_extents: tuple[float, float, float] = _DEFAULT_BOX_HALF_EXTENTS
     sensor_z_offset: float = _DEFAULT_SENSOR_Z_OFFSET
     physics_dt: float = 0.002
-    lidar_hz: float = 10.0
+    # Lidar runs at 1 Hz with 5k points/scan -- well under the raycast cost
+    # against the dense HSSD mesh (~170ms / 20k rays). Bump these together
+    # if the nav stack needs higher resolution.
+    lidar_hz: float = 1.0
     odom_hz: float = 50.0
-    lidar_points_per_scan: int = _MID360_POINTS_PER_SECOND // 10
+    lidar_points_per_scan: int = 5_000
     lidar_range_min: float = _MID360_RANGE_MIN_M
     lidar_range_max: float = _MID360_RANGE_MAX_M
     fov_h_deg: float = _MID360_FOV_H_DEG
