@@ -71,21 +71,27 @@ def _go2_rerun_blueprint() -> Any:
     )
 
 
-rerun_config = {
-    "blueprint": _go2_rerun_blueprint,
-    "pubsubs": [LCM()],
-    "visual_override": {
-        "world/camera_info": _convert_camera_info,
-        "world/navigation_costmap": _convert_navigation_costmap,
-    },
-    "static": {
-        "world/tf/base_link": _static_base_link,
-    },
-}
+def _build_rerun_config() -> dict[str, Any]:
+    from dimos.core.global_config import global_config
+
+    return {
+        "blueprint": _go2_rerun_blueprint,
+        "pubsubs": [LCM()],
+        "rerun_open": global_config.rerun_open,
+        "rerun_web": global_config.rerun_web,
+        "visual_override": {
+            "world/camera_info": _convert_camera_info,
+            "world/navigation_costmap": _convert_navigation_costmap,
+        },
+        "static": {
+            "world/tf/base_link": _static_base_link,
+        },
+    }
+
 
 unitree_go2_security = autoconnect(
     unitree_go2_agentic,
-    RerunBridgeModule.blueprint(**rerun_config),
+    RerunBridgeModule.blueprint(**_build_rerun_config()),
 )
 
 __all__ = ["unitree_go2_security"]
