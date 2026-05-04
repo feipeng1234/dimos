@@ -69,3 +69,21 @@
   problem: "Dashboard iframe skipped when rerun_web=True without matching rerun_open — user gets web viewer served but no iframe in dashboard"
   solution: "Fixed: serve_index condition now also checks config.g.rerun_web to match bridge-side logic"
   commit: 5bbd25041
+
+- pr: 1943
+  comment_id: 3178854442
+  author: greptile-apps[bot]
+  file: dimos/visualization/vis_module.py
+  line: null
+  problem: "RerunWebSocketServer included in Foxglove path causes port conflict and duplicate tele_cmd_vel"
+  solution: "Intentional: RerunWebSocketServer provides websocket streaming for the web dashboard (WebsocketVisModule) regardless of the 3D viewer backend. Both the rerun and foxglove cases include it for this reason. The duplicate tele_cmd_vel is harmless — both are teleop input sources (web dashboard vs rerun GUI) publishing to the same downstream topic, which is the intended behavior for multi-source teleop."
+  commit: null
+
+- pr: 1943
+  comment_id: 3178854465
+  author: greptile-apps[bot]
+  file: dimos/robot/unitree/go2/blueprints/agentic/unitree_go2_security.py
+  line: 88
+  problem: "Second RerunBridgeModule hardcodes rerun_open='native', ignoring CLI flags"
+  solution: "Fixed: rerun_config is now built via _build_rerun_config() which reads global_config.rerun_open and global_config.rerun_web, matching the pattern used in vis_module."
+  commit: c6130a606
