@@ -58,6 +58,7 @@ from dimos.core.module import Module, ModuleConfig
 from dimos.core.stream import In, Out
 from dimos.msgs.geometry_msgs.Pose import Pose
 from dimos.msgs.geometry_msgs.Quaternion import Quaternion
+from dimos.msgs.geometry_msgs.Transform import Transform
 from dimos.msgs.geometry_msgs.Twist import Twist
 from dimos.msgs.geometry_msgs.Vector3 import Vector3
 from dimos.msgs.nav_msgs.Odometry import Odometry
@@ -123,9 +124,10 @@ class G1MujocoPlanarSimConfig(ModuleConfig):
     fov_v_max_deg: float = _MID360_V_MAX_DEG
     velocity_kv: float = 200.0
     box_mass: float = 35.0
-    # Frames default to the nav_stack convention: PGO/SimplePlanner consume
-    # odometry tagged ``world`` and a registered scan in the same frame.
-    odom_frame: str = "world"
+    # Frames default to the nav_stack convention: PGO publishes (map, odom),
+    # this sim publishes (odom, base_link), giving the planner a complete
+    # map -> odom -> base_link chain through the TF tree.
+    odom_frame: str = "odom"
     base_frame: str = "base_link"
     # When true, lidar points are transformed to ``odom_frame`` before
     # publishing so the output is a "registered_scan" -- the form the
@@ -156,6 +158,12 @@ class G1MujocoPlanarSim(Module):
         self._slide_x_qpos: int = -1
         self._slide_y_qpos: int = -1
         self._yaw_qpos: int = -1
+        # qvel indices (jnt_dofadr); for slide/hinge joints qpos == dof, but
+        # in scenes with free joints (HSSD furniture) qpos and dof addresses
+        # diverge -- free joints use 7 qpos slots vs 6 dof slots.
+        self._slide_x_dof: int = -1
+        self._slide_y_dof: int = -1
+        self._yaw_dof: int = -1
         self._slide_x_act: int = -1
         self._slide_y_act: int = -1
         self._yaw_act: int = -1
@@ -163,6 +171,7 @@ class G1MujocoPlanarSim(Module):
         self._lidar_site_id: int = -1
         self._ray_dirs_sensor: np.ndarray = np.zeros((0, 3), dtype=np.float64)
         self._ray_cursor: int = 0
+        self._tf_logged_once: bool = False
 
     @rpc
     def start(self) -> None:
@@ -230,6 +239,9 @@ class G1MujocoPlanarSim(Module):
         self._slide_x_qpos = self._joint_qpos_addr("slide_x")
         self._slide_y_qpos = self._joint_qpos_addr("slide_y")
         self._yaw_qpos = self._joint_qpos_addr("hinge_yaw")
+        self._slide_x_dof = self._joint_dof_addr("slide_x")
+        self._slide_y_dof = self._joint_dof_addr("slide_y")
+        self._yaw_dof = self._joint_dof_addr("hinge_yaw")
         self._slide_x_act = self._actuator_id("vx")
         self._slide_y_act = self._actuator_id("vy")
         self._yaw_act = self._actuator_id("wz")
@@ -247,6 +259,13 @@ class G1MujocoPlanarSim(Module):
         if joint_id < 0:
             raise RuntimeError(f"Joint {name!r} missing in compiled model")
         return int(self._model.jnt_qposadr[joint_id])
+
+    def _joint_dof_addr(self, name: str) -> int:
+        assert self._model is not None
+        joint_id = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_JOINT, name)
+        if joint_id < 0:
+            raise RuntimeError(f"Joint {name!r} missing in compiled model")
+        return int(self._model.jnt_dofadr[joint_id])
 
     def _actuator_id(self, name: str) -> int:
         assert self._model is not None
@@ -346,18 +365,19 @@ class G1MujocoPlanarSim(Module):
         y = float(self._data.qpos[self._slide_y_qpos])
         z = float(self._data.xpos[self._robot_body_id][2])
         yaw = float(self._data.qpos[self._yaw_qpos])
-        vx_world = float(self._data.qvel[self._slide_x_qpos])
-        vy_world = float(self._data.qvel[self._slide_y_qpos])
-        wz = float(self._data.qvel[self._yaw_qpos])
+        vx_world = float(self._data.qvel[self._slide_x_dof])
+        vy_world = float(self._data.qvel[self._slide_y_dof])
+        wz = float(self._data.qvel[self._yaw_dof])
         cy = math.cos(yaw)
         sy = math.sin(yaw)
         vx_body = vx_world * cy + vy_world * sy
         vy_body = -vx_world * sy + vy_world * cy
         qz = math.sin(yaw / 2.0)
         qw = math.cos(yaw / 2.0)
+        ts = time.time()
         self.odom.publish(
             Odometry(
-                ts=time.time(),
+                ts=ts,
                 frame_id=cfg.odom_frame,
                 child_frame_id=cfg.base_frame,
                 pose=Pose(
@@ -370,6 +390,26 @@ class G1MujocoPlanarSim(Module):
                 ),
             )
         )
+        # Publish the (odom -> base_link) edge to the TF tree. Without this,
+        # SimplePlanner's TF lookup fails because Odometry alone doesn't
+        # populate the transform graph.
+        try:
+            self.tf.publish(
+                Transform(
+                    translation=Vector3(x, y, z),
+                    rotation=Quaternion(0.0, 0.0, qz, qw),
+                    frame_id=cfg.odom_frame,
+                    child_frame_id=cfg.base_frame,
+                    ts=ts,
+                )
+            )
+            if not self._tf_logged_once:
+                logger.info(
+                    f"G1MujocoPlanarSim: first TF publish ok ({cfg.odom_frame} -> {cfg.base_frame})"
+                )
+                self._tf_logged_once = True
+        except Exception:
+            logger.exception("G1MujocoPlanarSim: TF publish failed")
 
     def _publish_lidar(self) -> None:
         assert self._model is not None and self._data is not None

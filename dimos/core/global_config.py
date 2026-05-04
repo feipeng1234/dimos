@@ -54,6 +54,15 @@ class GlobalConfig(BaseSettings):
     mujoco_global_map_from_pointcloud: str | None = None
     mujoco_start_pos: str = "-1.0, 1.0"
     mujoco_steps_per_frame: int = 7
+    # Skip the interactive viewer and run physics offscreen. None auto-detects
+    # from the environment (no $DISPLAY on Linux -> headless). True/False are
+    # explicit overrides. Currently consumed by the legacy mujoco_sim path;
+    # the planar sim runs offscreen unconditionally.
+    mujoco_headless: bool | None = None
+    # Legacy flag from the mujoco_sim path: when True, integrate the floating
+    # base directly from cmd_vel instead of running the ONNX walking policy.
+    # The planar sim is always kinematic, so this is a no-op there.
+    mujoco_kinematic_robot: bool = False
     robot_model: str | None = None
     robot_width: float = 0.3
     robot_rotation_diameter: float = 0.6
