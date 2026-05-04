@@ -43,7 +43,16 @@ unitree_g1_nav_mujoco_sim = (
         create_nav_stack(
             use_simple_planner=True,
             vehicle_height=G1_VEHICLE_HEIGHT,
-            simple_planner={"body_frame": "base_link"},
+            simple_planner={
+                "body_frame": "base_link",
+                # The planar-sim box's odom z sits at ~0.66 m (box centre).
+                # The default ground_offset_below_robot=1.3 was tuned for the
+                # G1's full 1.24 m standing height -- with our shorter robot z
+                # it would label the actual floor (z=0) as a 0.6 m obstacle and
+                # block every cell. 0.7 matches the box centre + a little
+                # slack so the floor stays below obstacle_height_threshold.
+                "ground_offset_below_robot": 0.7,
+            },
             terrain_analysis={
                 "obstacle_height_threshold": 0.1,
                 "ground_height_threshold": 0.05,
