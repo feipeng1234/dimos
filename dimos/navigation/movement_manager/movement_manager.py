@@ -30,6 +30,7 @@ from dimos.core.stream import In, Out
 from dimos.msgs.geometry_msgs.PointStamped import PointStamped
 from dimos.msgs.geometry_msgs.Twist import Twist
 from dimos.msgs.geometry_msgs.Vector3 import Vector3
+from dimos.msgs.std_msgs.Bool import Bool as NavBool
 from dimos.utils.logging_config import setup_logger
 
 logger = setup_logger()
@@ -54,6 +55,7 @@ class MovementManager(Module):
     clicked_point: In[PointStamped]
     nav_cmd_vel: In[Twist]
     tele_cmd_vel: In[Twist]
+    goal_reached: In[NavBool]
 
     goal: Out[PointStamped]
     way_point: Out[PointStamped]
@@ -65,6 +67,9 @@ class MovementManager(Module):
         self._lock = threading.Lock()
         self._teleop_active = False
         self._last_teleop_time = 0.0
+        # Don't forward nav_cmd_vel until a goal has been issued — path_follower
+        # publishes rotate-in-place at startup before any goal is set.
+        self._goal_active = False
 
     @rpc
     def start(self) -> None:
@@ -72,6 +77,7 @@ class MovementManager(Module):
         self.register_disposable(Disposable(self.clicked_point.subscribe(self._on_click)))
         self.register_disposable(Disposable(self.nav_cmd_vel.subscribe(self._on_nav)))
         self.register_disposable(Disposable(self.tele_cmd_vel.subscribe(self._on_teleop)))
+        self.register_disposable(Disposable(self.goal_reached.subscribe(self._on_goal_reached)))
 
     @rpc
     def stop(self) -> None:
@@ -92,8 +98,15 @@ class MovementManager(Module):
             return
 
         logger.debug("Goal", x=round(msg.x, 1), y=round(msg.y, 1), z=round(msg.z, 1))
+        with self._lock:
+            self._goal_active = True
         self.way_point.publish(msg)
         self.goal.publish(msg)
+
+    def _on_goal_reached(self, msg: NavBool) -> None:
+        if msg.data:
+            with self._lock:
+                self._goal_active = False
 
     def _cancel_goal(self) -> None:
         self.stop_movement.publish(Bool(data=True))
@@ -109,6 +122,8 @@ class MovementManager(Module):
 
     def _on_nav(self, msg: Twist) -> None:
         with self._lock:
+            if not self._goal_active:
+                return
             if self._teleop_active:
                 # check if cooldown has expired
                 elapsed = time.monotonic() - self._last_teleop_time
