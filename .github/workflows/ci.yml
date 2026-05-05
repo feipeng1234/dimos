@@ -137,7 +137,6 @@ jobs:
         if: failure()
         env:
           COLOR: yes
-          AIOHTTP_NO_EXTENSIONS: ${{ matrix.no-extensions }}
         run: >-  # `exit 1` makes sure that the job remains red with flaky runs
           uv run pytest --no-cov -vvvvv --lf && exit 1
         shell: bash
