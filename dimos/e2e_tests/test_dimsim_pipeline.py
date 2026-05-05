@@ -204,7 +204,7 @@ class TestDimSimBinaryOnly:
         that the bridge multicasts. This is the stage that's been failing in CI.
         """
         dimsim_only_spy.wait_for_saved_topic(
-            "/color_image#sensor_msgs.Image", timeout=120.0
+            "/color_image#sensor_msgs.Image", timeout=30.0
         )
         msgs = dimsim_only_spy.messages.get("/color_image#sensor_msgs.Image", [])
         assert len(msgs) > 0
@@ -242,12 +242,11 @@ def dimos_sim_basic():
             dump_log("dimos sim-basic", log_path)
             pytest.fail(f"dimos sim-basic never opened port {BRIDGE_PORT}")
         # Gate on actual server-side physics activation. The "Sensor publishing
-        # active" log line lies — it only means the WS is connected. Physics-
-        # driven topics (/odom, /lidar) can't publish until the browser ships
-        # the 26MB Rapier snapshot to the bridge AND it's restored. Locally
-        # this takes ~60s; on the CI runner under load it can take much longer.
+        # active" log line lies — it only confirms the WS is connected. The
+        # 26MB Rapier snapshot still has to ship and be restored before
+        # /odom and /lidar publish. Under GPU rendering this lands in ~10s.
         if not wait_for_log_pattern(
-            log_path, r"Rapier snapshot restored", timeout=600.0
+            log_path, r"Rapier snapshot restored", timeout=60.0
         ):
             dump_log("dimos sim-basic", log_path)
             pytest.fail("Rapier snapshot never restored — server physics dead")
@@ -293,10 +292,10 @@ class TestDimosSimBasic:
 
     def test_color_image_publishes(self, dimos_sim_basic_spy) -> None:
         dimos_sim_basic_spy.wait_for_saved_topic(
-            "/color_image#sensor_msgs.Image", timeout=120.0
+            "/color_image#sensor_msgs.Image", timeout=30.0
         )
 
     def test_odom_publishes(self, dimos_sim_basic_spy) -> None:
         dimos_sim_basic_spy.wait_for_saved_topic(
-            "/odom#geometry_msgs.PoseStamped", timeout=200.0
+            "/odom#geometry_msgs.PoseStamped", timeout=30.0
         )

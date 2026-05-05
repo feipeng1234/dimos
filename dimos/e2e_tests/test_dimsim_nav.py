@@ -123,12 +123,11 @@ def sim_nav():
             dump_log("dimos sim-nav", log_path)
             pytest.fail(f"Bridge not ready on port {BRIDGE_PORT}")
         # Gate on actual server-side physics activation. The "Sensor publishing
-        # active" log line lies — it only means the WS is connected. Physics-
-        # driven topics (/odom, /lidar) can't publish until the browser ships
-        # the 26MB Rapier snapshot to the bridge AND it's restored. Locally
-        # this takes ~60s; on the CI runner under load it can take much longer.
+        # active" log line lies — it only confirms the WS is connected. The
+        # 26MB Rapier snapshot still has to ship and be restored before
+        # /odom and /lidar publish. Under GPU rendering this lands in ~10s.
         if not wait_for_log_pattern(
-            log_path, r"Rapier snapshot restored", timeout=600.0
+            log_path, r"Rapier snapshot restored", timeout=60.0
         ):
             dump_log("dimos sim-nav", log_path)
             pytest.fail("Rapier snapshot never restored — server physics dead")
@@ -151,9 +150,8 @@ def spy(sim_nav):
     s.start()
 
     # Wait for at least one message on color_image before tests start.
-    # First frame in CI takes ~78s: 43s engine init + 35s for 26MB Rapier
-    # snapshot upload + physics init before sensors begin publishing.
-    s.wait_for_saved_topic("/color_image#sensor_msgs.Image", timeout=120.0)
+    # Fixture already gated on physics-ready, so this should arrive promptly.
+    s.wait_for_saved_topic("/color_image#sensor_msgs.Image", timeout=30.0)
 
     yield s
 
@@ -191,7 +189,7 @@ class TestSimNav:
 
     def test_odom_publishing(self, spy: LcmSpy) -> None:
         """Verify /odom is publishing with sane values."""
-        spy.wait_for_saved_topic("/odom#geometry_msgs.PoseStamped", timeout=200)
+        spy.wait_for_saved_topic("/odom#geometry_msgs.PoseStamped", timeout=30)
         msgs = spy.messages.get("/odom#geometry_msgs.PoseStamped", [])
         assert len(msgs) > 0, "No odom messages received"
 
@@ -209,7 +207,7 @@ class TestSimNav:
 
     def test_lidar_publishing(self, spy: LcmSpy) -> None:
         """Verify /lidar is publishing with non-empty point cloud."""
-        spy.wait_for_saved_topic("/lidar#sensor_msgs.PointCloud2", timeout=200)
+        spy.wait_for_saved_topic("/lidar#sensor_msgs.PointCloud2", timeout=30)
         msgs = spy.messages.get("/lidar#sensor_msgs.PointCloud2", [])
         assert len(msgs) > 0, "No lidar messages received"
 
@@ -221,7 +219,7 @@ class TestSimNav:
     def test_cmd_vel_moves_robot(self, spy: LcmSpy) -> None:
         """Publish cmd_vel and verify odom position changes."""
         # Record initial position
-        spy.wait_for_saved_topic("/odom#geometry_msgs.PoseStamped", timeout=200)
+        spy.wait_for_saved_topic("/odom#geometry_msgs.PoseStamped", timeout=30)
         initial_msgs = spy.messages.get("/odom#geometry_msgs.PoseStamped", [])
         assert len(initial_msgs) > 0, "No initial odom"
         initial_pose = PoseStamped.lcm_decode(initial_msgs[-1])
