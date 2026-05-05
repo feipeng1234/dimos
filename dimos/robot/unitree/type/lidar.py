@@ -14,7 +14,6 @@
 
 """Unitree WebRTC lidar message parsing utilities."""
 
-import time
 from typing import TypedDict
 
 import numpy as np
@@ -55,7 +54,8 @@ def pointcloud2_from_webrtc_lidar(raw_message: RawLidarMsg, ts: float | None = N
 
     Args:
         raw_message: Raw lidar message from Unitree WebRTC API
-        ts: Optional timestamp override. If None, uses current time.
+        ts: Optional timestamp override. If None, uses the sensor stamp from
+            ``raw_message["data"]["stamp"]``.
 
     Returns:
         PointCloud2 message with the lidar points
@@ -68,7 +68,8 @@ def pointcloud2_from_webrtc_lidar(raw_message: RawLidarMsg, ts: float | None = N
 
     return PointCloud2(
         pointcloud=pointcloud,
-        # webrtc stamp is broken (e.g., "stamp": 1.758148e+09), use current time
-        ts=ts if ts is not None else time.time(),
+        # Use the sensor's own stamp — it's authoritative now that Unitree's
+        # WebRTC API reports a real unix timestamp here.
+        ts=ts if ts is not None else data["stamp"],
         frame_id="world",
     )
