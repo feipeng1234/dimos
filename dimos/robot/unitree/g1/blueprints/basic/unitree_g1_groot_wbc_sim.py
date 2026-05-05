@@ -170,10 +170,13 @@ if _scene_mesh_path_override:
     )
     _scene_mesh_y_up = os.environ.get("DIMOS_SCENE_MESH_Y_UP", "1") != "0"
 else:
-    # Default: Git-LFS-shipped artist mesh, identity alignment (mesh is
-    # already in dimos-world meters with floor at z=0, exported Z-up).
+    # Default: Git-LFS-shipped artist mesh, exported Z-up at meters.  The
+    # asset itself is roughly half-real-scale (the Blender source's "1 BU"
+    # convention came out small relative to the G1's 1.32 m height), so
+    # apply 2x by default.  Splat YAML below uses the same factor so the
+    # two stay overlaid.
     _scene_mesh_path = str(get_data("dimos_office_mesh") / "dimos_office_mesh.glb")
-    _scene_mesh_scale = float(os.environ.get("DIMOS_SCENE_MESH_SCALE", "1.0"))
+    _scene_mesh_scale = float(os.environ.get("DIMOS_SCENE_MESH_SCALE", "2.0"))
     _scene_mesh_translation = tuple(
         float(x) for x in os.environ.get("DIMOS_SCENE_MESH_TRANSLATION", "0,0,0").split(",")
     )
@@ -510,8 +513,12 @@ if _splat_path is not None and _splat_path.exists():
             "# between the .ply's positions and the mesh-aligned positions.\n"
             "# Renders without streaks because dimos's load_splat applies the\n"
             "# rotation to per-Gaussian quaternions correctly.\n"
-            "scale: 1.0\n"
-            "translation: [0.0, 0.0, 0.7734]\n"
+            # 2x scale matches DIMOS_SCENE_MESH_SCALE default above so the
+            # splat overlays the mesh.  Translation is the Procrustes-fit
+            # value (was [0, 0, 0.7734] at scale 1.0) doubled accordingly,
+            # since alignment formula is world = scale * R @ p + t.
+            f"scale: {_scene_mesh_scale}\n"
+            f"translation: [0.0, 0.0, {0.7734 * _scene_mesh_scale}]\n"
             "rotation_zyx: [164.6633, -0.0865, -95.4786]\n"
             "y_up: false\n"
         )
