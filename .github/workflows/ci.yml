@@ -94,6 +94,9 @@ jobs:
       )
     env:
       UV_NO_SYNC: "1"  # Disable installing default packages on `uv run`
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      ALIBABA_API_KEY: ${{ secrets.ALIBABA_API_KEY }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -103,10 +106,6 @@ jobs:
             # GitHub Actions only honours `container:` on Linux runners.
             container:
               image: ghcr.io/dimensionalos/ros-dev:dev
-              env:
-                OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-                ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-                ALIBABA_API_KEY: ${{ secrets.ALIBABA_API_KEY }}
             markers: "self_hosted or skipif_no_ros"
             experimental: false
           - runner: [self-hosted, macos, arm64]
