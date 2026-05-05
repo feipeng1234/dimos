@@ -422,6 +422,9 @@ exclude = [
     "src"
 ]
 
+[tool.ruff.format]
+line-ending = "lf"
+
 [tool.ruff.lint]
 extend-select = ["E", "W", "F", "B", "UP", "N", "I", "C90", "A", "RUF", "TCH"]
 ignore = [

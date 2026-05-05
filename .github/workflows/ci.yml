@@ -5,7 +5,6 @@ on:
     paths-ignore:
       - '**.md'
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
     paths-ignore:
       - '**.md'
 
@@ -31,8 +30,8 @@ jobs:
         run: uv sync --only-group lint --frozen
       - name: Mypy
         run: uv run mypy
-      - name: Ruff check
-        run: uv run ruff check
+      - name: Run pre-commit
+        uses: pre-commit/action@v3.0.1
 
   tests:
     timeout-minutes: 15
@@ -94,7 +93,7 @@ jobs:
         github.event.pull_request.draft == false &&
         github.event.pull_request.head.repo.full_name == github.repository
       )
-    timeout-minutes: 60
+    timeout-minutes: 20
     runs-on: [self-hosted, Linux]
     permissions:
       contents: read  # For checkout
