@@ -219,6 +219,32 @@ def bake_scene_mjcf(
             if (extent < _DEGENERATE_EPS).any():
                 skipped_degenerate += 1
                 continue
+            # qhull's coplanarity tolerance scales with the hull's max
+            # extent — a 7 mm thinness in a 380 mm-wide hull (e.g. CoACD's
+            # split of an "ultrawide monitor" prim) reads as coplanar and
+            # MuJoCo's mj_loadXML aborts with QH6154.  Skip pre-emptively
+            # any hull whose smallest axis is < 5% of the largest, *or*
+            # whose absolute thinness is < 5 mm — caught both failing
+            # examples in the dimos_office bake.
+            min_ext = float(extent.min())
+            max_ext = float(extent.max())
+            if max_ext > 0 and (min_ext / max_ext) < 0.05:
+                skipped_degenerate += 1
+                continue
+            if min_ext < 5e-3:
+                skipped_degenerate += 1
+                continue
+            # Belt-and-suspenders: try the same qhull call MuJoCo will
+            # do at load time.  If scipy can't build a 3D hull from
+            # these points, mj_loadXML can't either — skip rather than
+            # take the whole sim down on adapter-connect timeout.
+            try:
+                from scipy.spatial import ConvexHull, QhullError
+
+                ConvexHull(v, qhull_options="Qt")
+            except (QhullError, ValueError):
+                skipped_degenerate += 1
+                continue
 
             asset_name = f"{prim.name}_h{j:03d}"
             obj_file = cache_dir / f"{asset_name}.obj"
