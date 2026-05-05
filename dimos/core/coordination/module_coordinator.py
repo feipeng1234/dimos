@@ -25,6 +25,7 @@ import shutil
 import sys
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, cast
+import threading
 
 from dimos.core.coordination.rpyc_server import RpycServer
 from dimos.core.coordination.worker_manager import WorkerManager
