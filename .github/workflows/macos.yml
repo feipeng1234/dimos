@@ -103,6 +103,13 @@ jobs:
           ALIBABA_API_KEY: ${{ secrets.ALIBABA_API_KEY }}
           LCM_DEFAULT_URL: "udpm://239.255.76.67:7667?ttl=0"
           CI: "1"
+          # Hardware GPU via Metal/ANGLE in system Chrome — bundled Chromium
+          # has broken WebGL on macOS, so we explicitly use the brew-installed
+          # Chrome.app. Software (cpu/SwiftShader) rendering is too slow on
+          # the Mac Mini-class runner: it saturates the main thread and
+          # starves the WebSocket pump.
+          DIMSIM_RENDER: gpu
+          DIMSIM_CHROME_CHANNEL: chrome
         # continue-on-error so the rest of the suite still runs and we get full
         # CI signal even when sim-nav is broken.
         continue-on-error: true

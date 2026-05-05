@@ -124,6 +124,7 @@ def dimsim_only():
         f"Port {BRIDGE_PORT} still busy after force-kill"
     )
 
+    render = os.environ.get("DIMSIM_RENDER", "cpu")
     proc, log_path = launch_with_streaming_log(
         "dimsim_binary",
         [
@@ -135,7 +136,7 @@ def dimsim_only():
             str(BRIDGE_PORT),
             "--headless",
             "--render",
-            "cpu",
+            render,
         ],
     )
 
