@@ -8,6 +8,10 @@ on:
     paths-ignore:
       - '**.md'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
 permissions: {}
 
 jobs:
@@ -38,7 +42,7 @@ jobs:
     strategy:
       matrix:
         pyver: ['3.10', '3.11', '3.12', '3.13', '3.14']
-        os: [ubuntu, macos]
+        os: [ubuntu, macos, windows]
         experimental: [false]
         include:
           - os: ubuntu
@@ -153,7 +157,7 @@ jobs:
         with:
           enable-cache: true
       - name: Install dependencies
-        run: uv sync --group tests-self-hosted --frozen --reinstall-package dimos
+        run: uv sync --group tests-self-hosted --frozen --reinstall-package dimos --reinstall-package opencv-python
       - name: Run tests
         run: uv run pytest --cov=dimos/ --junitxml=junit.xml -m '(${{ matrix.markers }}) and not (tool or mujoco)'
       - name: Re-run the failing tests with maximum verbosity
@@ -185,21 +189,6 @@ jobs:
         if: failure()
         run: |
           df -h
-
-  # Cross-job fail-fast: GitHub Actions only fail-fasts within a matrix,
-  # not across sibling jobs. This watcher fires the moment `tests` fails
-  # and cancels the whole workflow run.
-  fail-fast:
-    if: failure()
-    needs: [tests]
-    runs-on: ubuntu-latest
-    permissions:
-      actions: write  # For `gh run cancel`
-    steps:
-      - name: Cancel workflow run
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh run cancel ${{ github.run_id }} --repo ${{ github.repository }}
 
   ci-complete:  # This is used for branch protection.
     if: always()
