@@ -370,14 +370,17 @@ lint = [
     "ruff==0.14.3",
     "mypy==1.19.0",
 
-    # Stubs for packages excluded from the lint env on purpose
+    "aiortc>=1.14.0",
+    "anthropic>=0.19.0",
+    "ipython",
+    "openai-whisper",
+    "python-socketio>=5.16.1",
+    "sounddevice>=0.5.5",
+    "trimesh>=4.12",
+    "watchdog>=3.0.0",
+
     "types-pyaudio",
     "types-psycopg2>=2.9.21.20251012",
-
-    # Stubs for packages without `py.typed` that dimos production code
-    # imports directly. (Other transitively-installed stubs we used to
-    # carry — pandas/scipy/protobuf/psutil/networkx/etc. — were redundant
-    # because those packages ship runtime types.)
     "types-PyYAML>=6.0.12.20250915,<7",  # yaml (msgs/sensor_msgs/CameraInfo.py, perception/common/utils.py)
     "types-requests>=2.32.4.20260107,<3",  # requests (mcp_adapter, osm, cli, skills/rest, …)
 

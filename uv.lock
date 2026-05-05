@@ -1987,10 +1987,14 @@ autofix = [
     { name = "ruff" },
 ]
 lint = [
+    { name = "aiortc" },
+    { name = "anthropic" },
     { name = "dimos", extra = ["cpu", "drone", "visualization", "web"] },
     { name = "gdown" },
     { name = "googlemaps" },
     { name = "hydra-core" },
+    { name = "ipython", version = "8.38.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11' or (extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
+    { name = "ipython", version = "9.10.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11' or (extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
     { name = "langchain" },
     { name = "langchain-chroma" },
     { name = "langchain-core" },
@@ -2002,17 +2006,22 @@ lint = [
     { name = "ollama" },
     { name = "open-clip-torch" },
     { name = "openai" },
+    { name = "openai-whisper" },
     { name = "pygame" },
+    { name = "python-socketio" },
     { name = "ruff" },
+    { name = "sounddevice" },
     { name = "tensorboard" },
     { name = "torch" },
     { name = "torchreid" },
     { name = "transformers", extra = ["torch"] },
+    { name = "trimesh" },
     { name = "types-psycopg2" },
     { name = "types-pyaudio" },
     { name = "types-pyyaml" },
     { name = "types-requests" },
     { name = "ultralytics" },
+    { name = "watchdog" },
     { name = "xacro" },
 ]
 project-deps = [
@@ -2256,10 +2265,13 @@ provides-extras = ["misc", "visualization", "agents", "web", "perception", "unit
 [package.metadata.requires-dev]
 autofix = [{ name = "ruff", specifier = "==0.14.3" }]
 lint = [
+    { name = "aiortc", specifier = ">=1.14.0" },
+    { name = "anthropic", specifier = ">=0.19.0" },
     { name = "dimos", extras = ["web", "visualization", "drone", "cpu"] },
     { name = "gdown", specifier = "==5.2.0" },
     { name = "googlemaps", specifier = ">=4.10.0" },
     { name = "hydra-core", specifier = ">=1.3.0" },
+    { name = "ipython" },
     { name = "langchain", specifier = "==1.2.3" },
     { name = "langchain-chroma", specifier = ">=1,<2" },
     { name = "langchain-core", specifier = "==1.2.3" },
@@ -2271,17 +2283,22 @@ lint = [
     { name = "ollama", specifier = ">=0.6.0" },
     { name = "open-clip-torch", specifier = "==3.2.0" },
     { name = "openai" },
+    { name = "openai-whisper" },
     { name = "pygame", specifier = ">=2.6.1" },
+    { name = "python-socketio", specifier = ">=5.16.1" },
     { name = "ruff", specifier = "==0.14.3" },
+    { name = "sounddevice", specifier = ">=0.5.5" },
     { name = "tensorboard", specifier = "==2.20.0" },
     { name = "torch" },
     { name = "torchreid", specifier = "==0.2.5" },
     { name = "transformers", extras = ["torch"], specifier = "==4.49.0" },
+    { name = "trimesh", specifier = ">=4.12" },
     { name = "types-psycopg2", specifier = ">=2.9.21.20251012" },
     { name = "types-pyaudio" },
     { name = "types-pyyaml", specifier = ">=6.0.12.20250915,<7" },
     { name = "types-requests", specifier = ">=2.32.4.20260107,<3" },
     { name = "ultralytics", specifier = ">=8.3.70" },
+    { name = "watchdog", specifier = ">=3.0.0" },
     { name = "xacro" },
 ]
 project-deps = [
@@ -10266,15 +10283,15 @@ wheels = [
 
 [[package]]
 name = "trimesh"
-version = "4.11.2"
+version = "4.12.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11' or (extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
     { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11' or (extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1f/41/de14e2fa9b2d99214c60402fc57d2efb201f2925b16d6bee289565901d83/trimesh-4.11.2.tar.gz", hash = "sha256:30fbde5b8dd7c157e7ff4d54286cb35291844fd3f4d0364e8b2727f1b308fb06", size = 835044, upload-time = "2026-02-10T16:00:27.58Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/79/37/5cb90f04990260d2caceb6093560c6cefafca1ec522c1e43be01ca658244/trimesh-4.12.2.tar.gz", hash = "sha256:c8ca31571ac00b112e4e160e66a2d4c3491df321f056bd33806be0485d1af9d9", size = 842220, upload-time = "2026-05-01T00:57:43.333Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3c/b9/da09903ea53b677a58ba770112de6fe8b2acb8b4cd9bffae4ff6cfe7c072/trimesh-4.11.2-py3-none-any.whl", hash = "sha256:25e3ab2620f9eca5c9376168c67aabdd32205dad1c4eea09cd45cd4a3edf775a", size = 740328, upload-time = "2026-02-10T16:00:25.246Z" },
+    { url = "https://files.pythonhosted.org/packages/05/98/716a473cfb24750858ddd5d14e6527539dd206583a46408d08eeb2844a75/trimesh-4.12.2-py3-none-any.whl", hash = "sha256:b5b5afa63c5272345f2858f7676bc8c217dc8a89f4fadf6193fe10a81b5ff2aa", size = 741043, upload-time = "2026-05-01T00:57:40.763Z" },
 ]
 
 [[package]]
