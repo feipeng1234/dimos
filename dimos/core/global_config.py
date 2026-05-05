@@ -35,6 +35,8 @@ class GlobalConfig(BaseSettings):
     simulation: bool = False
     replay: bool = False
     replay_db: str = "go2_china_office"
+    replay_file: str | None = None
+    record_path: str | None = None
     new_memory: bool = False
     viewer: ViewerBackend = "rerun"
     n_workers: int = 2
