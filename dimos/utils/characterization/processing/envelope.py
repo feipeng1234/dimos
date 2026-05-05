@@ -1,11 +1,24 @@
+# Copyright 2026 Dimensional Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Copyright 2025-2026 Dimensional Inc.
 # Licensed under the Apache License, Version 2.0.
 
-"""Per-mode operational envelope summary.
+"""Operational envelope summary.
 
-Takes a list of session directories (presumed to be the same mode —
-either all default or all rage), pulls aggregated metrics from each,
-and emits one human-readable markdown summary covering:
+Takes a list of session directories, pulls aggregated metrics from
+each, and emits one human-readable markdown summary covering:
 
   - Linear (vx) gain curve from E1 step matrix
   - Angular (wz) gain curve from E2 step matrix
@@ -15,8 +28,8 @@ and emits one human-readable markdown summary covering:
   - Battery / surface metadata snapshot
 
 Pre-requisites: each input session must have already been processed:
-``python -m dimos.utils.characterization.scripts.process_session validate``, ``python -m dimos.utils.characterization.scripts.process_session aggregate``, optionally
-``python -m dimos.utils.characterization.scripts.process_session deadtime`` and ``python -m dimos.utils.characterization.scripts.process_session coupling``.
+``process_session validate``, ``process_session aggregate``, optionally
+``process_session deadtime`` and ``process_session coupling``.
 """
 
 from __future__ import annotations
@@ -26,9 +39,7 @@ from pathlib import Path
 from typing import Any
 
 
-def envelope_report(
-    session_dirs: list[Path], *, mode_label: str = "default", out_path: Path | None = None
-) -> str:
+def envelope_report(session_dirs: list[Path], *, out_path: Path | None = None) -> str:
     """Build a markdown envelope summary; returns the markdown text.
 
     Writes to ``out_path`` if given.
@@ -37,7 +48,7 @@ def envelope_report(
     bundles = [_load_session(s) for s in sessions]
 
     lines: list[str] = []
-    lines.append(f"# Operational envelope — {mode_label}")
+    lines.append("# Operational envelope")
     lines.append("")
     lines.append(f"Sessions analyzed: {len(sessions)}")
     for s in sessions:
@@ -90,6 +101,7 @@ def envelope_report(
 
 # ---------------------------------------------------------------------------- internal
 
+
 def _load_session(session_dir: Path) -> dict[str, Any]:
     """Load all derived artifacts from one session into a dict."""
     bundle: dict[str, Any] = {"dir": session_dir}
@@ -128,7 +140,9 @@ def _step_gain_table(bundles: list[dict[str, Any]], *, channel: str, recipe_pref
         rise = m["rise_10_90_s"]["mean"]
         settle = m["settle_s"]["mean"]
         ovs = m["overshoot"]["mean"]
-        gain = (ss_mean / target) if (target and ss_mean is not None and abs(target) > 1e-6) else None
+        gain = (
+            (ss_mean / target) if (target and ss_mean is not None and abs(target) > 1e-6) else None
+        )
         lines.append(
             f"| {recipe} | {g['n_runs_kept']} | {_fmt(target)} | {_fmt(ss_mean)} | "
             f"{_fmt(ss_std)} | {_fmt(gain)} | {_fmt(rise)} | {_fmt(settle)} | {_fmt(ovs)} |"
@@ -153,8 +167,7 @@ def _ramp_summary(bundles: list[dict[str, Any]], *, recipe_prefix: str) -> str:
             f"{_fmt(m['cmd_min']['mean'])} |"
         )
     return (
-        "\n".join(lines)
-        + "\n\n_Saturation point detection requires running the parametric "
+        "\n".join(lines) + "\n\n_Saturation point detection requires running the parametric "
         "(cmd vs meas) analysis — see plot.svg for each ramp run._"
     )
 
@@ -185,7 +198,7 @@ def _deadtime_summary(bundles: list[dict[str, Any]]) -> str:
         chunks.append(
             f"**Session `{b['dir'].name}`**: n={s.get('n')}, "
             f"mean={s.get('mean_s')}s, median={s.get('median_s')}s, "
-            f"p95={s.get('p95_s')}s, jitter σ={s.get('std_s')}s"
+            f"p95={s.get('p95_s')}s, jitter sigma={s.get('std_s')}s"
         )
     return "\n".join(chunks) if chunks else "_no E8 deadtime data found_"
 
@@ -197,7 +210,7 @@ def _metadata_summary(bundles: list[dict[str, Any]]) -> str:
         op = sess.get("operator") or {}
         chunks.append(
             f"- `{b['dir'].name}`  notes='{op.get('notes')}'  surface='{op.get('surface')}'  "
-            f"rage={sess.get('rage')}  runs={len(sess.get('runs') or [])}"
+            f"runs={len(sess.get('runs') or [])}"
         )
     return "\n".join(chunks) if chunks else "_no session.json found_"
 

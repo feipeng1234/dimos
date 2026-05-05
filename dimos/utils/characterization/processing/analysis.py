@@ -44,7 +44,7 @@ from dimos.utils.characterization.processing.validate import _load_measured_for_
 #
 # For each E8 short-step run, find:
 #   - cmd edge time (when commanded leaves the pre-roll zero band)
-#   - response onset (first time |measured| exceeds K × σ_noise on that channel)
+#   - response onset (first time |measured| exceeds K x sigma_noise on that channel)
 #   - deadtime = response_onset - cmd_edge
 #
 # Aggregate across all matching runs in the session: mean, median, p95, jitter.
@@ -52,7 +52,7 @@ from dimos.utils.characterization.processing.validate import _load_measured_for_
 # of thing the cleaning rule says to keep raw.
 # =============================================================================
 
-_DEFAULT_THRESHOLD_K = 3.0  # threshold = K × σ_noise
+_DEFAULT_THRESHOLD_K = 3.0  # threshold = K x sigma_noise
 
 
 def deadtime_stats_session(
@@ -228,7 +228,7 @@ def _onset_time(
 #   - active window = phase=="active" rows from cmd_monotonic.jsonl
 #   - leak = mean abs(measured value on the *other* channel) during active
 #   - leak as % of commanded primary channel
-#   - leak as multiples of σ_noise on that channel
+#   - leak as multiples of sigma_noise on that channel
 #
 # Decision rule:
 #     leak% < 5%  → SISO is fine

@@ -1,26 +1,50 @@
+# Copyright 2026 Dimensional Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Copyright 2025-2026 Dimensional Inc.
 # Licensed under the Apache License, Version 2.0.
 
-"""Per-run data validation.
+"""Per-run data validation + noise-floor estimation.
 
-Checks that fail here mean the run's data shouldn't be trusted for
-downstream metrics. Non-destructive: writes a new ``validation.json``
-next to ``run.json``; does not modify anything else.
+Validation
+----------
+Non-destructive: writes a new ``validation.json`` next to ``run.json``;
+does not modify anything else. Checks:
 
-Checks:
   1. Commanded sample-rate consistency (jsonl tx_mono cadence vs recipe rate)
   2. Monotonic timestamps on commanded + measured streams
-  3. No gaps > 2× nominal period in either stream
+  3. No gaps > 2x nominal period in either stream
   4. Cross-correlation peak between cmd_vx and meas_vx at *positive* lag
      (a peak at 0 or negative lag means timestamps are wrong)
 
-CLI: see ``scripts/validate_session.py`` (``python -m dimos.utils.characterization.scripts.process_session validate``).
+Noise floor
+-----------
+The pre-roll is recorded with all-zero commanded velocities, so the
+measured signal during pre-roll *is* the noise floor (drift, IMU bias,
+odometry quantization). Computed sigma values are appended to ``run.json``
+under a top-level ``noise_floor`` key (additive — never overwrites
+existing fields). Safe to rerun. Downstream thresholds (deadtime onset,
+coupling leak) read this number instead of carrying magic constants.
+
+CLI: ``python -m dimos.utils.characterization.scripts.process_session validate``.
 """
 
 from __future__ import annotations
 
-import json
 from dataclasses import asdict, dataclass
+import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -91,7 +115,8 @@ def validate_session(session_dir: Path) -> dict[str, Any]:
                 "run_id": r["run_id"],
                 "failed_checks": [c["name"] for c in r.get("checks", []) if not c["passed"]],
             }
-            for r in results if not r.get("passed")
+            for r in results
+            if not r.get("passed")
         ],
     }
     (session_dir / "validation_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
@@ -99,6 +124,7 @@ def validate_session(session_dir: Path) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------- internal
+
 
 def _load_cmd_jsonl(path: Path) -> dict[str, np.ndarray]:
     rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
@@ -160,7 +186,7 @@ def _load_measured_for_run(
 
 
 def _check_sample_rate(ts: np.ndarray, expected_hz: float, *, name: str) -> CheckResult:
-    """Median Δt should match 1/expected_hz within 5%."""
+    """Median dt should match 1/expected_hz within 5%."""
     if ts.size < 3:
         return CheckResult(name, False, {"reason": "too few samples", "n": int(ts.size)})
     dt = np.diff(ts)
@@ -192,7 +218,7 @@ def _check_monotonic(ts: np.ndarray, *, name: str) -> CheckResult:
 
 
 def _check_no_gaps(ts: np.ndarray, gap_limit_s: float, *, name: str) -> CheckResult:
-    """No inter-sample interval should exceed 2× nominal period."""
+    """No inter-sample interval should exceed 2x nominal period."""
     if ts.size < 2:
         return CheckResult(name, True, {"n": int(ts.size)})
     deltas = np.diff(ts)
@@ -247,8 +273,11 @@ def _check_xcorr_positive_lag(
         return CheckResult(
             name,
             passed=True,  # constant signal, correlation undefined; don't fail
-            detail={"reason": "low-variance signal", "cmd_std": float(np.std(cmd_g)),
-                    "meas_std": float(np.std(meas_g))},
+            detail={
+                "reason": "low-variance signal",
+                "cmd_std": float(np.std(cmd_g)),
+                "meas_std": float(np.std(meas_g)),
+            },
         )
 
     # Limit lag search to ±0.5 s — deadtime is well under that.
@@ -284,4 +313,121 @@ def _check_xcorr_positive_lag(
     return CheckResult(name, passed=passed, detail=detail)
 
 
-__all__ = ["CheckResult", "validate_run", "validate_session"]
+# ---------------------------------------------------------------------------- noise floor
+
+
+def compute_noise_floor(run_dir: Path) -> dict[str, dict[str, float]]:
+    """Compute sigma, mean, span on each derived measured channel during pre-roll.
+
+    Channels:
+      vx, vy: body-frame translational, derived as gradient(x or y) rotated by -yaw
+      wz:     yaw rate, gradient(yaw) directly
+      x, y:   raw world-frame position
+      yaw:    raw yaw
+
+    Returns the dict and writes it into ``run.json`` (additive — never
+    overwrites existing fields). Pre-roll is identified from
+    ``cmd_monotonic.jsonl``'s ``phase == "pre_roll"`` window.
+    """
+    from dimos.utils.characterization.scripts.analyze import (
+        reconstruct_body_velocities,
+    )
+
+    run_dir = Path(run_dir).expanduser().resolve()
+    run_json_path = run_dir / "run.json"
+    meta = json.loads(run_json_path.read_text())
+
+    pre_window = _pre_roll_wall_window(run_dir, meta)
+    meas_ts, meas_x, meas_y, meas_yaw = _load_measured_for_run(run_dir, meta)
+
+    out: dict[str, dict[str, float]] = {}
+    if meas_ts.size < 3 or pre_window is None:
+        out = {"_unavailable": {"reason": "insufficient measured samples"}}  # type: ignore[dict-item]
+    else:
+        # Slice to pre-roll window only.
+        ts_lo, ts_hi = pre_window
+        mask = (meas_ts >= ts_lo) & (meas_ts <= ts_hi)
+        if int(mask.sum()) < 3:
+            out = {
+                "_unavailable": {"reason": "fewer than 3 pre-roll samples", "n": int(mask.sum())}
+            }  # type: ignore[dict-item]
+        else:
+            t = meas_ts[mask]
+            x = meas_x[mask]
+            y = meas_y[mask]
+            yaw = meas_yaw[mask]
+            # Reconstruct body-frame velocities on the same window (small
+            # window, no SavGol filtering — too few samples).
+            vx, vy, wz = reconstruct_body_velocities(t, x, y, yaw, window=3, order=1)
+            for name, arr in [
+                ("vx", vx),
+                ("vy", vy),
+                ("wz", wz),
+                ("x", x),
+                ("y", y),
+                ("yaw", yaw),
+            ]:
+                out[name] = {
+                    "std": float(np.std(arr, ddof=1)) if arr.size > 1 else 0.0,
+                    "mean": float(np.mean(arr)),
+                    "span": float(np.ptp(arr)),
+                    "n": int(arr.size),
+                }
+
+    # Append (don't overwrite existing fields).
+    meta["noise_floor"] = out
+    _atomic_write_json(run_json_path, meta)
+    return out
+
+
+def compute_noise_session(session_dir: Path) -> dict[str, Any]:
+    """Run noise-floor computation across every run in a session."""
+    session_dir = Path(session_dir).expanduser().resolve()
+    rows = []
+    for rd in sorted(p for p in session_dir.iterdir() if p.is_dir() and p.name[0].isdigit()):
+        try:
+            r = compute_noise_floor(rd)
+            vx_std = (r.get("vx") or {}).get("std")
+            wz_std = (r.get("wz") or {}).get("std")
+            rows.append({"run_id": rd.name, "vx_std": vx_std, "wz_std": wz_std})
+        except Exception as e:  # pragma: no cover
+            rows.append({"run_id": rd.name, "error": str(e)})
+    return {"session_dir": str(session_dir), "runs": rows}
+
+
+def _pre_roll_wall_window(run_dir: Path, meta: dict[str, Any]) -> tuple[float, float] | None:
+    """Wall-clock [start, end] of the pre-roll window.
+
+    The cmd_monotonic.jsonl rows have both tx_mono and tx_wall, so we
+    can directly read pre-roll wall-clock bounds without translating.
+    """
+    cmd_path = run_dir / "cmd_monotonic.jsonl"
+    if not cmd_path.exists():
+        return None
+    pre_walls: list[float] = []
+    with cmd_path.open() as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            d = json.loads(line)
+            if d.get("phase") == "pre_roll":
+                pre_walls.append(float(d["tx_wall"]))
+    if not pre_walls:
+        return None
+    return (min(pre_walls), max(pre_walls))
+
+
+def _atomic_write_json(path: Path, data: dict[str, Any]) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2, default=str) + "\n")
+    os.replace(tmp, path)
+
+
+__all__ = [
+    "CheckResult",
+    "compute_noise_floor",
+    "compute_noise_session",
+    "validate_run",
+    "validate_session",
+]

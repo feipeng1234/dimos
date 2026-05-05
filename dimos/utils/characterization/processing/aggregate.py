@@ -123,7 +123,7 @@ def _aggregate_group(
         metric_arrays[key] = np.asarray(vals, dtype=float) if vals else np.array([])
 
     # Outlier rejection: for steady_state (the most stable metric), drop runs
-    # whose value is > sigma σ from the mean. Apply to all metrics consistently
+    # whose value is > sigma sigma from the mean. Apply to all metrics consistently
     # using the same kept-runs set.
     kept_run_ids: list[str] = [r["run_id"] for r in runs_with_metrics]
     rejected_run_ids: list[str] = []

@@ -24,11 +24,12 @@ drive; release to let the next recipe fire.
 Usage::
 
     python -m dimos.utils.characterization.scripts.run_session \\
-        --recipes "dimos.utils.characterization.examples:step_vx_1:3,dimos.utils.characterization.examples:step_wz_1:2" \\
+        --recipes "my_recipes:step_vx_1:3,my_recipes:step_wz_1:2" \\
         --simulation --out-dir /tmp/char_runs [--randomize] [--rng-seed 42]
 
-``--recipes`` format: comma-separated ``module:attr[:repeats]``.
-``repeats`` defaults to 1.
+``--recipes`` format: comma-separated ``module:attr[:repeats]``. The
+attribute must resolve to a ``TestRecipe`` (e.g. one defined in your own
+``my_recipes.py``). ``repeats`` defaults to 1.
 """
 
 from __future__ import annotations
@@ -38,11 +39,10 @@ import importlib
 import logging
 import sys
 import time
-from pathlib import Path
 
 from dimos.utils.characterization.recipes import TestRecipe
-from dimos.utils.characterization.runner import OperatorMetadata
 from dimos.utils.characterization.session import (
+    OperatorMetadata,
     PlannedRun,
     SessionManager,
     expand_plan,
@@ -54,8 +54,7 @@ logger = logging.getLogger(__name__)
 def _resolve_recipe(spec: str) -> TestRecipe:
     if ":" not in spec:
         raise ValueError(
-            f"recipe spec {spec!r} must be 'module.path:attribute' "
-            "(e.g. dimos.utils.characterization.examples:step_vx_1)"
+            f"recipe spec {spec!r} must be 'module.path:attribute' (e.g. my_recipes:step_vx_1)"
         )
     module_path, attr = spec.split(":", 1)
     mod = importlib.import_module(module_path)
@@ -133,10 +132,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--recipes",
         required=True,
-        help=(
-            "Comma-separated list of 'module:attr[:repeats]'. "
-            "Example: dimos.utils.characterization.examples:step_vx_1:3"
-        ),
+        help=("Comma-separated list of 'module:attr[:repeats]'. Example: my_recipes:step_vx_1:3"),
     )
     parser.add_argument(
         "--out-dir",
@@ -150,17 +146,12 @@ def main(argv: list[str] | None = None) -> int:
         help="go2 (real/mujoco) or mock (no-robot plumbing test)",
     )
     parser.add_argument("--simulation", action="store_true", help="Launch mujoco sim for go2")
-    parser.add_argument(
-        "--rage",
-        action="store_true",
-        help="Real-Go2 only: enable rage mode at connection start (StandUp -> "
-        "BalanceStand -> enable_rage_mode). Characterizes a different plant — "
-        "tag your --notes accordingly so the rage dataset stays distinct.",
-    )
     parser.add_argument("--randomize", action="store_true", help="Shuffle the expanded plan")
     parser.add_argument("--rng-seed", type=int, default=None, help="Seed for --randomize")
     parser.add_argument("--dry-run", action="store_true", help="Print plan then exit")
-    parser.add_argument("--no-teleop", action="store_true", help="Do not add the keyboard teleop task")
+    parser.add_argument(
+        "--no-teleop", action="store_true", help="Do not add the keyboard teleop task"
+    )
     parser.add_argument(
         "--auto",
         action="store_true",
@@ -186,7 +177,9 @@ def main(argv: list[str] | None = None) -> int:
     # Dry-run: print plan and exit.
     est_dur = _estimate_duration(plan)
     est_fwd = _estimate_forward_distance(plan)
-    print(f"session plan ({len(plan)} runs, ~{est_dur:.0f}s command time, ~{est_fwd:.1f}m cumulative forward motion):")
+    print(
+        f"session plan ({len(plan)} runs, ~{est_dur:.0f}s command time, ~{est_fwd:.1f}m cumulative forward motion):"
+    )
     for i, p in enumerate(plan):
         r = p.recipe
         print(
@@ -213,7 +206,6 @@ def main(argv: list[str] | None = None) -> int:
         include_teleop=(not args.no_teleop) and args.backend == "go2",
         warmup_s=args.warmup_s,
         operator=operator,
-        rage=args.rage,
     ) as mgr:
         try:
             mgr.start_coordinator()
@@ -243,7 +235,7 @@ def main(argv: list[str] | None = None) -> int:
             r = entry.recipe
             print()
             print(
-                f"--- [{i+1}/{len(plan)}] {entry.label}  "
+                f"--- [{i + 1}/{len(plan)}] {entry.label}  "
                 f"type={r.test_type}  dur={r.duration_s:.1f}s ---"
             )
             if not args.auto:
@@ -283,10 +275,12 @@ def main(argv: list[str] | None = None) -> int:
             i += 1
 
         print()
-        print(f"session done. runs={len(mgr._runs)} skipped={skipped}  session_dir={mgr.session_dir}")
+        print(
+            f"session done. runs={len(mgr._runs)} skipped={skipped}  session_dir={mgr.session_dir}"
+        )
         print("  analyze individual runs:")
         for r in mgr._runs[-3:]:
-            print(f"    python -m dimos.utils.characterization.scripts.analyze_run {r.run_dir}")
+            print(f"    python -m dimos.utils.characterization.scripts.analyze run {r.run_dir}")
 
         # Post-session park: teleop is still live because we haven't stopped
         # the coordinator yet (the `with` block's __exit__ hasn't fired). Give

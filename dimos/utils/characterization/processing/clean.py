@@ -1,3 +1,17 @@
+# Copyright 2026 Dimensional Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Copyright 2025-2026 Dimensional Inc.
 # Licensed under the Apache License, Version 2.0.
 
@@ -7,10 +21,10 @@ Two-stage filter applied to derived body-frame velocities:
 
   1. Hampel filter (rolling-MAD outlier replacement). Window 7, k=3 by
      default — flags samples whose deviation from the local median
-     exceeds k × MAD and replaces them with the local median.
+     exceeds k x MAD and replaces them with the local median.
 
   2. Physics bound. Reject samples implying acceleration |a| > 8 m/s² or
-     |α| > 20 rad/s². The Go2 hardware can't actually achieve these;
+     |alpha| > 20 rad/s². The Go2 hardware can't actually achieve these;
      anything past these is sensor / odometry noise.
 
 **The raw arrays are never mutated.** Functions return cleaned copies
@@ -25,13 +39,12 @@ which should use the raw signal — see ``README.md`` "Processing rule".
 
 from __future__ import annotations
 
-import json
 from dataclasses import asdict, dataclass
+import json
 from pathlib import Path
 from typing import Any
 
 import numpy as np
-
 
 _DEFAULT_HAMPEL_WINDOW = 7
 _DEFAULT_HAMPEL_K = 3.0
@@ -55,8 +68,9 @@ class CleaningStats:
         return asdict(self)
 
 
-def hampel(x: np.ndarray, *, window: int = _DEFAULT_HAMPEL_WINDOW, k: float = _DEFAULT_HAMPEL_K
-           ) -> tuple[np.ndarray, np.ndarray]:
+def hampel(
+    x: np.ndarray, *, window: int = _DEFAULT_HAMPEL_WINDOW, k: float = _DEFAULT_HAMPEL_K
+) -> tuple[np.ndarray, np.ndarray]:
     """Replace outlier samples with the local median.
 
     Returns ``(cleaned, mask)`` where ``mask[i] == True`` indicates
@@ -142,25 +156,42 @@ def clean_run_velocities(
     (not m/s) and rad/s² for wz.
     """
     vx_clean, vx_stats = clean_channel(
-        ts, vx_raw, max_rate=ax_max, hampel_window=hampel_window, hampel_k=hampel_k,
+        ts,
+        vx_raw,
+        max_rate=ax_max,
+        hampel_window=hampel_window,
+        hampel_k=hampel_k,
     )
     vy_clean, vy_stats = clean_channel(
-        ts, vy_raw, max_rate=ax_max, hampel_window=hampel_window, hampel_k=hampel_k,
+        ts,
+        vy_raw,
+        max_rate=ax_max,
+        hampel_window=hampel_window,
+        hampel_k=hampel_k,
     )
     wz_clean, wz_stats = clean_channel(
-        ts, wz_raw, max_rate=alpha_max, hampel_window=hampel_window, hampel_k=hampel_k,
+        ts,
+        wz_raw,
+        max_rate=alpha_max,
+        hampel_window=hampel_window,
+        hampel_k=hampel_k,
     )
-    return vx_clean, vy_clean, wz_clean, {
-        "vx": vx_stats.asdict(),
-        "vy": vy_stats.asdict(),
-        "wz": wz_stats.asdict(),
-        "params": {
-            "hampel_window": hampel_window,
-            "hampel_k": hampel_k,
-            "ax_max": ax_max,
-            "alpha_max": alpha_max,
+    return (
+        vx_clean,
+        vy_clean,
+        wz_clean,
+        {
+            "vx": vx_stats.asdict(),
+            "vy": vy_stats.asdict(),
+            "wz": wz_stats.asdict(),
+            "params": {
+                "hampel_window": hampel_window,
+                "hampel_k": hampel_k,
+                "ax_max": ax_max,
+                "alpha_max": alpha_max,
+            },
         },
-    }
+    )
 
 
 def write_processed_json(run_dir: Path, stats: dict[str, Any]) -> None:
