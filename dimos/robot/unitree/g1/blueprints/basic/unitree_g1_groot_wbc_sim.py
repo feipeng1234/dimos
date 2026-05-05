@@ -510,14 +510,22 @@ if _splat_path is not None and _splat_path.exists():
     #   * Custom DIMOS_SCENE_MESH_PATH: legacy ``dimos_office.yaml``.
     import tempfile
 
+    # Splat alignment mirrors the mesh's SceneMeshAlignment exactly when
+    # we're on the default office bundle — both files share the same
+    # Blender-world frame, so the same env vars (DIMOS_SCENE_MESH_*)
+    # control both in lockstep.  Slide / scale / rotate the whole scene
+    # with one knob, e.g. ``DIMOS_SCENE_MESH_TRANSLATION="3,0,0"`` to
+    # nudge the robot out of furniture at the artist's world origin.
     _office_splat_yaml = Path(tempfile.gettempdir()) / "dimos_office_identity_alignment.yaml"
+    _t = list(_scene_mesh_translation)
+    _r = list(_scene_mesh_rotation)
     _office_splat_yaml.write_text(
-        "# Identity alignment for the joint-exported office splat.\n"
-        "# Both mesh GLB and splat PLY are in the same Blender Z-up frame.\n"
-        "scale: 1.0\n"
-        "translation: [0.0, 0.0, 0.0]\n"
-        "rotation_zyx: [0.0, 0.0, 0.0]\n"
-        "y_up: false\n"
+        "# Splat alignment for the joint-exported office bundle.\n"
+        "# Tracks DIMOS_SCENE_MESH_* env vars so splat moves with mesh.\n"
+        f"scale: {_scene_mesh_scale}\n"
+        f"translation: [{_t[0]}, {_t[1]}, {_t[2]}]\n"
+        f"rotation_zyx: [{_r[0]}, {_r[1]}, {_r[2]}]\n"
+        f"y_up: {'true' if _scene_mesh_y_up else 'false'}\n"
     )
     _splat_alignment_yaml = (
         str(_office_splat_yaml)
