@@ -97,6 +97,7 @@ from dimos.simulation.engines.mujoco_sim_module import MujocoSimModule
 from dimos.utils.data import get_data
 from dimos.utils.logging_config import setup_logger
 from dimos.visualization.viser import SplatCameraModule, ViserRenderModule
+from dimos.visualization.viser.camera import g1_d435_forward
 from dimos.web.websocket_vis.websocket_vis_module import WebsocketVisModule
 
 logger = setup_logger()
@@ -192,6 +193,12 @@ _scene_mesh_auto_ground = os.environ.get("DIMOS_SCENE_MESH_AUTO_GROUND", "0") no
 # click-to-nav still works against open space.  Useful for isolating
 # locomotion / control-loop perf from the perception firehose.
 _disable_lidar = os.environ.get("DIMOS_DISABLE_LIDAR", "0") not in ("", "0")
+# Camera pose toggle.  Default is the manipulation-oriented 47.6° downward
+# pitch (matches Matrix's real D435i mount).  Set DIMOS_CAMERA_FORWARD=1 to
+# swap in the horizontal eye-level mount instead — useful for navigation /
+# exploration where the agent wants to see walls and people, not the floor.
+_camera_forward = os.environ.get("DIMOS_CAMERA_FORWARD", "0") not in ("", "0")
+_camera_spec = g1_d435_forward() if _camera_forward else None
 
 if _scene_mesh_path:
     from dimos.mapping.mesh_scene import SceneMeshAlignment, floor_z_under_origin
@@ -535,6 +542,7 @@ if _splat_path is not None and _splat_path.exists():
         scene_mesh_translation=_scene_mesh_translation,
         scene_mesh_rotation_zyx_deg=_scene_mesh_rotation,
         scene_mesh_y_up=_scene_mesh_y_up,
+        camera_spec=_camera_spec,
     ).transports(
         {
             ("joint_state", JointState): LCMTransport("/coordinator/joint_state", JointState),
@@ -573,6 +581,7 @@ if _splat_path is not None and _splat_path.exists():
             # needs color.frame_id == the MJCF camera's TF frame so the
             # head/depth_image frame_id matches.
             frame_id="head_color_color_optical_frame",
+            camera_spec=_camera_spec,
         ).transports(
             {
                 ("joint_state", JointState): LCMTransport("/coordinator/joint_state", JointState),
@@ -590,6 +599,7 @@ if _splat_path is not None and _splat_path.exists():
             # Match MujocoSimModule's depth camera frame so RGB and depth
             # share frame_id; ObjectSceneRegistration's tf lookup needs that.
             frame_id="head_color_color_optical_frame",
+            camera_spec=_camera_spec,
         ).transports(
             {
                 ("joint_state", JointState): LCMTransport("/coordinator/joint_state", JointState),

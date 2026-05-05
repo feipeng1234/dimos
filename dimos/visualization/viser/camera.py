@@ -140,6 +140,40 @@ def g1_d435_default() -> CameraSpec:
     )
 
 
+def g1_d435_forward() -> CameraSpec:
+    """RealSense D435i mounted forward at G1 eye level (no pitch).
+
+    Alternate to ``g1_d435_default`` for when the agent wants a
+    "robot's eye view" of the room — looking at the horizon, walls,
+    people — instead of the manipulation-oriented downward pitch.
+    Useful for navigation / exploration / scene understanding tasks
+    that don't care about the table workspace in front of the chest.
+
+    Mount: on ``torso_link`` at ``(0.10, 0.0, 0.40)`` — 10 cm forward
+    of the torso origin and 40 cm up, roughly at eye level just past
+    the forehead mesh.  Optical axis horizontal.
+
+    Intrinsics are Intel datasheet for D435i color
+    (HFOV 69.4°, VFOV 42.5°), binned to 320x180.
+    """
+    body_R_image = np.array(
+        [
+            [0.0, 0.0, 1.0],
+            [-1.0, 0.0, 0.0],
+            [0.0, -1.0, 0.0],
+        ],
+        dtype=np.float64,
+    )
+    return CameraSpec(
+        body_name="torso_link",
+        mount_pos=(0.10, 0.0, 0.40),
+        mount_wxyz=_quat_from_matrix(body_R_image),
+        vfov_deg=42.5,
+        width=320,
+        height=180,
+    )
+
+
 def world_pose(
     body_world_pos: np.ndarray,
     body_world_wxyz: np.ndarray,
@@ -170,4 +204,4 @@ def world_pose(
     return out_pos, out_quat
 
 
-__all__ = ["CameraSpec", "g1_d435_default", "world_pose"]
+__all__ = ["CameraSpec", "g1_d435_default", "g1_d435_forward", "world_pose"]
