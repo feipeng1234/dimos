@@ -16,6 +16,7 @@ import pytest
 
 
 @pytest.mark.skipif_in_ci
+@pytest.mark.self_hosted
 @pytest.mark.skipif_no_openai
 def test_dimos_skills(lcm_spy, start_blueprint, human_input) -> None:
     lcm_spy.save_topic("/agent")
