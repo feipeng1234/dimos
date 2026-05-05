@@ -475,16 +475,25 @@ _g1_ws_vis = WebsocketVisModule.blueprint().transports(
 _viser_modules: tuple = ()
 try:
     _splat_dir = get_data("dimos_office")
-    _splat_path = _splat_dir / "dimos_office.ply"
+    _legacy_splat_path = _splat_dir / "dimos_office.ply"
     _alignment_yaml = _splat_dir / "dimos_office.yaml"
 except Exception as e:
     logger.warning(f"Splat asset unavailable: {e}; viser viewer + splat camera disabled")
-    _splat_path = None
+    _legacy_splat_path = None
+# When on the default office path, use the joint-exported Z-up splat from
+# the artist .blend — same Blender world frame as the mesh GLB, so identity
+# alignment puts both in the same dimos world (no YAML, no env vars).  When
+# a user-supplied DIMOS_SCENE_MESH_PATH is set, fall back to the legacy
+# Y-up dimos_office.ply with its (unrelated) YAML alignment.
+_splat_path = _legacy_splat_path
+if _scene_mesh_path_override is None:
+    try:
+        _office_pointcloud = get_data("dimos_office_mesh") / "dimos_office_pointcloud.ply"
+        if _office_pointcloud.exists():
+            _splat_path = _office_pointcloud
+    except Exception:
+        pass
 if _splat_path is not None and _splat_path.exists():
-    # Scene-mesh env vars (DIMOS_SCENE_MESH_*) are parsed at module top —
-    # the resulting alignment + path get reused here for the viser viewer
-    # and the mesh-camera module.
-
     # Show the splat alongside the mesh when we're using the default office
     # mesh (so the user can visually compare both in the same world frame).
     # When the user provides their *own* scene mesh, hide the splat — it's
@@ -493,31 +502,22 @@ if _splat_path is not None and _splat_path.exists():
     # in either case.
     _viser_splat_path = None if _scene_mesh_path_override else str(_splat_path)
     # Splat alignment policy:
-    #   * Default office path: write a tuned-to-the-artist-mesh YAML and
-    #     use it.  The .ply is genuinely Y-up natively (Y span 2.59m =
-    #     room height); the Y→Z swap is correct.  Beyond that, the legacy
-    #     dimos_office.yaml's scale=2.0 + translate=[-1.72,-0.11,1.436]
-    #     was way off compared to the artist mesh — overscaling the splat
-    #     2x and putting its floor below z=0.  Values below were derived
-    #     by matching the splat's p5..p95 bbox to the mesh's bbox after
-    #     Y→Z swap:
-    #       scale = (mesh X span 11.3) / (splat X span 9.79)  ≈ 1.18
-    #       trans Z = -splat min Z (after scale & swap) ≈ 1.94 → floor at 0
-    #       trans X, Y = align p5..p95 centroids
-    #   * Custom DIMOS_SCENE_MESH_PATH: keep the legacy YAML for the
-    #     splat (unrelated geometry; nothing to align to).
+    #   * Default office path: identity.  The joint-exported PLY is in the
+    #     SAME Blender Z-up world frame as the artist mesh GLB, so no
+    #     transform is needed — they overlay directly, the way the artist
+    #     authored them in Blender.  ``SplatAlignment()`` defaults to
+    #     y_up=True, so we still need a runtime YAML to set y_up=false.
+    #   * Custom DIMOS_SCENE_MESH_PATH: legacy ``dimos_office.yaml``.
     import tempfile
 
-    _office_splat_yaml = Path(tempfile.gettempdir()) / "dimos_office_aligned_to_mesh.yaml"
+    _office_splat_yaml = Path(tempfile.gettempdir()) / "dimos_office_identity_alignment.yaml"
     _office_splat_yaml.write_text(
-        "# Alignment derived from the artist office mesh's bbox:\n"
-        "# splat p5..p95 X[-4.77,5.02] Y[-2.58,3.87] Z[-1.64,0.95] (after Y->Z swap)\n"
-        "# mesh  bbox    X[-6.7, 4.6]  Y[-3.1, 4.8]  Z[ 0.0, 3.03]\n"
-        "# scale = mesh_span / splat_span ≈ 1.18 (uniform)\n"
-        "scale: 1.18\n"
-        "translation: [-1.20, 0.08, 1.94]\n"
+        "# Identity alignment for the joint-exported office splat.\n"
+        "# Both mesh GLB and splat PLY are in the same Blender Z-up frame.\n"
+        "scale: 1.0\n"
+        "translation: [0.0, 0.0, 0.0]\n"
         "rotation_zyx: [0.0, 0.0, 0.0]\n"
-        "y_up: true\n"
+        "y_up: false\n"
     )
     _splat_alignment_yaml = (
         str(_office_splat_yaml)
