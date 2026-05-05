@@ -63,9 +63,8 @@ jobs:
         if: failure()
         env:
           COLOR: yes
-          AIOHTTP_NO_EXTENSIONS: ${{ matrix.no-extensions }}
         run: >-  # `exit 1` makes sure that the job remains red with flaky runs
-          uv run pytest --no-cov -vvvvv --lf && exit 1
+          uv run pytest --no-cov -vvvvv --lf  -m 'not (tool or self_hosted or mujoco)' && exit 1
         shell: bash
       - name: Combine coverage from subprocesses
         run: uv run python -m coverage combine
@@ -93,6 +92,8 @@ jobs:
         github.event.pull_request.draft == false &&
         github.event.pull_request.head.repo.full_name == github.repository
       )
+    env:
+      UV_NO_SYNC: "1"  # Disable installing default packages on `uv run`
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -131,6 +132,8 @@ jobs:
         run: |
           git config --global --add safe.directory '*'
           git clean -ffdx -e .venv
+      - name: Install dependencies
+        run: uv sync --only-group tests-self-hosted --frozen
       - name: Run tests
         run: uv run pytest --cov=dimos/ --junitxml=junit.xml -m '(${{ matrix.markers }}) and not (tool or mujoco)'
       - name: Re-run the failing tests with maximum verbosity
@@ -138,7 +141,7 @@ jobs:
         env:
           COLOR: yes
         run: >-  # `exit 1` makes sure that the job remains red with flaky runs
-          uv run pytest --no-cov -vvvvv --lf && exit 1
+          uv run pytest --no-cov -vvvvv --lf  -m '(${{ matrix.markers }}) and not (tool or mujoco)' && exit 1
         shell: bash
       - name: Combine coverage from subprocesses
         run: uv run python -m coverage combine
