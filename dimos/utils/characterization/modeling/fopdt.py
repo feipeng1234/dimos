@@ -1,3 +1,17 @@
+# Copyright 2026 Dimensional Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Copyright 2025-2026 Dimensional Inc.
 # Licensed under the Apache License, Version 2.0.
 
@@ -16,7 +30,7 @@ Three parameters per channel:
 
 Fit uses ``scipy.optimize.curve_fit`` (Levenberg-Marquardt with bounds).
 Initial guesses are derived from the trace itself (steady-state span,
-time-to-63%, first-sample-above-noise-floor) — bad initial guesses send
+time-to-63%, first-sample-above-noise-floor) - bad initial guesses send
 the optimizer to bad local minima for nonlinear fits.
 """
 
@@ -47,14 +61,14 @@ class FopdtParams:
     K: float
     tau: float
     L: float
-    K_ci: tuple[float, float]      # 95% CI as (low, high); (nan, nan) if degenerate
+    K_ci: tuple[float, float]  # 95% CI as (low, high); (nan, nan) if degenerate
     tau_ci: tuple[float, float]
     L_ci: tuple[float, float]
     rmse: float
     r_squared: float
     n_samples: int
-    fit_window_s: tuple[float, float]   # (t_start, t_end) relative to step edge
-    degenerate: bool                    # singular covariance => point estimates only
+    fit_window_s: tuple[float, float]  # (t_start, t_end) relative to step edge
+    degenerate: bool  # singular covariance => point estimates only
     converged: bool
     reason: str | None = None
     initial_guess: dict[str, float] = field(default_factory=dict)
@@ -63,9 +77,7 @@ class FopdtParams:
         return asdict(self)
 
 
-def fopdt_step_response(
-    t: np.ndarray, K: float, tau: float, L: float, u_step: float
-) -> np.ndarray:
+def fopdt_step_response(t: np.ndarray, K: float, tau: float, L: float, u_step: float) -> np.ndarray:
     """Vectorized FOPDT step response. ``t`` is time relative to step edge."""
     t = np.asarray(t, dtype=float)
     out = np.zeros_like(t)
@@ -164,34 +176,44 @@ def fit_fopdt(
     t = np.asarray(t, dtype=float)
     y = np.asarray(y, dtype=float)
 
-    fit_window = fit_window_s if fit_window_s is not None else (
-        (float(t[0]), float(t[-1])) if t.size else (0.0, 0.0)
+    fit_window = (
+        fit_window_s
+        if fit_window_s is not None
+        else ((float(t[0]), float(t[-1])) if t.size else (0.0, 0.0))
     )
 
     if t.size < 4:
         return FopdtParams(
-            K=float("nan"), tau=float("nan"), L=float("nan"),
+            K=float("nan"),
+            tau=float("nan"),
+            L=float("nan"),
             K_ci=(float("nan"), float("nan")),
             tau_ci=(float("nan"), float("nan")),
             L_ci=(float("nan"), float("nan")),
-            rmse=float("nan"), r_squared=float("nan"),
+            rmse=float("nan"),
+            r_squared=float("nan"),
             n_samples=int(t.size),
             fit_window_s=fit_window,
-            degenerate=True, converged=False,
+            degenerate=True,
+            converged=False,
             reason="fewer than 4 samples in fit window",
         )
 
     if abs(u_step) < 1e-9:
         return FopdtParams(
-            K=float("nan"), tau=float("nan"), L=float("nan"),
+            K=float("nan"),
+            tau=float("nan"),
+            L=float("nan"),
             K_ci=(float("nan"), float("nan")),
             tau_ci=(float("nan"), float("nan")),
             L_ci=(float("nan"), float("nan")),
-            rmse=float("nan"), r_squared=float("nan"),
+            rmse=float("nan"),
+            r_squared=float("nan"),
             n_samples=int(t.size),
             fit_window_s=fit_window,
-            degenerate=True, converged=False,
-            reason="u_step is zero — cannot identify K",
+            degenerate=True,
+            converged=False,
+            reason="u_step is zero - cannot identify K",
         )
 
     K0, tau0, L0 = _initial_guess(t, y, u_step, noise_std)
@@ -207,7 +229,9 @@ def fit_fopdt(
 
     try:
         popt, pcov = curve_fit(
-            _model, t, y,
+            _model,
+            t,
+            y,
             p0=p0,
             bounds=(lo, hi),
             sigma=sigma,
@@ -216,14 +240,18 @@ def fit_fopdt(
         )
     except Exception as e:
         return FopdtParams(
-            K=float("nan"), tau=float("nan"), L=float("nan"),
+            K=float("nan"),
+            tau=float("nan"),
+            L=float("nan"),
             K_ci=(float("nan"), float("nan")),
             tau_ci=(float("nan"), float("nan")),
             L_ci=(float("nan"), float("nan")),
-            rmse=float("nan"), r_squared=float("nan"),
+            rmse=float("nan"),
+            r_squared=float("nan"),
             n_samples=int(t.size),
             fit_window_s=fit_window,
-            degenerate=True, converged=False,
+            degenerate=True,
+            converged=False,
             reason=f"curve_fit failed: {type(e).__name__}: {e}",
             initial_guess={"K": K0, "tau": tau0, "L": L0},
         )
@@ -231,8 +259,8 @@ def fit_fopdt(
     K, tau, L = (float(popt[0]), float(popt[1]), float(popt[2]))
     y_hat = _model(t, K, tau, L)
     resid = y - y_hat
-    rmse = float(np.sqrt(np.mean(resid ** 2))) if resid.size else float("nan")
-    ss_res = float(np.sum(resid ** 2))
+    rmse = float(np.sqrt(np.mean(resid**2))) if resid.size else float("nan")
+    ss_res = float(np.sum(resid**2))
     y_mean = float(np.mean(y))
     ss_tot = float(np.sum((y - y_mean) ** 2))
     r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
@@ -250,9 +278,14 @@ def fit_fopdt(
         L_ci = (L - 1.96 * float(sigmas[2]), L + 1.96 * float(sigmas[2]))
 
     return FopdtParams(
-        K=K, tau=tau, L=L,
-        K_ci=K_ci, tau_ci=tau_ci, L_ci=L_ci,
-        rmse=rmse, r_squared=r2,
+        K=K,
+        tau=tau,
+        L=L,
+        K_ci=K_ci,
+        tau_ci=tau_ci,
+        L_ci=L_ci,
+        rmse=rmse,
+        r_squared=r2,
         n_samples=int(t.size),
         fit_window_s=fit_window,
         degenerate=degenerate,

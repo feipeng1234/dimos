@@ -1,3 +1,17 @@
+# Copyright 2026 Dimensional Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Copyright 2025-2026 Dimensional Inc.
 # Licensed under the Apache License, Version 2.0.
 
@@ -5,7 +19,7 @@
 
 Predicts the output ``y(t)`` of a FOPDT plant driven by an arbitrary
 commanded waveform ``cmd(t)``. The fitter (``fopdt.fit_fopdt``) goes the
-other direction — data + cmd in, params out. The simulator goes
+other direction - data + cmd in, params out. The simulator goes
 params + cmd in, predicted data out.
 
 For Rung 2 Session 2 (validation), this is what lets us take params
@@ -13,7 +27,7 @@ fitted on forward-direction runs and predict the response on held-out
 reverse-direction runs.
 
 Discrete-time first-order with deadtime, integrated on the input
-timestamps directly (no resampling — variable-step exact ZOH):
+timestamps directly (no resampling - variable-step exact ZOH):
 
     cmd_delayed(t) = cmd(t - L)              (zero-order hold)
     target(t)     = K * cmd_delayed(t)
@@ -22,13 +36,13 @@ timestamps directly (no resampling — variable-step exact ZOH):
 
 Using ``target[k-1]`` (the value held over the previous interval) rather
 than ``target[k]`` is the exact ZOH discretization of a first-order ODE
-under a piecewise-constant input — it matches the analytic step response
+under a piecewise-constant input - it matches the analytic step response
 at sample times within numerical roundoff.
 
 When ``fall_params`` is provided, ``tau`` (and ``K``, ``L``) switch based
 on whether the system is accelerating (``|target| >= |y|``) or braking
 (``|target| < |y|``). This mirrors how ``per_run.fit_run`` fits two
-FOPDTs per run (one rise = accel, one fall = brake) — the simulator can
+FOPDTs per run (one rise = accel, one fall = brake) - the simulator can
 replay both edges with their own dynamics. The accel/brake formulation
 (rather than ``target >= y``) is what makes this work for reverse-direction
 steps where ``target`` is negative throughout.
@@ -41,11 +55,12 @@ import numpy as np
 from dimos.utils.characterization.modeling.fopdt import FopdtParams
 
 
-def _zoh_at(t_query: np.ndarray, t_grid: np.ndarray, vals: np.ndarray,
-            *, left: float) -> np.ndarray:
+def _zoh_at(
+    t_query: np.ndarray, t_grid: np.ndarray, vals: np.ndarray, *, left: float
+) -> np.ndarray:
     """Zero-order hold sample of (t_grid, vals) at t_query.
 
-    Times before t_grid[0] return ``left`` (the pre-trace value — usually
+    Times before t_grid[0] return ``left`` (the pre-trace value - usually
     the pre-step cmd, which is 0). Times within or beyond t_grid pick the
     most recent sample at or before t_query.
     """
@@ -123,7 +138,7 @@ def simulate_fopdt(
     for k in range(1, t.size):
         dt = t[k] - t[k - 1]
         if dt <= 0:
-            # Duplicate or out-of-order timestamps — keep previous y.
+            # Duplicate or out-of-order timestamps - keep previous y.
             y[k] = y[k - 1]
             continue
         # Decide regime from current state and the input held over

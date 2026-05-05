@@ -1,16 +1,26 @@
+# Copyright 2026 Dimensional Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Copyright 2025-2026 Dimensional Inc.
 # Licensed under the Apache License, Version 2.0.
 
-"""Markdown report + matplotlib overlay plots for FOPDT modeling.
+"""Markdown + plot rendering for the fit pipeline.
 
-Two plot families:
-  - per-group overlay: cmd step + measured response + fitted FOPDT curve
-    + residuals subplot. One SVG per recipe group.
-  - per-channel parameter-vs-amplitude: K/τ/L vs |amplitude|, with CI
-    error bars and forward/reverse colored separately.
-
-Markdown report has four sections: per-channel summary, per-cell table,
-pooling decisions, diagnostics.
+Split out from fit.py to fit the project's 50 KB per-file budget.
+fit.py imports these lazily (render_markdown / write_plots inside
+fit_session, render_compare_markdown inside compare_pooled and
+compare_two_sessions) to avoid an import cycle.
 """
 
 from __future__ import annotations
@@ -20,11 +30,8 @@ from typing import Any
 
 import numpy as np
 
-from dimos.utils.characterization.modeling.aggregate import GroupFit
-from dimos.utils.characterization.modeling.per_run import RunFit
+from dimos.utils.characterization.modeling.fit import GroupFit, RunFit
 
-
-# --------------------------------------------------------------------------- markdown
 
 def render_markdown(
     *,
@@ -37,26 +44,25 @@ def render_markdown(
 ) -> str:
     """Build the modeling report markdown."""
     lines: list[str] = []
-    lines.append(f"# FOPDT Plant Model — {session_dir.name}")
+    lines.append(f"# FOPDT Plant Model - {session_dir.name}")
     lines.append("")
     lines.append(f"- Session: `{session_dir}`")
     lines.append(f"- Mode: **{mode}**")
     lines.append(f"- Total runs: {len(run_fits)}")
     skipped = sum(1 for r in run_fits if r.skip_reason is not None)
     failed_fit = sum(
-        1 for r in run_fits
+        1
+        for r in run_fits
         if r.skip_reason is None and (r.params is None or not r.params.converged)
     )
     degenerate = sum(
-        1 for r in run_fits
-        if r.params is not None and r.params.converged and r.params.degenerate
+        1 for r in run_fits if r.params is not None and r.params.converged and r.params.degenerate
     )
     lines.append(f"- Skipped (non-step / unparseable): {skipped}")
     lines.append(f"- Failed fit: {failed_fit}")
     lines.append(f"- Degenerate (singular covariance): {degenerate}")
     lines.append("")
 
-    # Per-channel summary.
     lines.append("## Per-channel summary")
     lines.append("")
     for channel, ch in sorted(summary.get("channels", {}).items()):
@@ -70,7 +76,9 @@ def render_markdown(
             n = stats.get("n_groups")
             lines.append(f"- **{p}** = {mean}  (95% CI [{lo}, {hi}]; n_groups={n})")
         if ch.get("direction_asymmetric"):
-            lines.append("- Direction asymmetric — forward and reverse fits disagree at one or more amplitudes.")
+            lines.append(
+                "- Direction asymmetric - forward and reverse fits disagree at one or more amplitudes."
+            )
         else:
             lines.append("- Forward / reverse pooled (CIs overlapped at every amplitude).")
         lin = ch.get("linear_in_amplitude") or {}
@@ -84,12 +92,15 @@ def render_markdown(
             lines.append("- Linear-in-amplitude on all parameters (slope CIs include zero).")
         lines.append("")
 
-    # Per-cell table.
     lines.append("## Per-cell results")
     lines.append("")
-    lines.append("| recipe | channel | amp | direction | K (95% CI) | τ (95% CI) | L (95% CI) | kept / input | rejected (2σ) |")
+    lines.append(
+        "| recipe | channel | amp | direction | K (95% CI) | tau (95% CI) | L (95% CI) | kept / input | rejected (2 sigma) |"
+    )
     lines.append("|---|---|---|---|---|---|---|---|---|")
-    for g in sorted(group_fits, key=lambda gg: (gg.key.get("channel") or "", gg.key.get("amplitude") or 0)):
+    for g in sorted(
+        group_fits, key=lambda gg: (gg.key.get("channel") or "", gg.key.get("amplitude") or 0)
+    ):
         recipe = g.key.get("recipe", "?")
         ch = g.key.get("channel", "?")
         amp = _fmt(g.key.get("amplitude"))
@@ -104,15 +115,15 @@ def render_markdown(
         )
     lines.append("")
 
-    # Pooling decisions.
     lines.append("## Pooling decisions")
     lines.append("")
     for channel, ch in sorted(summary.get("channels", {}).items()):
-        lines.append(f"- `{channel}`: direction_asymmetric={ch.get('direction_asymmetric')}, "
-                     f"linear_in_amplitude={ch.get('linear_in_amplitude')}")
+        lines.append(
+            f"- `{channel}`: direction_asymmetric={ch.get('direction_asymmetric')}, "
+            f"linear_in_amplitude={ch.get('linear_in_amplitude')}"
+        )
     lines.append("")
 
-    # Diagnostics.
     diag = summary.get("diagnostics", {})
     lines.append("## Diagnostics")
     lines.append("")
@@ -120,9 +131,6 @@ def render_markdown(
         lines.append(f"- {k}: {v}")
     lines.append("")
 
-    # Step-down dynamics. Two parts:
-    #   1. Per-channel pooled fall fit summary.
-    #   2. Rise vs fall comparison (asymmetry verdict per param).
     fall_summary = summary.get("fall") or {}
     rvf = summary.get("rise_vs_fall") or {}
     if fall_summary or rvf:
@@ -130,7 +138,7 @@ def render_markdown(
         lines.append("")
         for channel, fch in sorted((fall_summary.get("channels") or {}).items()):
             pooled = fch.get("pooled", {})
-            lines.append(f"### `{channel}` — fall fit")
+            lines.append(f"### `{channel}` - fall fit")
             for p in ("K", "tau", "L"):
                 stats = pooled.get(p) or {}
                 lines.append(
@@ -143,7 +151,9 @@ def render_markdown(
         if rvf.get("channels"):
             lines.append("### Rise vs fall comparison")
             lines.append("")
-            lines.append("| channel | param | rise mean | fall mean | ratio fall/rise | CI overlap | verdict |")
+            lines.append(
+                "| channel | param | rise mean | fall mean | ratio fall/rise | CI overlap | verdict |"
+            )
             lines.append("|---|---|---|---|---|---|---|")
             for channel, cv in sorted(rvf["channels"].items()):
                 for p in ("K", "tau", "L"):
@@ -158,8 +168,8 @@ def render_markdown(
             lines.append("")
             lines.append(
                 "Verdicts: `identical` (<5% of mean), `equivalent` (CIs overlap or "
-                "<20% of mean), `differs` (otherwise). A `differs` row on **τ** means "
-                "the plant decelerates at a different rate than it accelerates — "
+                "<20% of mean), `differs` (otherwise). A `differs` row on **tau** means "
+                "the plant decelerates at a different rate than it accelerates - "
                 "common on legged plants and worth knowing for controller design."
             )
             lines.append("")
@@ -167,9 +177,9 @@ def render_markdown(
     return "\n".join(lines) + "\n"
 
 
-def _fmt(v: float | None, digits: int = 4) -> str:
+def _fmt(v: Any, digits: int = 4) -> str:
     if v is None:
-        return "—"
+        return "-"
     try:
         if not np.isfinite(v):
             return "nan"
@@ -180,11 +190,9 @@ def _fmt(v: float | None, digits: int = 4) -> str:
 
 def _fmt_param_cell(stats: dict[str, Any] | None) -> str:
     if stats is None:
-        return "—"
+        return "-"
     return f"{_fmt(stats.get('mean'))} [{_fmt(stats.get('ci_low'))}, {_fmt(stats.get('ci_high'))}]"
 
-
-# --------------------------------------------------------------------------- plots
 
 def write_plots(
     *,
@@ -194,22 +202,18 @@ def write_plots(
     run_fits: list[RunFit],
     fall_groups: list[GroupFit] | None = None,
 ) -> list[Path]:
-    """Write overlay + parameter plots. Returns the list of paths written.
-
-    Plots are best-effort — failure to render any single plot doesn't
-    block the rest of the pipeline.
-    """
+    """Per-recipe overlay + per-channel param-vs-amp plots. Best-effort."""
     plots_dir.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
 
     try:
         import matplotlib
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
     except Exception:
         return written
 
-    # Group RunFits by recipe so the overlay can show every repeat at once.
     by_recipe: dict[str, list[RunFit]] = {}
     for rf in run_fits:
         if rf.recipe == "<unknown>" or rf.skip_reason is not None:
@@ -250,20 +254,18 @@ def _safe(s: Any) -> str:
 
 
 def _plot_overlay(
-    path: Path, recipe: str, fits: list[RunFit], group: GroupFit | None, plt,
-    *, edge: str = "rise",
+    path: Path,
+    recipe: str,
+    fits: list[RunFit],
+    group: GroupFit | None,
+    plt,
+    *,
+    edge: str = "rise",
 ) -> None:
-    """Per-recipe overlay: measured trace + group-mean FOPDT model + RMSE bars.
-
-    ``edge`` selects which fit to draw — ``"rise"`` (cmd 0 → amplitude) or
-    ``"fall"`` (cmd amplitude → 0). The fall variant uses ``params_down``
-    and ``extra_down`` so we share one plotting function for both phases.
-    """
+    """Per-recipe overlay: measured trace + group-mean FOPDT model + RMSE bars."""
     from dimos.utils.characterization.modeling.fopdt import fopdt_step_response
-    from dimos.utils.characterization.scripts.analyze_run import (
-        _channel_arrays,
-        load_run,
-    )
+    from dimos.utils.characterization.plotting import _channel_arrays
+    from dimos.utils.characterization.scripts.analyze import load_run
 
     fig, (ax_main, ax_resid) = plt.subplots(
         2, 1, figsize=(8, 5.5), gridspec_kw={"height_ratios": [3, 1]}, sharex=False
@@ -307,7 +309,9 @@ def _plot_overlay(
             ax_main.plot(
                 meas_ts[mask] - edge_t,
                 meas_arr[mask] - baseline,
-                color="#888", alpha=0.35, linewidth=0.8,
+                color="#888",
+                alpha=0.35,
+                linewidth=0.8,
                 label=("measured (per-repeat)" if plotted_meas == 0 else None),
             )
             plotted_meas += 1
@@ -317,7 +321,9 @@ def _plot_overlay(
         t_grid = np.linspace(-0.3, t_max, 400)
         y_model = fopdt_step_response(t_grid, K_mean, tau_mean, L_mean, u_step)
         ax_main.plot(t_grid, y_model, color="#000", linewidth=2.0, label="FOPDT (group mean)")
-        ax_main.axhline(K_mean * u_step, color="#888", linestyle="--", linewidth=0.6, label="K·u_step")
+        ax_main.axhline(
+            K_mean * u_step, color="#888", linestyle="--", linewidth=0.6, label="K*u_step"
+        )
 
     for rf in fits:
         edge_params = rf.params if edge == "rise" else rf.params_down
@@ -328,7 +334,10 @@ def _plot_overlay(
         t_grid = np.linspace(0.0, t_max, 400)
         y = fopdt_step_response(t_grid, edge_params.K, edge_params.tau, edge_params.L, u)
         ax_main.plot(
-            t_grid, y, alpha=0.35, linewidth=0.6,
+            t_grid,
+            y,
+            alpha=0.35,
+            linewidth=0.6,
             color=("#1f77b4" if (rf.amplitude or 0) > 0 else "#d62728"),
         )
 
@@ -339,14 +348,12 @@ def _plot_overlay(
             title += f", u_step={u_step}"
         title += ")"
     ax_main.set_title(title)
-    ax_main.set_xlabel(f"t − {'step_t' if edge == 'rise' else 'active_end_t'} [s]")
-    ax_main.set_ylabel(f"meas_{channel or '?'} − baseline")
+    ax_main.set_xlabel(f"t - {'step_t' if edge == 'rise' else 'active_end_t'} [s]")
+    ax_main.set_ylabel(f"meas_{channel or '?'} - baseline")
     ax_main.legend(loc="best", fontsize=8)
     ax_main.grid(True, alpha=0.3)
 
-    edge_params_list = [
-        rf.params if edge == "rise" else rf.params_down for rf in fits
-    ]
+    edge_params_list = [rf.params if edge == "rise" else rf.params_down for rf in fits]
     rmses = [p.rmse for p in edge_params_list if p is not None and np.isfinite(p.rmse)]
     if rmses:
         ax_resid.bar(range(len(rmses)), rmses, color="#888")
@@ -359,20 +366,22 @@ def _plot_overlay(
     plt.close(fig)
 
 
-def _plot_params_vs_amp(
-    path: Path, channel: str, channel_summary: dict[str, Any], plt
-) -> None:
-    """Per-channel K/τ/L vs |amplitude| with CI error bars."""
+def _plot_params_vs_amp(path: Path, channel: str, channel_summary: dict[str, Any], plt) -> None:
+    """Per-channel K/tau/L vs |amplitude| with CI error bars."""
     entries = channel_summary.get("per_amplitude", []) or []
     if not entries:
         return
     fig, axes = plt.subplots(1, 3, figsize=(11, 3.2))
-    for ax, p in zip(axes, ("K", "tau", "L")):
-        for direction, color in (("forward", "#1f77b4"), ("reverse", "#d62728"), ("pooled", "#000")):
-            xs = []
-            ys = []
-            yerr_lo = []
-            yerr_hi = []
+    for ax, p in zip(axes, ("K", "tau", "L"), strict=False):
+        for direction, color in (
+            ("forward", "#1f77b4"),
+            ("reverse", "#d62728"),
+            ("pooled", "#000"),
+        ):
+            xs: list[float] = []
+            ys: list[float] = []
+            yerr_lo: list[float] = []
+            yerr_hi: list[float] = []
             for e in entries:
                 if e.get("direction") != direction:
                     continue
@@ -407,11 +416,11 @@ def _plot_params_vs_amp(
 def render_compare_markdown(verdict: dict[str, Any]) -> str:
     """Render the cross-mode comparison verdict to markdown."""
     lines: list[str] = []
-    lines.append("# FOPDT Plant Model — Default vs Rage")
+    lines.append("# FOPDT Plant Model - Default vs Rage")
     lines.append("")
     for channel in sorted(verdict.get("channels", {})):
         cv = verdict["channels"][channel]
-        lines.append(f"## `{channel}` — overall: **{cv.get('verdict')}**")
+        lines.append(f"## `{channel}` - overall: **{cv.get('verdict')}**")
         lines.append("")
         lines.append("| param | default mean | rage mean | ratio | CI overlap | verdict |")
         lines.append("|---|---|---|---|---|---|")
