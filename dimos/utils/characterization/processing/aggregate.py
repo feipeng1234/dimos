@@ -1,16 +1,30 @@
+# Copyright 2026 Dimensional Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Copyright 2025-2026 Dimensional Inc.
 # Licensed under the Apache License, Version 2.0.
 
 """Session-level aggregation across runs.
 
 Groups runs by recipe name, computes per-group mean ± std for each
-metric, rejects 2σ outlier *runs* (not samples), emits one summary
+metric, rejects 2sigma outlier *runs* (not samples), emits one summary
 artifact per session.
 
 Reads:
   - ``run.json`` for recipe name, exit_reason, BMS bookends, validation
   - ``metrics.json`` for the per-run rise/settle/overshoot/steady_state
-    (must already exist — run ``python -m dimos.utils.characterization.scripts.analyze_run`` on each run first).
+    (must already exist — run ``python -m dimos.utils.characterization.scripts.analyze run`` on each run first).
 
 Writes:
   - ``session_summary.json`` — the aggregated structure
@@ -20,14 +34,13 @@ Writes:
 
 from __future__ import annotations
 
+from collections import defaultdict
 import csv
 import json
-from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
 import numpy as np
-
 
 _NUMERIC_METRIC_KEYS = (
     "rise_10_90_s",
@@ -64,15 +77,17 @@ def aggregate_session(session_dir: Path, *, sigma: float = 2.0) -> dict[str, Any
         if validation_path.exists():
             passed_validation = json.loads(validation_path.read_text()).get("passed")
 
-        by_recipe[recipe_name].append({
-            "run_id": meta["run_id"],
-            "exit_reason": exit_reason,
-            "passed_validation": passed_validation,
-            "bms_start_soc": (meta.get("bms_start") or {}).get("soc"),
-            "bms_end_soc": (meta.get("bms_end") or {}).get("soc"),
-            "metrics": metrics,
-            "noise_floor": meta.get("noise_floor"),
-        })
+        by_recipe[recipe_name].append(
+            {
+                "run_id": meta["run_id"],
+                "exit_reason": exit_reason,
+                "passed_validation": passed_validation,
+                "bms_start_soc": (meta.get("bms_start") or {}).get("soc"),
+                "bms_end_soc": (meta.get("bms_end") or {}).get("soc"),
+                "metrics": metrics,
+                "noise_floor": meta.get("noise_floor"),
+            }
+        )
 
     groups: list[dict[str, Any]] = []
     for recipe_name, runs in by_recipe.items():
@@ -96,7 +111,7 @@ def aggregate_session(session_dir: Path, *, sigma: float = 2.0) -> dict[str, Any
 def _aggregate_group(
     recipe_name: str, runs: list[dict[str, Any]], *, sigma: float
 ) -> dict[str, Any]:
-    """Compute per-metric mean ± std, reject 2σ outlier runs, retry."""
+    """Compute per-metric mean ± std, reject 2sigma outlier runs, retry."""
     n_total = len(runs)
     runs_with_metrics = [r for r in runs if r["metrics"]]
     n_with_metrics = len(runs_with_metrics)
@@ -120,7 +135,9 @@ def _aggregate_group(
             for r, ok in zip(runs_with_metrics, keep_mask, strict=False):
                 if not ok:
                     rejected_run_ids.append(r["run_id"])
-            kept_run_ids = [r["run_id"] for r, ok in zip(runs_with_metrics, keep_mask, strict=False) if ok]
+            kept_run_ids = [
+                r["run_id"] for r, ok in zip(runs_with_metrics, keep_mask, strict=False) if ok
+            ]
             for key in _NUMERIC_METRIC_KEYS:
                 if metric_arrays[key].size == ss.size:
                     metric_arrays[key] = metric_arrays[key][keep_mask]
@@ -128,8 +145,7 @@ def _aggregate_group(
     metric_stats: dict[str, dict[str, float | None]] = {}
     for key, arr in metric_arrays.items():
         if arr.size == 0:
-            metric_stats[key] = {"mean": None, "std": None, "n": 0,
-                                 "min": None, "max": None}
+            metric_stats[key] = {"mean": None, "std": None, "n": 0, "min": None, "max": None}
         else:
             metric_stats[key] = {
                 "mean": float(np.mean(arr)),
@@ -140,9 +156,9 @@ def _aggregate_group(
             }
 
     # Aggregate noise floor across kept runs (median across runs).
-    noise_floor_agg = _aggregate_noise_floor([
-        r for r in runs_with_metrics if r["run_id"] in kept_run_ids
-    ])
+    noise_floor_agg = _aggregate_noise_floor(
+        [r for r in runs_with_metrics if r["run_id"] in kept_run_ids]
+    )
 
     bms_start = [r["bms_start_soc"] for r in runs if isinstance(r["bms_start_soc"], (int, float))]
     bms_end = [r["bms_end_soc"] for r in runs if isinstance(r["bms_end_soc"], (int, float))]
@@ -166,12 +182,10 @@ def _aggregate_group(
 
 
 def _aggregate_noise_floor(runs: list[dict[str, Any]]) -> dict[str, dict[str, float | None]]:
-    """Median σ per channel across runs."""
+    """Median sigma per channel across runs."""
     out: dict[str, dict[str, float | None]] = {}
     for ch in ("vx", "vy", "wz", "yaw"):
-        stds = [
-            (r["noise_floor"] or {}).get(ch, {}).get("std") for r in runs
-        ]
+        stds = [(r["noise_floor"] or {}).get(ch, {}).get("std") for r in runs]
         stds = [s for s in stds if isinstance(s, (int, float))]
         out[ch] = {
             "median_std": float(np.median(stds)) if stds else None,
@@ -195,9 +209,12 @@ def _write_csv(path: Path, summary: dict[str, Any]) -> None:
             for k in _NUMERIC_METRIC_KEYS:
                 m = g["metrics"][k]
                 row.extend([m["mean"], m["std"]])
-            row.extend([
-                g["bms_soc_range"]["start_min"], g["bms_soc_range"]["end_min"],
-            ])
+            row.extend(
+                [
+                    g["bms_soc_range"]["start_min"],
+                    g["bms_soc_range"]["end_min"],
+                ]
+            )
             w.writerow(row)
 
 
