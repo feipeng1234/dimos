@@ -18,28 +18,27 @@ Computes ALL velocity components (vx, vy, wz) reactively from the robot's
 current error state relative to the path.  No precomputed velocity profiles.
 
 Error decomposition (Frenet frame of closest path point):
-    e_s  — along-track error  (ahead/behind)
-    e_d  — cross-track error  (lateral offset, signed)
-    e_θ  — heading error      (robot heading vs path tangent)
+    e_s  - along-track error  (ahead/behind)
+    e_d  - cross-track error  (lateral offset, signed)
+    e_theta  - heading error      (robot heading vs path tangent)
 
 Control law:
-    v_ref = v_max · σ(e_d, e_θ, κ, d_goal)      — reactive reference speed
-    vx    = v_ref · cos(e_θ) + k_s · e_s         — forward (+ along-track catch-up)
-    vy    = −k_d · e_d                            — lateral correction (holonomic)
-    wz    = v_ref · κ + k_θ · sin(e_θ)           — feedforward curvature + feedback heading
+    v_ref = v_max * sigma(e_d, e_theta, kappa, d_goal)      - reactive reference speed
+    vx    = v_ref * cos(e_theta) + k_s * e_s         - forward (+ along-track catch-up)
+    vy    = -k_d * e_d                            - lateral correction (holonomic)
+    wz    = v_ref * kappa + k_theta * sin(e_theta)           - feedforward curvature + feedback heading
 
-Stability: Lyapunov candidate V = ½(e_s² + e_d² + e_θ²) yields dV/dt < 0
+Stability: Lyapunov candidate V = ½(e_s² + e_d² + e_theta²) yields dV/dt < 0
 for appropriate gain selection → exponential error convergence.
 """
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
+import math
 from typing import TYPE_CHECKING
 
 import numpy as np
-from numpy.typing import NDArray
 
 from dimos.utils.trigonometry import angle_diff
 
@@ -52,7 +51,7 @@ if TYPE_CHECKING:
 class LyapunovPathControllerConfig:
     """Gains and limits for the Lyapunov path controller.
 
-    All gains have physical meaning — see inline comments.
+    All gains have physical meaning - see inline comments.
     """
 
     # Speed limits
@@ -66,7 +65,7 @@ class LyapunovPathControllerConfig:
     k_theta: float = 1.5  # heading: angular correction strength
 
     # Reactive speed modulation
-    k_cte: float = 4.0  # CTE penalty on vx — higher = slower when off-path
+    k_cte: float = 4.0  # CTE penalty on vx - higher = slower when off-path
     k_heading: float = 2.0  # heading error penalty on vx
     k_curv: float = 1.0  # curvature penalty on vx
 
@@ -160,8 +159,13 @@ class LyapunovPathController:
         wz = float(np.clip(wz, -cfg.wz_max, cfg.wz_max))
 
         return ControlOutput(
-            vx=vx, vy=vy, wz=wz,
-            e_s=e_s, e_d=e_d, e_theta=e_theta, v_ref=v_ref,
+            vx=vx,
+            vy=vy,
+            wz=wz,
+            e_s=e_s,
+            e_d=e_d,
+            e_theta=e_theta,
+            v_ref=v_ref,
         )
 
     @staticmethod
@@ -180,7 +184,7 @@ class LyapunovPathController:
 
 
 __all__ = [
+    "ControlOutput",
     "LyapunovPathController",
     "LyapunovPathControllerConfig",
-    "ControlOutput",
 ]

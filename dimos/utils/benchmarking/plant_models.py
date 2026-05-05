@@ -23,7 +23,7 @@ Both produced by the characterization fitting pipeline at
 
 Caveats:
   - Only "rise" params are vendored. Real plant has rise/fall asymmetry,
-    notably L_fall ≈ 0.20 s vs L_rise ≈ 0.04 s on vx. The current
+    notably L_fall ~= 0.20 s vs L_rise ~= 0.04 s on vx. The current
     :class:`FOPDTChannel` is single-regime; asymmetric modeling is a
     follow-up if sim/hw rankings disagree.
   - vy is a placeholder copy of vx params: Go2 has no native lateral
@@ -43,6 +43,6 @@ GO2_WZ_FALL = FopdtChannelParams(K=2.380, tau=0.258, L=0.083)
 
 GO2_PLANT_FITTED = Go2PlantParams(
     vx=GO2_VX_RISE,
-    vy=GO2_VX_RISE,  # placeholder — see module docstring
+    vy=GO2_VX_RISE,  # placeholder - see module docstring
     wz=GO2_WZ_RISE,
 )

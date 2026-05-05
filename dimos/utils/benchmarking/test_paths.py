@@ -47,7 +47,7 @@ def test_single_corner_endpoint_geometry() -> None:
     # Last point: corner at (2,0), then 2.0 along +y → (2, 2)
     assert p.poses[-1].position.x == pytest.approx(2.0, abs=1e-6)
     assert p.poses[-1].position.y == pytest.approx(2.0, abs=1e-6)
-    # First yaw 0, last yaw π/2
+    # First yaw 0, last yaw pi/2
     assert p.poses[0].orientation.euler[2] == pytest.approx(0.0, abs=1e-9)
     assert p.poses[-1].orientation.euler[2] == pytest.approx(math.pi / 2, abs=1e-6)
 
@@ -80,7 +80,7 @@ def test_slalom_passes_centerline_at_each_cone_spacing() -> None:
     p = slalom(cone_spacing=1.0, lateral_offset=0.5, n_cones=5)
     assert p.poses[0].position.x == pytest.approx(0.0, abs=1e-9)
     assert p.poses[0].position.y == pytest.approx(0.0, abs=1e-9)
-    # At every multiple of cone_spacing, sin(πx) = 0 → y = 0
+    # At every multiple of cone_spacing, sin(pix) = 0 → y = 0
     for pose in p.poses:
         if abs(pose.position.x - round(pose.position.x)) < 1e-6:
             assert pose.position.y == pytest.approx(0.0, abs=1e-6)

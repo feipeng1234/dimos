@@ -15,7 +15,7 @@
 """Sim coordinator blueprint for the Go2 controller benchmark.
 
 Mirrors the production hardware blueprint in shape (same TickLoop, same
-TwistBase adapter protocol, same transports) — only the bottom edge is
+TwistBase adapter protocol, same transports) - only the bottom edge is
 swapped: instead of the real Go2 WebRTC adapter, we use
 :class:`~dimos.hardware.drive_trains.go2_sim.adapter.Go2SimTwistBaseAdapter`
 which runs an FOPDT plant model in-process.

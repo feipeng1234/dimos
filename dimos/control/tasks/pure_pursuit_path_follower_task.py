@@ -15,12 +15,12 @@
 """Classic Pure Pursuit path-follower as a passive ControlTask.
 
 Geometric controller: find a fixed-distance lookahead point on the path,
-compute the arc curvature κ to reach it, output ``(vx = target_speed,
-wz = vx · κ)``. No adaptive lookahead, no curvature-based speed
-regulation, no cross-track PID — that's :mod:`path_follower_task`
+compute the arc curvature kappa to reach it, output ``(vx = target_speed,
+wz = vx · kappa)``. No adaptive lookahead, no curvature-based speed
+regulation, no cross-track PID - that's :mod:`path_follower_task`
 (Regulated Pure Pursuit).
 
-For ``Pure Pursuit + FF`` cohort, supply ``ff_config`` — the static
+For ``Pure Pursuit + FF`` cohort, supply ``ff_config`` - the static
 plant-gain compensator divides cmd by ``K_plant`` before output.
 """
 

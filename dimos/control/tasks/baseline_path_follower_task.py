@@ -20,7 +20,7 @@ Algorithm is a faithful port of
 PController + 0.5 m fixed lookahead + rotate-then-drive heuristic +
 state machine (initial_rotation → path_following → final_rotation → arrived).
 
-Costmap / obstacle-clearance plumbing is intentionally omitted — the
+Costmap / obstacle-clearance plumbing is intentionally omitted - the
 benchmark battery is obstacle-free.
 """
 
@@ -72,7 +72,7 @@ class BaselinePathFollowerTaskConfig:
     goal_tolerance: float = 0.2
     orientation_tolerance: float = 0.35
     # PController outer-loop angular gain. Default 0.5 matches production
-    # LocalPlanner; sweep on circle_R1.0 found 1.0 gives ~9× lower CTE.
+    # LocalPlanner; sweep on circle_R1.0 found 1.0 gives ~9x lower CTE.
     k_angular: float = 0.5
     # Optional inner-loop velocity-tracking PID. None ⟹ no closed loop.
     # Mutually exclusive with ff_config (PI takes precedence if both set).
@@ -154,7 +154,7 @@ class BaselinePathFollowerTask(BaseControlTask):
             case _:
                 return None
 
-        # Inner-loop options (mutually exclusive — PI wins if both set).
+        # Inner-loop options (mutually exclusive - PI wins if both set).
         if self._pid is not None:
             actual_vx = state.joints.joint_velocities.get(self._joint_names_list[0], 0.0)
             actual_vy = state.joints.joint_velocities.get(self._joint_names_list[1], 0.0)
@@ -277,7 +277,7 @@ class BaselinePathFollowerTask(BaseControlTask):
         if abs(yaw_err) < self._config.orientation_tolerance:
             # Note: production LocalPlanner transitions to "final_rotation" when
             # the robot is exactly at path[0] (pos_d < 0.01). That's broken for
-            # open paths — we'd snap to "arrived" immediately. Always start in
+            # open paths - we'd snap to "arrived" immediately. Always start in
             # path_following when aligned; arrival is detected by distance_to_goal.
             self._state = "path_following"
         else:

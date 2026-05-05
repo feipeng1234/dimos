@@ -21,7 +21,6 @@ Every path starts at the origin facing +x in the robot frame. Each
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
 
 from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
 from dimos.msgs.geometry_msgs.Quaternion import Quaternion
@@ -58,22 +57,20 @@ def _path_from_xy(xs: list[float], ys: list[float]) -> Path:
 
 
 def straight_line(length: float = 5.0, step: float = 0.05) -> Path:
-    n = int(round(length / step))
+    n = round(length / step)
     xs = [i * step for i in range(n + 1)]
     ys = [0.0] * (n + 1)
     return _path_from_xy(xs, ys)
 
 
-def single_corner(
-    leg_length: float = 2.0, angle_deg: float = 90.0, step: float = 0.05
-) -> Path:
+def single_corner(leg_length: float = 2.0, angle_deg: float = 90.0, step: float = 0.05) -> Path:
     """Two straight legs meeting at one corner.
 
     Robot starts at origin going +x, drives ``leg_length``, turns by
     ``angle_deg`` (left positive), drives another ``leg_length``.
     """
     angle = math.radians(angle_deg)
-    n_leg = int(round(leg_length / step))
+    n_leg = round(leg_length / step)
 
     xs: list[float] = []
     ys: list[float] = []
@@ -106,7 +103,7 @@ def circle(radius: float = 1.0, n_points: int = 100) -> Path:
 def figure_eight(loop_radius: float = 1.0, n_points: int = 200) -> Path:
     """Lemniscate of Gerono.
 
-    x(t) = R sin(2t), y(t) = R sin(t), t in [0, 2π].
+    x(t) = R sin(2t), y(t) = R sin(t), t in [0, 2pi].
     Starts at origin going +x.
     """
     xs: list[float] = []
@@ -126,7 +123,7 @@ def slalom(
 ) -> Path:
     """Smooth slalom past ``n_cones`` cones, alternating sides.
 
-    Cones sit at (i * cone_spacing, ±lateral_offset). The path is a
+    Cones sit at (i * cone_spacing, +/-lateral_offset). The path is a
     sinusoid that crosses the centerline between cones.
     """
     total_length = (n_cones + 1) * cone_spacing
@@ -143,7 +140,7 @@ def slalom(
 
 def square(side: float = 2.0, step: float = 0.05) -> Path:
     """Closed square. Origin → +x → +y → -x → -y back to origin."""
-    n_side = int(round(side / step))
+    n_side = round(side / step)
 
     xs: list[float] = []
     ys: list[float] = []
@@ -252,7 +249,9 @@ def trajectory_to_svg(
         sy = size_px - (margin_px + (y - y_min) * scale)
         return sx, sy
 
-    ref_pts = " ".join(f"{x:.2f},{y:.2f}" for x, y in (_xy(p.position.x, p.position.y) for p in reference.poses))
+    ref_pts = " ".join(
+        f"{x:.2f},{y:.2f}" for x, y in (_xy(p.position.x, p.position.y) for p in reference.poses)
+    )
     exe_pts = " ".join(f"{x:.2f},{y:.2f}" for x, y in (_xy(x, y) for x, y in executed_xy))
     sx, sy = _xy(executed_xy[0][0], executed_xy[0][1])
     ex, ey = _xy(executed_xy[-1][0], executed_xy[-1][1])
@@ -318,17 +317,14 @@ def multi_trajectory_to_svg(
     ]
     if title:
         parts.append(
-            f'<text x="{size_px//2}" y="20" font-family="monospace" font-size="13" '
+            f'<text x="{size_px // 2}" y="20" font-family="monospace" font-size="13" '
             f'text-anchor="middle" font-weight="bold">{title}</text>'
         )
 
     ref_pts = " ".join(
-        f"{x:.2f},{y:.2f}"
-        for x, y in (_xy(p.position.x, p.position.y) for p in reference.poses)
+        f"{x:.2f},{y:.2f}" for x, y in (_xy(p.position.x, p.position.y) for p in reference.poses)
     )
-    parts.append(
-        f'<polyline points="{ref_pts}" stroke="lightgray" fill="none" stroke-width="4"/>'
-    )
+    parts.append(f'<polyline points="{ref_pts}" stroke="lightgray" fill="none" stroke-width="4"/>')
 
     legend_y = margin_px + plot_h + 16
     for i, (name, xy) in enumerate(cohorts.items()):

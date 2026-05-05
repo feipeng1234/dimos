@@ -97,7 +97,7 @@ def test_ff_clamps_to_output_limits() -> None:
 
 def test_ff_reset_is_noop() -> None:
     ff = FeedforwardGainCompensator()
-    ff.reset()  # stateless — should not error
+    ff.reset()  # stateless - should not error
 
 
 # ---------------------------------------------------------------------------
@@ -164,7 +164,7 @@ def test_mpc_requires_plant() -> None:
 
 
 # ---------------------------------------------------------------------------
-# End-to-end sim integration (slow — one path each)
+# End-to-end sim integration (slow - one path each)
 # ---------------------------------------------------------------------------
 
 
@@ -193,6 +193,6 @@ def test_rpp_handles_closed_path_without_false_arrival() -> None:
     score = score_run(path, traj)
     # Must have actually traversed the circle, not arrived in 0.1s.
     assert score.time_to_complete > 5.0, (
-        f"RPP arrived too fast ({score.time_to_complete:.2f}s) — closed-path arrival gate is broken"
+        f"RPP arrived too fast ({score.time_to_complete:.2f}s) - closed-path arrival gate is broken"
     )
     assert score.n_ticks > 50

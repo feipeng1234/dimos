@@ -24,7 +24,7 @@ controller's "I want vx=X" command actually produces vx=X at the wheels:
 
 Stateless, no actual feedback needed, no phase-margin issues. Works as
 long as K is reasonably accurate. Trade: doesn't compensate for plant
-dynamics (τ, L) — controller's own outer loop handles those via pose
+dynamics (tau, L) - controller's own outer loop handles those via pose
 feedback.
 """
 
@@ -61,7 +61,7 @@ class FeedforwardGainCompensator:
 
     API mirrors :class:`VelocityTrackingPID.compute` so it slots into the
     same place in the path-follower task pipeline. ``actual_*`` arguments
-    are accepted but ignored — this is pure feedforward.
+    are accepted but ignored - this is pure feedforward.
     """
 
     def __init__(self, config: FeedforwardGainConfig | None = None) -> None:

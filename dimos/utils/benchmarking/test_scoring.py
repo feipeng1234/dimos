@@ -16,8 +16,6 @@
 
 from __future__ import annotations
 
-import math
-
 import pytest
 
 from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
@@ -142,7 +140,7 @@ def test_command_metrics() -> None:
 def test_cmd_rate_integral_picks_up_jumps() -> None:
     path = _straight_path(length=5.0, step=0.1)
     # Alternating linear-x command at 0.0 and 0.5 each tick → jump magnitude
-    # is 0.5 between every adjacent pair; for 5 ticks we get 4 jumps × 0.5 = 2.0.
+    # is 0.5 between every adjacent pair; for 5 ticks we get 4 jumps x 0.5 = 2.0.
     vxs = [0.0, 0.5, 0.0, 0.5, 0.0]
     ticks = [
         TrajectoryTick(

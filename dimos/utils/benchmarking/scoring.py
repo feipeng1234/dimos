@@ -20,8 +20,8 @@ score identically.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
+import math
 
 import numpy as np
 from numpy.typing import NDArray
@@ -57,7 +57,7 @@ class ScoreResult:
     time_to_complete: float = 0.0  # s
     linear_speed_rms: float = 0.0  # m/s, |cmd linear|
     angular_speed_rms: float = 0.0  # rad/s, |cmd wz|
-    cmd_rate_integral: float = 0.0  # Σ |Δcmd| (smoothness; lower is smoother)
+    cmd_rate_integral: float = 0.0  # Sum |dcmd| (smoothness; lower is smoother)
     arrived: bool = False
     n_ticks: int = 0
 
@@ -71,7 +71,9 @@ def _path_xy(path: Path) -> NDArray[np.float64]:
     return np.array([[p.position.x, p.position.y] for p in path.poses], dtype=np.float64)
 
 
-def _nearest_segment(pt: NDArray[np.float64], path_xy: NDArray[np.float64]) -> tuple[int, float, float]:
+def _nearest_segment(
+    pt: NDArray[np.float64], path_xy: NDArray[np.float64]
+) -> tuple[int, float, float]:
     """Find nearest path segment to ``pt``.
 
     Returns ``(seg_idx, perp_dist, t_along_seg)`` where ``seg_idx`` indexes

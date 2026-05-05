@@ -22,9 +22,9 @@ Fitted plant parameters live in :mod:`dimos.utils.benchmarking.plant_models`.
 
 from __future__ import annotations
 
-import math
 from collections import deque
 from dataclasses import dataclass
+import math
 
 
 @dataclass
@@ -32,9 +32,9 @@ class FopdtChannelParams:
     """First-order-plus-dead-time params for a single velocity channel.
 
     Symbols match the characterization fitter:
-      K   — steady-state gain (output / commanded)
-      tau — first-order time constant (s)
-      L   — pure dead-time (s)
+      K   - steady-state gain (output / commanded)
+      tau - first-order time constant (s)
+      L   - pure dead-time (s)
     """
 
     K: float
@@ -57,9 +57,7 @@ class FOPDTChannel:
 
     def reset(self, dt: float) -> None:
         self._delay_samples = max(1, int(self.params.L / dt))
-        self._delay_buf = deque(
-            [0.0] * self._delay_samples, maxlen=self._delay_samples
-        )
+        self._delay_buf = deque([0.0] * self._delay_samples, maxlen=self._delay_samples)
         self._y = 0.0
 
     def step(self, u: float, dt: float) -> float:

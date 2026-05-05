@@ -82,12 +82,12 @@ class PathFollowerTaskConfig:
     """Configuration for PathFollowerTask.
 
     PID gains (``ct_kp``, ``ct_ki``, ``ct_kd``) should come from the plant
-    identification / tuning pipeline — do **not** guess these values.
+    identification / tuning pipeline - do **not** guess these values.
     """
 
     joint_names: list[str] = field(default_factory=lambda: ["go2_vx", "go2_vy", "go2_wz"])
     priority: int = 20
-    control_frequency: float = 10.0  # effective output rate (Hz) — matches WebRTC limit
+    control_frequency: float = 10.0  # effective output rate (Hz) - matches WebRTC limit
 
     # PurePursuit
     min_lookahead: float = 0.3
@@ -244,7 +244,7 @@ class PathFollowerTask(BaseControlTask):
     # ------------------------------------------------------------------
 
     def _compute_control(self) -> JointCommandOutput:
-        """Core control pipeline — PurePursuit + PID + VelocityProfiler."""
+        """Core control pipeline - PurePursuit + PID + VelocityProfiler."""
         assert self._path is not None
         assert self._path_distancer is not None
         assert self._velocity_profiler is not None
@@ -273,7 +273,7 @@ class PathFollowerTask(BaseControlTask):
 
             if abs(yaw_err) < self._config.orientation_tolerance:
                 self._state = "completed"
-                logger.info(f"PathFollowerTask '{self._name}' completed — goal reached")
+                logger.info(f"PathFollowerTask '{self._name}' completed - goal reached")
                 return self._zero_output()
 
             twist = self._controller.rotate(yaw_err)

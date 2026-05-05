@@ -84,9 +84,9 @@ class ReactivePathFollowerTaskConfig:
     # Lyapunov controller config (all reactive gains)
     controller: LyapunovPathControllerConfig = field(default_factory=LyapunovPathControllerConfig)
 
-    # Optional inner-loop velocity-tracking PID (Strategy D — closed loop)
+    # Optional inner-loop velocity-tracking PID (Strategy D - closed loop)
     pid_config: VelocityTrackingConfig | None = None
-    # Optional static plant-gain feedforward (Strategy B — divide cmd by K).
+    # Optional static plant-gain feedforward (Strategy B - divide cmd by K).
     # Mutually exclusive with pid_config; PI wins if both set.
     ff_config: FeedforwardGainConfig | None = None
 
@@ -95,7 +95,7 @@ class ReactivePathFollowerTask(BaseControlTask):
     """ControlTask that follows a path using the Lyapunov reactive controller.
 
     All velocity components (vx, vy, wz) are computed from the robot's
-    instantaneous error state — no precomputed velocity profiles.
+    instantaneous error state - no precomputed velocity profiles.
     """
 
     def __init__(
@@ -174,7 +174,7 @@ class ReactivePathFollowerTask(BaseControlTask):
         self._last_compute_time = state.t_now
         output = self._compute_control()
 
-        # Inner-loop options (mutually exclusive — PI wins if both set).
+        # Inner-loop options (mutually exclusive - PI wins if both set).
         if self._pid is not None and output.velocities is not None:
             actual_vx = state.joints.joint_velocities.get(self._joint_names_list[0], 0.0)
             actual_vy = state.joints.joint_velocities.get(self._joint_names_list[1], 0.0)
@@ -263,7 +263,7 @@ class ReactivePathFollowerTask(BaseControlTask):
 
             if abs(yaw_err) < self._config.orientation_tolerance:
                 self._state = "completed"
-                logger.info(f"ReactivePathFollowerTask '{self._name}' completed — goal reached")
+                logger.info(f"ReactivePathFollowerTask '{self._name}' completed - goal reached")
                 return self._zero_output()
 
             # Final rotation: use heading-only control
