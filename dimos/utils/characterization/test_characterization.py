@@ -99,7 +99,7 @@ def test_runner_smoke_produces_artifacts(tmp_path: Path) -> None:
     Validates: run dir created, cmd_monotonic.jsonl has expected sample count,
     run.json has begin+end metadata, exit_reason is 'ok'.
     """
-    from dimos.utils.characterization.runner import CharacterizationSession
+    from dimos.utils.characterization.session import CharacterizationSession
 
     recipe = TestRecipe(
         name="pytest_step",
@@ -144,7 +144,7 @@ def test_runner_smoke_produces_artifacts(tmp_path: Path) -> None:
 
 def test_reconstruct_body_velocities_matches_straight_line() -> None:
     """A straight-line pure-vx motion at 1 m/s should recover vx≈1, vy≈0, wz≈0."""
-    from dimos.utils.characterization.scripts.analyze_run import (
+    from dimos.utils.characterization.scripts.analyze import (
         reconstruct_body_velocities,
     )
 
@@ -161,7 +161,7 @@ def test_reconstruct_body_velocities_matches_straight_line() -> None:
 
 def test_reconstruct_body_velocities_pure_rotation() -> None:
     """Pure rotation at 1 rad/s about origin: body vx=vy=0, wz=1."""
-    from dimos.utils.characterization.scripts.analyze_run import (
+    from dimos.utils.characterization.scripts.analyze import (
         reconstruct_body_velocities,
     )
 
@@ -176,8 +176,20 @@ def test_reconstruct_body_velocities_pure_rotation() -> None:
 
 
 def test_expand_plan_preserves_order_without_randomize() -> None:
-    from dimos.utils.characterization.examples import ramp_vx_0_to_1p5, step_vx_1
     from dimos.utils.characterization.session import expand_plan
+
+    step_vx_1 = TestRecipe(
+        name="step_vx_1.0",
+        test_type="step",
+        duration_s=3.0,
+        signal_fn=step(amplitude=1.0, channel="vx"),
+    )
+    ramp_vx_0_to_1p5 = TestRecipe(
+        name="ramp_vx_0_to_1.5",
+        test_type="ramp",
+        duration_s=10.0,
+        signal_fn=ramp(start=0.0, end=1.5, duration=10.0, channel="vx"),
+    )
 
     plan = expand_plan([(step_vx_1, 2), (ramp_vx_0_to_1p5, 1)])
     assert [p.label for p in plan] == [
@@ -188,8 +200,20 @@ def test_expand_plan_preserves_order_without_randomize() -> None:
 
 
 def test_expand_plan_randomize_is_deterministic_with_seed() -> None:
-    from dimos.utils.characterization.examples import step_vx_1, step_wz_1
     from dimos.utils.characterization.session import expand_plan
+
+    step_vx_1 = TestRecipe(
+        name="step_vx_1.0",
+        test_type="step",
+        duration_s=3.0,
+        signal_fn=step(amplitude=1.0, channel="vx"),
+    )
+    step_wz_1 = TestRecipe(
+        name="step_wz_1.0",
+        test_type="step",
+        duration_s=3.0,
+        signal_fn=step(amplitude=1.0, channel="wz"),
+    )
 
     entries = [(step_vx_1, 3), (step_wz_1, 2)]
     a = expand_plan(entries, randomize=True, rng_seed=42)
@@ -201,8 +225,8 @@ def test_expand_plan_randomize_is_deterministic_with_seed() -> None:
 
 
 def test_session_blueprint_composes_with_and_without_teleop(tmp_path: Path) -> None:
-    from dimos.utils.characterization.session import build_session_blueprint
     from dimos.robot.unitree.keyboard_teleop import KeyboardTeleop
+    from dimos.utils.characterization.session import build_session_blueprint
 
     db = tmp_path / "s.db"
     bp = build_session_blueprint(db, backend="go2", include_teleop=True)
@@ -218,7 +242,7 @@ def test_session_blueprint_composes_with_and_without_teleop(tmp_path: Path) -> N
 
 def test_run_json_session_fields_present_for_session_runs(tmp_path: Path) -> None:
     """Runner with session_db_path writes relative db pointer + ts_window_wall."""
-    from dimos.utils.characterization.runner import CharacterizationSession
+    from dimos.utils.characterization.session import CharacterizationSession
 
     session_db = tmp_path / "session" / "recording.db"
     session_db.parent.mkdir()
