@@ -206,20 +206,6 @@ class SqliteStore(Store):
         db_names = set(self._registry.list_streams())
         return sorted(db_names | set(self._streams.keys()))
 
-    def get_stream_meta(self, name: str) -> dict[str, Any] | None:
-        """Return persisted metadata for a stream, or None if it doesn't exist."""
-        return self._registry.get(name)
-
-    def update_stream_meta(self, name: str, **updates: Any) -> None:
-        """Merge ``updates`` into a stream's persisted metadata. No-op if the
-        stream has no registry entry yet.
-        """
-        meta = self._registry.get(name)
-        if meta is None:
-            return
-        meta.update(updates)
-        self._registry.put(name, meta)
-
     def delete_stream(self, name: str) -> None:
         super().delete_stream(name)
         self._registry_conn.execute(f'DROP TABLE IF EXISTS "{name}"')

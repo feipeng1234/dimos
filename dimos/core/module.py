@@ -176,7 +176,7 @@ class ModuleBase(Configurable, CompositeResource):
     def stop(self) -> None:
         self._stop_main()
         super().stop()
-        self._stop_recording_outputs()
+        self.stop_recording_outputs()
         self._close_module()
 
     def _close_module(self) -> None:
@@ -424,9 +424,6 @@ class ModuleBase(Configurable, CompositeResource):
         self._rec_store = SqliteStore(path=db_path)
         for name, out in self.outputs.items():
             stream = self._rec_store.stream(name, out.type)
-            meta = self._rec_store.get_stream_meta(name)
-            if meta and "channel" not in meta:
-                self._rec_store.update_stream_meta(name, channel=f"/{name}#{out.type.msg_name}")
 
             def cb(msg: Any, _stream: "Stream[object]" = stream) -> None:
                 ts = msg.ts if isinstance(msg, Timestamped) else time.time()
@@ -436,9 +433,6 @@ class ModuleBase(Configurable, CompositeResource):
 
     @rpc
     def stop_recording_outputs(self) -> None:
-        self._stop_recording_outputs()
-
-    def _stop_recording_outputs(self) -> None:
         for unsub in self._rec_unsubs:
             unsub()
         self._rec_unsubs = []

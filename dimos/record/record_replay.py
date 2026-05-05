@@ -107,7 +107,6 @@ class RecordReplay:
         self._play_task: asyncio.Task[None] | None = None
         self._play_speed = 1.0
         self._position = 0.0
-        self._pubsub = None
 
     @property
     def store(self) -> SqliteStore:
@@ -175,10 +174,6 @@ class RecordReplay:
         s = self._store.stream(stream_name, type(msg))
         s.append(msg, ts=ts)
 
-        meta = self._store.get_stream_meta(stream_name)
-        if meta and "channel" not in meta:
-            self._store.update_stream_meta(stream_name, channel=str(topic))
-
     @property
     def duration(self) -> float:
         """Total duration of the recording in seconds."""
@@ -219,10 +214,8 @@ class RecordReplay:
                 info["start"] = t0
                 info["end"] = t1
                 info["duration"] = t1 - t0
-            # Get payload type from registry
-            meta = self._store.get_stream_meta(name)
-            if meta:
-                info["type"] = meta.get("payload_module", "unknown")
+            t = s.data_type
+            info["type"] = f"{t.__module__}.{t.__qualname__}" if t is not object else "unknown"
             result.append(info)
         return tuple(result)
 
@@ -250,14 +243,15 @@ class RecordReplay:
         rec = rr.RecordingStream("playback", make_default=False)
         rec.connect_grpc()
 
-        # Build topic map for decoding raw bytes -> DimosMsg
+        # Reconstruct topic map from each stream's payload type. Channel is
+        # /<stream_name>#<msg_name>; under the convention that recorded topic
+        # names are valid identifiers, the stream name is the channel name.
         topic_map: dict[str, Topic] = {}
         for name in self._store.list_streams():
-            meta = self._store.get_stream_meta(name)
-            if meta:
-                channel = meta.get("channel")
-                if channel:
-                    topic_map[name] = Topic.from_channel_str(channel)
+            s: Stream[object] = self._store.stream(name)
+            data_type = s.data_type
+            if data_type is not object:
+                topic_map[name] = Topic(topic=f"/{name}", lcm_type=data_type)
 
         # Merge-sort all streams by timestamp
         start_ts = t_min + self._position
@@ -265,8 +259,7 @@ class RecordReplay:
         counter = 0  # tiebreaker for heapq
 
         for name in self._store.list_streams():
-            s: Stream[object] = self._store.stream(name)
-            it = iter(s.after(start_ts - 0.001))
+            it: Any = iter(self._store.stream(name).after(start_ts - 0.001))
             try:
                 obs = next(it)
             except StopIteration:
@@ -344,8 +337,7 @@ class RecordReplay:
         self._position = max(0.0, min(seconds, self.duration))
         if self.is_playing:
             await self.stop_playback()
-            assert self._pubsub is not None
-            self.play(pubsub=self._pubsub, speed=self._play_speed)
+            self.play(speed=self._play_speed)
 
     def delete_range(self, start: float, end: float) -> int:
         """Delete observations in [start, end] seconds from recording start.

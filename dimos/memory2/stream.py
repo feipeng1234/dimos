@@ -125,6 +125,16 @@ class Stream(CompositeResource, Generic[T, O]):
             return self._source.is_live()
         return False
 
+    @property
+    def data_type(self) -> type:
+        """Payload type of the root backend, or ``object`` if unbound."""
+        current: Any = self
+        while isinstance(current._source, Stream):
+            current = current._source
+        if current._source is None:
+            return object
+        return cast("type", current._source.data_type)
+
     def __iter__(self) -> Iterator[O]:
         if self._source is None:
             raise TypeError(
