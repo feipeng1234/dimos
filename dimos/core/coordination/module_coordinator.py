@@ -598,7 +598,7 @@ class ModuleCoordinator(Resource):
         stop = asyncio.Event()
         try:
             await stop.wait()
-        except KeyboardInterrupt:
+        except (KeyboardInterrupt, asyncio.CancelledError):
             return
         finally:
             self.stop()

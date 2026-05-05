@@ -46,7 +46,6 @@ from dimos.protocol.rpc.pubsubrpc import LCMRPC
 from dimos.protocol.rpc.spec import DEFAULT_RPC_TIMEOUT, DEFAULT_RPC_TIMEOUTS, RPCSpec
 from dimos.protocol.service.spec import BaseConfig, Configurable
 from dimos.protocol.tf.tf import LCMTF, TFSpec
-from dimos.types.timestamped import Timestamped
 from dimos.utils import colors
 from dimos.utils.generic import classproperty
 from dimos.utils.logging_config import setup_logger
@@ -426,8 +425,10 @@ class ModuleBase(Configurable, CompositeResource):
             stream = self._rec_store.stream(name, out.type)
 
             def cb(msg: Any, _stream: "Stream[object]" = stream) -> None:
-                ts = msg.ts if isinstance(msg, Timestamped) else time.time()
-                _stream.append(msg, ts=ts)
+                # Storage ts is wall-clock at record time. Sensor / message
+                # timestamps live on the payload (e.g. ``msg.ts``) and are
+                # preserved there. Storage ts must be unique within a stream.
+                _stream.append(msg, ts=time.time())
 
             self._rec_unsubs.append(out.subscribe(cb))
 

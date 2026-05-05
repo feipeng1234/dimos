@@ -53,7 +53,6 @@ from dimos.memory2.stream import Stream
 from dimos.protocol.pubsub.impl.lcmpubsub import Topic
 from dimos.protocol.pubsub.spec import PubSub
 from dimos.protocol.service.spec import Service
-from dimos.types.timestamped import Timestamped
 from dimos.utils.logging_config import setup_logger
 from dimos.visualization.rerun.bridge import RerunConvertible, is_rerun_multi
 
@@ -101,7 +100,6 @@ class RecordReplay:
 
         self._recording = False
         self._unsubscribes: list[Callable[[], None]] = []
-        self._ts_offsets: dict[str, float] = {}
 
         self._resume = asyncio.Event()
         self._play_task: asyncio.Task[None] | None = None
@@ -160,19 +158,12 @@ class RecordReplay:
         logger.info("Recording stopped")
 
     def _on_message(self, msg: object, topic: Topic) -> None:
+        # Storage ts = reception time (default in stream.append). Sensor stamp
+        # is preserved on the payload (msg.ts) — same split rosbag uses, and
+        # the only one that survives sender-side stamp bugs / retransmits /
+        # looped replay sources without UNIQUE collisions.
         stream_name = topic_to_stream_name(topic.pattern)
-
-        ts: float | None = None
-        if isinstance(msg, Timestamped) and msg.ts:
-            # Record the time offset on first message and then offset all messages
-            # by the same amount. This allows recording live channels and replayed
-            # channels together with consistent timestamps.
-            if stream_name not in self._ts_offsets:
-                self._ts_offsets[stream_name] = time.time() - msg.ts
-            ts = msg.ts + self._ts_offsets[stream_name]
-
-        s = self._store.stream(stream_name, type(msg))
-        s.append(msg, ts=ts)
+        self._store.stream(stream_name, type(msg)).append(msg)
 
     @property
     def duration(self) -> float:
