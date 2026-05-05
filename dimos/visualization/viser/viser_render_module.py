@@ -538,12 +538,17 @@ class ViserRenderModule(Module):
             pts = np.asarray(pcd.points, dtype=np.float32)
             if pts.size == 0:
                 return
-            # Color choice: subtle teal so the cloud is visible against
-            # both the dark mesh background and the light splat.  Per-point
-            # colors would be nicer but the lidar source doesn't carry
-            # them and viser's add_point_cloud accepts a single uniform
-            # color that broadcasts across all points.
-            colors = np.broadcast_to(np.array([0, 200, 255], dtype=np.uint8), pts.shape).copy()
+            # Per-point colors via height-mapped turbo colormap — same
+            # gradient + same z-normalization formula rerun's pointcloud
+            # path uses (PointCloud2.to_rerun) so the two viewers look
+            # identical when both are running.
+            from dimos.msgs.sensor_msgs.PointCloud2 import _get_colormap_lut
+
+            lut = _get_colormap_lut("turbo")  # (256, 3) uint8, lru-cached
+            z = pts[:, 2]
+            z_min, z_max = float(z.min()), float(z.max())
+            class_ids = ((z - z_min) / (z_max - z_min + 1e-8) * 255).astype(np.uint8)
+            colors = lut[class_ids]  # (N, 3) uint8
             self._lidar_handle = self._server.scene.add_point_cloud(
                 "/lidar_overlay",
                 points=pts,
