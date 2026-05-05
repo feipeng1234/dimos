@@ -16,7 +16,7 @@ dimos [GLOBAL OPTIONS] COMMAND [ARGS]
 | `--robot-ips` | TEXT | `None` | Multiple robot IPs |
 | `--simulation` / `--no-simulation` | bool | `False` | Enable MuJoCo simulation |
 | `--replay` / `--no-replay` | bool | `False` | Use recorded replay data |
-| `--replay-dir` | TEXT | `go2_sf_office` | Replay dataset directory name |
+| `--replay-db` | TEXT | `go2_china_office` | Replay memory2 SQLite database name |
 | `--replay-file` | TEXT | `None` | Path to a `.db` recording file for replay |
 | `--record-path` | TEXT | `None` | Record module outputs to a `.db` file |
 | `--new-memory` / `--no-new-memory` | bool | `False` | Clear persistent memory on start |
