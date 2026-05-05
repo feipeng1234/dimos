@@ -94,17 +94,31 @@ jobs:
         github.event.pull_request.head.repo.full_name == github.repository
       )
     timeout-minutes: 20
-    runs-on: [self-hosted, Linux]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: [self-hosted, Linux]
+            # GitHub Actions only honours `container:` on Linux runners.
+            container:
+              image: ghcr.io/dimensionalos/ros-dev:dev
+              env:
+                OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+                ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+                ALIBABA_API_KEY: ${{ secrets.ALIBABA_API_KEY }}
+            markers: "self_hosted or skipif_no_ros"
+            experimental: false
+          - runner: [self-hosted, macos, arm64]
+            container: null  # run on host — `container:` is Linux-only
+            markers: "self_hosted"
+            experimental: true
+    runs-on: ${{ matrix.runner }}
+    continue-on-error: ${{ matrix.experimental }}
     permissions:
       contents: read  # For checkout
       packages: read  # For pulling the ros-dev container from ghcr.io
       id-token: write  # For codecov-action's OIDC upload
-    container:
-      image: ghcr.io/dimensionalos/ros-dev:dev
-      env:
-        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        ALIBABA_API_KEY: ${{ secrets.ALIBABA_API_KEY }}
+    container: ${{ matrix.container }}
 
     steps:
       - uses: actions/checkout@v5
@@ -118,7 +132,7 @@ jobs:
           git config --global --add safe.directory '*'
           git clean -ffdx -e .venv
       - name: Run tests
-        run: uv run pytest --cov=dimos/ --junitxml=junit.xml -m '(self_hosted or skipif_no_ros) and not (tool or mujoco)'
+        run: uv run pytest --cov=dimos/ --junitxml=junit.xml -m '(${{ matrix.markers }}) and not (tool or mujoco)'
       - name: Re-run the failing tests with maximum verbosity
         if: failure()
         env:
