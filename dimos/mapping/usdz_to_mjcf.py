@@ -196,6 +196,19 @@ def bake_scene_mjcf(
     n_hulls = 0
     # 1 mm — anything thinner is coplanar for qhull's purposes.
     _DEGENERATE_EPS = 1e-3
+    # Single convex hull is fine for furniture-scale prims (chair, desk,
+    # crate) but disastrous for architectural shells (wall mesh, ceiling,
+    # floor): those are *concave* — wrapping them in one hull produces a
+    # room-sized solid block that swallows the robot's spawn point and
+    # MuJoCo resolves the penetration by slamming the pelvis down to the
+    # floor.  Detect "shell" prims by hull volume; only the architectural
+    # bits exceed ~2 m³ (a sofa is ~0.5 m³, a desk ~0.3 m³, a wall is 100+).
+    # For those, run VHACD — it produces ~64 thin slab hulls following the
+    # actual wall surfaces.  VHACD on these few large prims is fast (~0.2 s
+    # each) because they have very few triangles (the artist welded each
+    # wall as a flat plane).
+    _SHELL_VOLUME_M3 = 2.0
+    n_decomposed = 0
     logger.info(f"bake_scene_mjcf: per-prim convex-hulling {len(prims)} prims (one-time)…")
     for prim in prims:
         tm = trimesh.Trimesh(
@@ -204,10 +217,30 @@ def bake_scene_mjcf(
             process=False,
         )
         try:
-            hulls = [tm.convex_hull]
+            single_hull = tm.convex_hull
         except Exception as e:
             logger.warning(f"  convex_hull failed for {prim.name}: {e}; skipping")
             continue
+
+        if float(single_hull.volume) > _SHELL_VOLUME_M3:
+            try:
+                parts = tm.convex_decomposition(maxConvexHulls=64, resolution=200_000)
+                if not isinstance(parts, list):
+                    parts = [parts]
+                hulls = parts
+                n_decomposed += 1
+                logger.info(
+                    f"  {prim.name}: VHACD decomposed "
+                    f"({single_hull.volume:.1f} m³ shell → {len(parts)} sub-hulls)"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"  VHACD failed for {prim.name}: {e}; "
+                    f"using single hull (will swallow robot spawn area)"
+                )
+                hulls = [single_hull]
+        else:
+            hulls = [single_hull]
 
         for j, hull in enumerate(hulls):
             v = np.asarray(hull.vertices, dtype=np.float32)
@@ -271,7 +304,8 @@ def bake_scene_mjcf(
         )
     logger.info(
         f"bake_scene_mjcf: baked {n_hulls} convex hulls from {len(prims)} prims "
-        f"({total_tris} tris total), skipped {skipped_degenerate} degenerate hulls"
+        f"({total_tris} tris total), VHACD-decomposed {n_decomposed} shell prims, "
+        f"skipped {skipped_degenerate} degenerate hulls"
     )
 
     wrapper_xml = _WRAPPER_TEMPLATE.format(
