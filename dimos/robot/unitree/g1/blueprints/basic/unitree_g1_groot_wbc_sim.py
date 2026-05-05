@@ -492,10 +492,26 @@ if _splat_path is not None and _splat_path.exists():
     # SplatCameraModule below still uses the splat for the head-camera feed
     # in either case.
     _viser_splat_path = None if _scene_mesh_path_override else str(_splat_path)
+    # Splat alignment policy:
+    #   * Default office path: skip the YAML.  The artist .blend uses the
+    #     same dimos_office.ply data as the splat, with no transform applied
+    #     on Blender import (verified vertex-by-vertex).  So loading both
+    #     the splat .ply and the artist GLB with identity alignment puts
+    #     them in the same frame — they overlay exactly as they do in
+    #     Blender.  The mesh's floor sits at z≈0; the splat clusters around
+    #     z=0.05–2.36 (room ceiling).
+    #   * Custom DIMOS_SCENE_MESH_PATH: keep the legacy YAML so the splat
+    #     still appears in dimos-world if anything else is depending on
+    #     that pose.
+    _splat_alignment_yaml = (
+        None
+        if _scene_mesh_path_override is None
+        else (str(_alignment_yaml) if _alignment_yaml.exists() else None)
+    )
     _g1_viser = ViserRenderModule.blueprint(
         splat_path=_viser_splat_path,
         mjcf_path=_MJCF_PATH,
-        alignment_yaml=str(_alignment_yaml) if _alignment_yaml.exists() else None,
+        alignment_yaml=_splat_alignment_yaml,
         port=8082,
         scene_mesh_path=_scene_mesh_path,
         scene_mesh_scale=_scene_mesh_scale,
@@ -549,7 +565,7 @@ if _splat_path is not None and _splat_path.exists():
         _g1_camera = SplatCameraModule.blueprint(
             splat_path=str(_splat_path),
             mjcf_path=_MJCF_PATH,
-            alignment_yaml=str(_alignment_yaml) if _alignment_yaml.exists() else None,
+            alignment_yaml=_splat_alignment_yaml,
             render_hz=10.0,
             # Match MujocoSimModule's depth camera frame so RGB and depth
             # share frame_id; ObjectSceneRegistration's tf lookup needs that.
