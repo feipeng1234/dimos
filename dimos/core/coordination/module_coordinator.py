@@ -22,6 +22,7 @@ import importlib
 from pathlib import Path
 import shutil
 import sys
+import threading
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, cast
 
@@ -302,7 +303,7 @@ class ModuleCoordinator(Resource):
                 if bp.module in record_modules:
                     instance = coordinator.get_instance(bp.module)
                     if instance is not None:
-                        instance.start_recording(global_config.record_path)
+                        instance.start_recording_outputs(global_config.record_path)
 
         _log_blueprint_graph(blueprint, coordinator)
 

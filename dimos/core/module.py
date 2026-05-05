@@ -161,7 +161,7 @@ class ModuleBase(Configurable, CompositeResource):
     @rpc
     def stop(self) -> None:
         super().stop()
-        self._stop_recording()
+        self._stop_recording_outputs()
         self._close_module()
 
     def _close_module(self) -> None:
@@ -384,16 +384,17 @@ class ModuleBase(Configurable, CompositeResource):
         return partial(Blueprint.create, self)  # type: ignore[arg-type]
 
     @rpc
-    def start_recording(self, db_path: str) -> None:
+    def start_recording_outputs(self, db_path: str) -> None:
         from dimos.memory2.store.sqlite import SqliteStore
 
+        if self._rec_store is not None:
+            raise RuntimeError("Recording already in progress")
         self._rec_store = SqliteStore(path=db_path)
         for name, out in self.outputs.items():
             stream = self._rec_store.stream(name, out.type)
-            reg = self._rec_store._registry.get(name)
-            if reg and "channel" not in reg:
-                reg["channel"] = f"/{name}#{out.type.msg_name}"
-                self._rec_store._registry.put(name, reg)
+            meta = self._rec_store.get_stream_meta(name)
+            if meta and "channel" not in meta:
+                self._rec_store.update_stream_meta(name, channel=f"/{name}#{out.type.msg_name}")
 
             def cb(msg: Any, _stream: "Stream[object]" = stream) -> None:
                 ts = msg.ts if isinstance(msg, Timestamped) else time.time()
@@ -402,10 +403,10 @@ class ModuleBase(Configurable, CompositeResource):
             self._rec_unsubs.append(out.subscribe(cb))
 
     @rpc
-    def stop_recording(self) -> None:
-        self._stop_recording()
+    def stop_recording_outputs(self) -> None:
+        self._stop_recording_outputs()
 
-    def _stop_recording(self) -> None:
+    def _stop_recording_outputs(self) -> None:
         for unsub in self._rec_unsubs:
             unsub()
         self._rec_unsubs = []

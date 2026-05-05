@@ -443,12 +443,12 @@ class SqliteObservationStore(ObservationStore[T]):
         """Delete observations with ts in [t1, t2]. Returns deleted IDs."""
         with self._lock:
             rows = self._conn.execute(
-                f'SELECT id FROM "{self._name}" WHERE ts >= ? AND ts <= ?', (t1, t2)
+                f'DELETE FROM "{self._name}" WHERE ts >= ? AND ts <= ? RETURNING id',
+                (t1, t2),
             ).fetchall()
             ids = [r[0] for r in rows]
             if ids:
                 placeholders = ",".join("?" * len(ids))
-                self._conn.execute(f'DELETE FROM "{self._name}" WHERE id IN ({placeholders})', ids)
                 self._conn.execute(
                     f'DELETE FROM "{self._name}_rtree" WHERE id IN ({placeholders})', ids
                 )

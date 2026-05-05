@@ -375,8 +375,6 @@ unitree_go2 = (
 )
 ```
 
-If `default_record_modules` is not set, all modules with Out streams are recorded.
-
 Recording captures decoded message objects directly via `Out.subscribe()` — no transport dependency. Codecs are auto-selected (JPEG for images, LCM for standard messages). Sensor timestamps are preserved from `msg.ts`.
 
 ```bash

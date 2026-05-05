@@ -40,7 +40,6 @@ import asyncio
 from collections.abc import Callable, Collection
 from contextlib import suppress
 import heapq
-import logging
 import math
 import re
 import sys
@@ -55,6 +54,7 @@ from dimos.protocol.pubsub.impl.lcmpubsub import Topic
 from dimos.protocol.pubsub.spec import PubSub
 from dimos.protocol.service.spec import Service
 from dimos.types.timestamped import Timestamped
+from dimos.utils.logging_config import setup_logger
 from dimos.visualization.rerun.bridge import RerunConvertible, is_rerun_multi
 
 if sys.version_info >= (3, 11):
@@ -62,7 +62,7 @@ if sys.version_info >= (3, 11):
 else:
     from typing import Any as Self
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 _SANITIZE_RE = re.compile(r"[^A-Za-z0-9_]")
 
@@ -175,10 +175,9 @@ class RecordReplay:
         s = self._store.stream(stream_name, type(msg))
         s.append(msg, ts=ts)
 
-        reg = self._store._registry.get(stream_name)
-        if reg and "channel" not in reg:
-            reg["channel"] = str(topic)
-            self._store._registry.put(stream_name, reg)
+        meta = self._store.get_stream_meta(stream_name)
+        if meta and "channel" not in meta:
+            self._store.update_stream_meta(stream_name, channel=str(topic))
 
     @property
     def duration(self) -> float:
@@ -221,9 +220,9 @@ class RecordReplay:
                 info["end"] = t1
                 info["duration"] = t1 - t0
             # Get payload type from registry
-            reg = self._store._registry.get(name)
-            if reg:
-                info["type"] = reg.get("payload_module", "unknown")
+            meta = self._store.get_stream_meta(name)
+            if meta:
+                info["type"] = meta.get("payload_module", "unknown")
             result.append(info)
         return tuple(result)
 
@@ -254,9 +253,9 @@ class RecordReplay:
         # Build topic map for decoding raw bytes -> DimosMsg
         topic_map: dict[str, Topic] = {}
         for name in self._store.list_streams():
-            reg = self._store._registry.get(name)
-            if reg:
-                channel = reg.get("channel")
+            meta = self._store.get_stream_meta(name)
+            if meta:
+                channel = meta.get("channel")
                 if channel:
                     topic_map[name] = Topic.from_channel_str(channel)
 

@@ -204,8 +204,6 @@ async def _run(
     show_help: bool,
 ) -> None:
     """Start a robot blueprint"""
-    logger.info("Starting DimOS")
-
     from dimos.core.coordination.blueprints import autoconnect
     from dimos.core.coordination.module_coordinator import ModuleCoordinator
     from dimos.core.coordination.process_lifecycle import (
