@@ -299,24 +299,11 @@ autofix = ["ruff==0.14.3"]
 
 # Project deps shared by `tests` and `lint`.
 project-deps = [
-    # Lightweight project extras safe for ubuntu-latest. `psql` is
-    # excluded — `types-psycopg2` (in the `lint` group) covers the
-    # `psycopg2` API surface for mypy, and `tests` re-adds it below.
-    "dimos[web,visualization,drone,cpu]",
-
-    # Minimum heavy deps required for test collection / mypy to succeed.
-    # These modules are imported unconditionally by production code that
-    # tests transitively reach during pytest collection (even if the
-    # tests themselves are marked `self_hosted` and skipped):
-    #   - torch:   `dimos.perception.detection.type.detection2d.seg`
-    #              (collected via perception/detection/conftest.py)
-    #   - langchain (+ core): `dimos.agents.vlm_agent`
-    #              (collected via blueprints/smart/*_test.py)
+    "dimos[web,visualization]",
     "torch",
     "langchain==1.2.3",
     "langchain-core==1.2.3",
     "googlemaps>=4.10.0",
-    "mujoco>=3.3.4",
     "transformers[torch]==4.49.0",
     "ultralytics>=8.3.70",
     "hydra-core>=1.3.0",
@@ -327,9 +314,7 @@ project-deps = [
     "gdown==5.2.0",
     "tensorboard==2.20.0",
     "xacro",
-    "pygame>=2.6.1",
     "lap>=0.5.12",
-    "langchain-chroma>=1,<2",
     "langchain-openai>=1,<2",
     "ollama>=0.6.0",
 ]
@@ -356,11 +341,13 @@ tests = [
     "python-lsp-server[all]==1.14.0",
     "python-lsp-ruff==2.3.0",
 
-    # Deps the lint job swaps for stubs (see `lint` group below): real
-    # packages are needed at test time, stubs alone are enough for mypy.
-    "dimos[psql]",  # psycopg2-binary; `types-psycopg2` stubs it for lint
-    "unitree-webrtc-connect-leshy>=2.0.7",  # pulls `pyaudio` (needs `libportaudio` system lib);
-                                            # `types-pyaudio` stubs it for lint
+    # Deps the lint job swaps for stubs (`stubs/<pkg>/` or `types-*`):
+    # the real packages are needed at test time, stubs cover mypy.
+    "dimos[psql,drone,cpu]",
+    "mujoco>=3.3.4",
+    "pygame>=2.6.1",
+    "langchain-chroma>=1,<2",
+    "unitree-webrtc-connect-leshy>=2.0.7",
 
     {include-group = "project-deps"},
 ]
