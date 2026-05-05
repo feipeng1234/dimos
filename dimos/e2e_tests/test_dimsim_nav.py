@@ -260,16 +260,19 @@ class TestSimNav:
 
     def test_odom_rate(self, spy: LcmSpy) -> None:
         """Verify odom publishes at a reasonable rate (>5 Hz)."""
-        # Clear existing messages and collect fresh ones
+        # Clear existing messages and collect fresh ones. Widen the sampling
+        # window to 5s — a 2s window only catches ~9 messages at this rate
+        # and is too noisy to compare against a hard threshold.
         topic = "/odom#geometry_msgs.PoseStamped"
+        window = 5.0
         with spy._messages_lock:
             spy.messages[topic] = []
 
-        time.sleep(2.0)
+        time.sleep(window)
 
         with spy._messages_lock:
             count = len(spy.messages.get(topic, []))
 
-        rate = count / 2.0
-        print(f"  odom rate: {rate:.1f} Hz ({count} messages in 2s)")
+        rate = count / window
+        print(f"  odom rate: {rate:.1f} Hz ({count} messages in {window:.0f}s)")
         assert rate > 5, f"Odom rate too low: {rate:.1f} Hz (expected >5 Hz)"
