@@ -38,6 +38,7 @@ import time
 
 import pytest
 
+from dimos.e2e_tests._subprocess_log import dump_log, launch_with_streaming_log
 from dimos.robot.sim.scene_client import EMBODIMENT_PRESETS, SceneClient
 
 PORT = 8091  # Use different port to avoid conflicts with other tests
@@ -85,7 +86,13 @@ def _force_kill_port(port: int) -> None:
 
 
 def _start_server(*extra_args: str) -> subprocess.Popen:
-    """Start headless DimSim dev server with extra CLI args."""
+    """Start headless DimSim dev server with extra CLI args.
+
+    Uses ``launch_with_streaming_log`` so the subprocess's stdout is drained
+    in a background thread — a raw ``subprocess.PIPE`` with no reader fills
+    the OS pipe buffer (~64 KB) and deadlocks the server, which then stops
+    accepting WebSocket connections.
+    """
     _force_kill_port(PORT)
     time.sleep(1)
     cmd = [
@@ -104,8 +111,13 @@ def _start_server(*extra_args: str) -> subprocess.Popen:
         str(PORT),
         *extra_args,
     ]
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    assert _wait_for_port(PORT, timeout=120), f"dimsim failed to start on :{PORT}"
+    proc, log_path = launch_with_streaming_log("dimsim_scene_editing", cmd)
+    # Stash for _stop_server cleanup; avoids changing the function signature
+    # used by every caller.
+    proc._log_path = log_path  # type: ignore[attr-defined]
+    if not _wait_for_port(PORT, timeout=120):
+        dump_log("dimsim scene-editing", log_path)
+        raise AssertionError(f"dimsim failed to start on :{PORT}")
     time.sleep(10)  # wait for browser page init
     return proc
 
@@ -116,6 +128,9 @@ def _stop_server(proc: subprocess.Popen) -> None:
         proc.wait(timeout=10)
     except subprocess.TimeoutExpired:
         proc.kill()
+    log_path = getattr(proc, "_log_path", None)
+    if log_path is not None:
+        log_path.unlink(missing_ok=True)
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
