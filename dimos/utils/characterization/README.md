@@ -13,12 +13,15 @@ the next recipe.
 
 ```bash
 python -m dimos.utils.characterization.scripts.run_session \
-    --recipes "dimos.utils.characterization.experiments:e1_vx_pos_1p0:3" \
+    --recipes "module.path:my_recipe:3" \
     --surface carpet --notes "first E1 pilot" \
     --out-dir ~/char_runs --randomize --rng-seed 1
 ```
 
-Flags: `--simulation`, `--backend mock`, `--auto`, `--no-teleop`, `--rage`, `-v`.
+`--recipes` format: comma-separated `module:attr[:repeats]`. The attribute
+must resolve to a `TestRecipe` (defined per `recipes.py`).
+
+Flags: `--simulation`, `--backend mock`, `--auto`, `--no-teleop`, `-v`.
 
 ## Run layout
 
@@ -50,12 +53,17 @@ Helpers in `recipes.py`: `step`, `ramp`, `chirp`, `constant`, `composite`.
 ```bash
 SESSION=~/char_runs/session_<ts>
 python -m dimos.utils.characterization.scripts.process_session validate    $SESSION
-for d in $SESSION/0*; do python -m dimos.utils.characterization.scripts.analyze_run "$d"; done
+for d in $SESSION/0*; do python -m dimos.utils.characterization.scripts.analyze run "$d"; done
 python -m dimos.utils.characterization.scripts.process_session aggregate   $SESSION
 python -m dimos.utils.characterization.scripts.process_session deadtime    $SESSION   # E8
 python -m dimos.utils.characterization.scripts.process_session coupling    $SESSION   # E7
-python -m dimos.utils.characterization.scripts.process_session envelope    $SESSIONS... --mode default --out envelope_default.md
-python -m dimos.utils.characterization.scripts.process_session compare-modes --default <s>... --rage <s>... --out compare.md
+python -m dimos.utils.characterization.scripts.process_session envelope    $SESSIONS... --out envelope.md
+```
+
+Multi-run overlay:
+
+```bash
+python -m dimos.utils.characterization.scripts.analyze compare $SESSION/0* --out overlay.svg
 ```
 
 Each step writes derived artifacts; nothing destructive. Per-step rationale

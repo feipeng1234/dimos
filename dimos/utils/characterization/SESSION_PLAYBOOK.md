@@ -16,6 +16,80 @@ makes the data comparable later. Examples: `carpet-low`, `vinyl`,
 `concrete`, `hardwood`. The commands below use `carpet`; change it once
 at the top.
 
+## Recipe catalog (paste this into `my_recipes.py`)
+
+The harness loads recipes by `module:attr` reference. Save the snippet
+below somewhere on your `PYTHONPATH` (e.g. `~/scripts/my_recipes.py`)
+so the `--recipes` arg can find E1–E8 by name.
+
+```python
+# my_recipes.py
+from dimos.utils.characterization.recipes import TestRecipe, constant, ramp, step
+
+def _step(amp, channel, name):
+    return TestRecipe(name=name, test_type="step", duration_s=3.0,
+                      signal_fn=step(amplitude=amp, channel=channel))
+
+def _const_hold(vx, vy, wz, name, duration=5.0):
+    return TestRecipe(name=name, test_type="constant", duration_s=duration,
+                      signal_fn=constant(vx=vx, vy=vy, wz=wz),
+                      pre_roll_s=2.0, post_roll_s=2.0)
+
+# E1 — vx step response
+e1_vx_pos_0p3 = _step( 0.3, "vx", "e1_vx_+0.3");  e1_vx_neg_0p3 = _step(-0.3, "vx", "e1_vx_-0.3")
+e1_vx_pos_0p6 = _step( 0.6, "vx", "e1_vx_+0.6");  e1_vx_neg_0p6 = _step(-0.6, "vx", "e1_vx_-0.6")
+e1_vx_pos_1p0 = _step( 1.0, "vx", "e1_vx_+1.0");  e1_vx_neg_1p0 = _step(-1.0, "vx", "e1_vx_-1.0")
+e1_vx_pos_1p5 = _step( 1.5, "vx", "e1_vx_+1.5");  e1_vx_neg_1p5 = _step(-1.5, "vx", "e1_vx_-1.5")
+
+# E2 — wz step response
+e2_wz_pos_0p3 = _step( 0.3, "wz", "e2_wz_+0.3");  e2_wz_neg_0p3 = _step(-0.3, "wz", "e2_wz_-0.3")
+e2_wz_pos_0p6 = _step( 0.6, "wz", "e2_wz_+0.6");  e2_wz_neg_0p6 = _step(-0.6, "wz", "e2_wz_-0.6")
+e2_wz_pos_1p0 = _step( 1.0, "wz", "e2_wz_+1.0");  e2_wz_neg_1p0 = _step(-1.0, "wz", "e2_wz_-1.0")
+e2_wz_pos_1p5 = _step( 1.5, "wz", "e2_wz_+1.5");  e2_wz_neg_1p5 = _step(-1.5, "wz", "e2_wz_-1.5")
+
+# E3 — vx saturation ramp (5 m runway)
+e3_vx_ramp_0_to_1p2_5m = TestRecipe(
+    name="e3_vx_ramp_0_to_1.2_5m", test_type="ramp", duration_s=7.0,
+    signal_fn=ramp(start=0.0, end=1.2, duration=7.0, channel="vx"),
+    pre_roll_s=1.5, post_roll_s=1.5,
+)
+
+# E4 — wz saturation ramp (in place)
+e4_wz_ramp_0_to_4 = TestRecipe(
+    name="e4_wz_ramp_0_to_4", test_type="ramp", duration_s=15.0,
+    signal_fn=ramp(start=0.0, end=4.0, duration=15.0, channel="wz"),
+    pre_roll_s=2.0, post_roll_s=2.0,
+)
+
+# E7a — pure wz, measure vx leak
+e7a_wz_pos_0p3 = _const_hold(0, 0,  0.3, "e7a_wz_+0.3");  e7a_wz_neg_0p3 = _const_hold(0, 0, -0.3, "e7a_wz_-0.3")
+e7a_wz_pos_0p8 = _const_hold(0, 0,  0.8, "e7a_wz_+0.8");  e7a_wz_neg_0p8 = _const_hold(0, 0, -0.8, "e7a_wz_-0.8")
+e7a_wz_pos_1p5 = _const_hold(0, 0,  1.5, "e7a_wz_+1.5");  e7a_wz_neg_1p5 = _const_hold(0, 0, -1.5, "e7a_wz_-1.5")
+
+# E7b — pure vx, measure wz leak
+e7b_vx_pos_0p3 = _const_hold( 0.3, 0, 0, "e7b_vx_+0.3");  e7b_vx_neg_0p3 = _const_hold(-0.3, 0, 0, "e7b_vx_-0.3")
+e7b_vx_pos_0p6 = _const_hold( 0.6, 0, 0, "e7b_vx_+0.6");  e7b_vx_neg_0p6 = _const_hold(-0.6, 0, 0, "e7b_vx_-0.6")
+e7b_vx_pos_1p0 = _const_hold( 1.0, 0, 0, "e7b_vx_+1.0");  e7b_vx_neg_1p0 = _const_hold(-1.0, 0, 0, "e7b_vx_-1.0")
+
+# E8 — deadtime precision (sharp 1.0 m/s vx step, 0.5s hold)
+e8_vx_short_step = TestRecipe(
+    name="e8_vx_short_step", test_type="step", duration_s=0.5,
+    signal_fn=step(amplitude=1.0, channel="vx"),
+    pre_roll_s=1.0, post_roll_s=2.0,
+)
+e8_vx_short_step_neg = TestRecipe(
+    name="e8_vx_short_step_neg", test_type="step", duration_s=0.5,
+    signal_fn=step(amplitude=-1.0, channel="vx"),
+    pre_roll_s=1.0, post_roll_s=2.0,
+)
+
+# Sanity step
+step_vx_1 = TestRecipe(
+    name="step_vx_1.0", test_type="step", duration_s=3.0,
+    signal_fn=step(amplitude=1.0, channel="vx"),
+)
+```
+
 ---
 
 ## 0. Pre-flight (1 minute)
@@ -51,7 +125,7 @@ committing to a long session. Confirms:
 
 ```
 python -m dimos.utils.characterization.scripts.run_session \
-    --recipes "dimos.utils.characterization.examples:step_vx_1:1" \
+    --recipes "my_recipes:step_vx_1:1" \
     --surface $SURFACE --notes "morning sanity" \
     --out-dir ~/char_runs
 ```
@@ -60,7 +134,7 @@ After it finishes, look at the plot:
 
 ```
 SESSION=$(ls -td ~/char_runs/session_*/ | head -1); SESSION=${SESSION%/}
-python -m dimos.utils.characterization.scripts.analyze_run $SESSION/000_*
+python -m dimos.utils.characterization.scripts.analyze run $SESSION/000_*
 xdg-open $SESSION/000_*/plot.svg
 ```
 
@@ -81,7 +155,7 @@ python -m dimos.utils.characterization.scripts.run_session \
     --randomize --rng-seed 1 \
     --surface $SURFACE --notes "E1 vx step matrix, 5 reps" \
     --out-dir ~/char_runs \
-    --recipes "dimos.utils.characterization.experiments:e1_vx_pos_0p3:5,dimos.utils.characterization.experiments:e1_vx_neg_0p3:5,dimos.utils.characterization.experiments:e1_vx_pos_0p6:5,dimos.utils.characterization.experiments:e1_vx_neg_0p6:5,dimos.utils.characterization.experiments:e1_vx_pos_1p0:5,dimos.utils.characterization.experiments:e1_vx_neg_1p0:5,dimos.utils.characterization.experiments:e1_vx_pos_1p5:5,dimos.utils.characterization.experiments:e1_vx_neg_1p5:5"
+    --recipes "my_recipes:e1_vx_pos_0p3:5,my_recipes:e1_vx_neg_0p3:5,my_recipes:e1_vx_pos_0p6:5,my_recipes:e1_vx_neg_0p6:5,my_recipes:e1_vx_pos_1p0:5,my_recipes:e1_vx_neg_1p0:5,my_recipes:e1_vx_pos_1p5:5,my_recipes:e1_vx_neg_1p5:5"
 ```
 
 What the syntax does:
@@ -111,12 +185,12 @@ What the syntax does:
 ```
 SESSION=$(ls -td ~/char_runs/session_*/ | head -1); SESSION=${SESSION%/}
 echo "$SESSION"
-for d in $SESSION/0*; do python -m dimos.utils.characterization.scripts.analyze_run "$d"; done
+for d in $SESSION/0*; do python -m dimos.utils.characterization.scripts.analyze run "$d"; done
 
 # Note: '+' in recipe names is sanitized to '_' in dir names, so the
 # positive amplitudes match with double-underscore (e.g. e1_vx__1.0).
 for amp in _0.3 -0.3 _0.6 -0.6 _1.0 -1.0 _1.5 -1.5; do
-  python -m dimos.utils.characterization.scripts.compare_runs $SESSION/*e1_vx_${amp}_* \
+  python -m dimos.utils.characterization.scripts.analyze compare $SESSION/*e1_vx_${amp}_* \
       --out $SESSION/compare_e1_vx_${amp}.svg 2>/dev/null
 done
 
@@ -137,7 +211,7 @@ be roughly linear up to wherever the Go2 saturates.
 
 ```
 python -m dimos.utils.characterization.scripts.run_session \
-    --recipes "dimos.utils.characterization.experiments:e3_vx_ramp_0_to_1p2_5m:5" \
+    --recipes "my_recipes:e3_vx_ramp_0_to_1p2_5m:5" \
     --surface $SURFACE --notes "E3 vx ramp x5 (5m runway recipe)" \
     --out-dir ~/char_runs
 ```
@@ -149,8 +223,8 @@ facing the other end. Each run travels ~4.2 m + braking distance.
 
 ```
 SESSION=$(ls -td ~/char_runs/session_*/ | head -1); SESSION=${SESSION%/}
-for d in $SESSION/0*; do python -m dimos.utils.characterization.scripts.analyze_run "$d"; done
-python -m dimos.utils.characterization.scripts.compare_runs $SESSION/0* --out $SESSION/compare_e3.svg
+for d in $SESSION/0*; do python -m dimos.utils.characterization.scripts.analyze run "$d"; done
+python -m dimos.utils.characterization.scripts.analyze compare $SESSION/0* --out $SESSION/compare_e3.svg
 xdg-open $SESSION/compare_e3.svg
 ```
 
@@ -169,7 +243,7 @@ python -m dimos.utils.characterization.scripts.run_session \
     --randomize --rng-seed 2 \
     --surface $SURFACE --notes "E2 wz step matrix, 5 reps" \
     --out-dir ~/char_runs \
-    --recipes "dimos.utils.characterization.experiments:e2_wz_pos_0p3:5,dimos.utils.characterization.experiments:e2_wz_neg_0p3:5,dimos.utils.characterization.experiments:e2_wz_pos_0p6:5,dimos.utils.characterization.experiments:e2_wz_neg_0p6:5,dimos.utils.characterization.experiments:e2_wz_pos_1p0:5,dimos.utils.characterization.experiments:e2_wz_neg_1p0:5,dimos.utils.characterization.experiments:e2_wz_pos_1p5:5,dimos.utils.characterization.experiments:e2_wz_neg_1p5:5"
+    --recipes "my_recipes:e2_wz_pos_0p3:5,my_recipes:e2_wz_neg_0p3:5,my_recipes:e2_wz_pos_0p6:5,my_recipes:e2_wz_neg_0p6:5,my_recipes:e2_wz_pos_1p0:5,my_recipes:e2_wz_neg_1p0:5,my_recipes:e2_wz_pos_1p5:5,my_recipes:e2_wz_neg_1p5:5"
 ```
 
 **During the session:** the robot rotates in place. Reposition
@@ -179,10 +253,10 @@ between runs only if it has drifted out of place.
 
 ```
 SESSION=$(ls -td ~/char_runs/session_*/ | head -1); SESSION=${SESSION%/}
-for d in $SESSION/0*; do python -m dimos.utils.characterization.scripts.analyze_run "$d"; done
+for d in $SESSION/0*; do python -m dimos.utils.characterization.scripts.analyze run "$d"; done
 
 for amp in _0.3 -0.3 _0.6 -0.6 _1.0 -1.0 _1.5 -1.5; do
-  python -m dimos.utils.characterization.scripts.compare_runs $SESSION/*e2_wz_${amp}_* \
+  python -m dimos.utils.characterization.scripts.analyze compare $SESSION/*e2_wz_${amp}_* \
       --out $SESSION/compare_e2_wz_${amp}.svg 2>/dev/null
 done
 ls $SESSION/compare_e2_wz_*.svg
@@ -217,7 +291,7 @@ In-place wz ramp 0 → 4 rad/s over 15 s. Should reveal max yaw rate.
 
 ```
 python -m dimos.utils.characterization.scripts.run_session \
-    --recipes "dimos.utils.characterization.experiments:e4_wz_ramp_0_to_4:5" \
+    --recipes "my_recipes:e4_wz_ramp_0_to_4:5" \
     --surface $SURFACE --notes "E4 wz ramp x5" \
     --out-dir ~/char_runs
 ```
@@ -226,8 +300,8 @@ python -m dimos.utils.characterization.scripts.run_session \
 
 ```
 SESSION=$(ls -td ~/char_runs/session_*/ | head -1); SESSION=${SESSION%/}
-for d in $SESSION/0*; do python -m dimos.utils.characterization.scripts.analyze_run "$d"; done
-python -m dimos.utils.characterization.scripts.compare_runs $SESSION/0* --out $SESSION/compare_e4.svg
+for d in $SESSION/0*; do python -m dimos.utils.characterization.scripts.analyze run "$d"; done
+python -m dimos.utils.characterization.scripts.analyze compare $SESSION/0* --out $SESSION/compare_e4.svg
 xdg-open $SESSION/compare_e4.svg
 ```
 
@@ -245,17 +319,17 @@ python -m dimos.utils.characterization.scripts.run_session \
     --randomize --rng-seed 71 \
     --surface $SURFACE --notes "E7a pure-wz cross-coupling matrix" \
     --out-dir ~/char_runs \
-    --recipes "dimos.utils.characterization.experiments:e7a_wz_pos_0p3:3,dimos.utils.characterization.experiments:e7a_wz_neg_0p3:3,dimos.utils.characterization.experiments:e7a_wz_pos_0p8:3,dimos.utils.characterization.experiments:e7a_wz_neg_0p8:3,dimos.utils.characterization.experiments:e7a_wz_pos_1p5:3,dimos.utils.characterization.experiments:e7a_wz_neg_1p5:3"
+    --recipes "my_recipes:e7a_wz_pos_0p3:3,my_recipes:e7a_wz_neg_0p3:3,my_recipes:e7a_wz_pos_0p8:3,my_recipes:e7a_wz_neg_0p8:3,my_recipes:e7a_wz_pos_1p5:3,my_recipes:e7a_wz_neg_1p5:3"
 ```
 
 **After:**
 
 ```
 SESSION=$(ls -td ~/char_runs/session_*/ | head -1); SESSION=${SESSION%/}
-for d in $SESSION/0*; do python -m dimos.utils.characterization.scripts.analyze_run "$d"; done
+for d in $SESSION/0*; do python -m dimos.utils.characterization.scripts.analyze run "$d"; done
 
 for amp in _0.3 -0.3 _0.8 -0.8 _1.5 -1.5; do
-  python -m dimos.utils.characterization.scripts.compare_runs $SESSION/*e7a_wz_${amp}_* \
+  python -m dimos.utils.characterization.scripts.analyze compare $SESSION/*e7a_wz_${amp}_* \
       --out $SESSION/compare_e7a_${amp}.svg 2>/dev/null
 done
 ls $SESSION/compare_e7a_*.svg
@@ -280,7 +354,7 @@ python -m dimos.utils.characterization.scripts.run_session \
     --randomize --rng-seed 72 \
     --surface $SURFACE --notes "E7b pure-vx cross-coupling matrix" \
     --out-dir ~/char_runs \
-    --recipes "dimos.utils.characterization.experiments:e7b_vx_pos_0p3:3,dimos.utils.characterization.experiments:e7b_vx_neg_0p3:3,dimos.utils.characterization.experiments:e7b_vx_pos_0p6:3,dimos.utils.characterization.experiments:e7b_vx_neg_0p6:3,dimos.utils.characterization.experiments:e7b_vx_pos_1p0:3,dimos.utils.characterization.experiments:e7b_vx_neg_1p0:3"
+    --recipes "my_recipes:e7b_vx_pos_0p3:3,my_recipes:e7b_vx_neg_0p3:3,my_recipes:e7b_vx_pos_0p6:3,my_recipes:e7b_vx_neg_0p6:3,my_recipes:e7b_vx_pos_1p0:3,my_recipes:e7b_vx_neg_1p0:3"
 ```
 
 **During the session:** randomization alternates ± directions, so the
@@ -291,10 +365,10 @@ between runs (~5 m each way).
 
 ```
 SESSION=$(ls -td ~/char_runs/session_*/ | head -1); SESSION=${SESSION%/}
-for d in $SESSION/0*; do python -m dimos.utils.characterization.scripts.analyze_run "$d"; done
+for d in $SESSION/0*; do python -m dimos.utils.characterization.scripts.analyze run "$d"; done
 
 for amp in _0.3 -0.3 _0.6 -0.6 _1.0 -1.0; do
-  python -m dimos.utils.characterization.scripts.compare_runs $SESSION/*e7b_vx_${amp}_* \
+  python -m dimos.utils.characterization.scripts.analyze compare $SESSION/*e7b_vx_${amp}_* \
       --out $SESSION/compare_e7b_${amp}.svg 2>/dev/null
 done
 ls $SESSION/compare_e7b_*.svg
@@ -314,7 +388,7 @@ python -m dimos.utils.characterization.scripts.run_session \
     --randomize --rng-seed 8 \
     --surface $SURFACE --notes "E8 deadtime 30 reps alternating" \
     --out-dir ~/char_runs \
-    --recipes "dimos.utils.characterization.experiments:e8_vx_short_step:15,dimos.utils.characterization.experiments:e8_vx_short_step_neg:15"
+    --recipes "my_recipes:e8_vx_short_step:15,my_recipes:e8_vx_short_step_neg:15"
 ```
 
 **During the session:** each run only travels ~0.5 m, so repositioning
@@ -325,9 +399,9 @@ center with WASD.
 
 ```
 SESSION=$(ls -td ~/char_runs/session_*/ | head -1); SESSION=${SESSION%/}
-for d in $SESSION/0*; do python -m dimos.utils.characterization.scripts.analyze_run "$d"; done
-python -m dimos.utils.characterization.scripts.compare_runs $SESSION/*e8_vx_short_step_r* --out $SESSION/compare_e8_pos.svg 2>/dev/null
-python -m dimos.utils.characterization.scripts.compare_runs $SESSION/*e8_vx_short_step_neg_r* --out $SESSION/compare_e8_neg.svg 2>/dev/null
+for d in $SESSION/0*; do python -m dimos.utils.characterization.scripts.analyze run "$d"; done
+python -m dimos.utils.characterization.scripts.analyze compare $SESSION/*e8_vx_short_step_r* --out $SESSION/compare_e8_pos.svg 2>/dev/null
+python -m dimos.utils.characterization.scripts.analyze compare $SESSION/*e8_vx_short_step_neg_r* --out $SESSION/compare_e8_neg.svg 2>/dev/null
 ```
 
 The standard plots show rise/settle at recipe level. Aggregating the
