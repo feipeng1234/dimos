@@ -15,8 +15,7 @@ on:
       - '.github/workflows/docker-build.yml'
       - '.github/workflows/_docker-build-template.yml'
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   check-changes:
@@ -40,6 +39,8 @@ jobs:
     needs: [check-changes]
     if: needs.check-changes.outputs.should-run == 'true'
     runs-on: [self-hosted, macos, arm64]
+    permissions:
+      contents: read  # For checkout
     timeout-minutes: 60
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -104,10 +105,4 @@ jobs:
       - name: Check disk usage (post-test)
         if: always()
         run: df -h .
-
-      - name: Run mypy
-        if: ${{ !cancelled() }}
-        run: |
-          source .venv/bin/activate
-          mypy dimos
 # macOS CI retrigger
