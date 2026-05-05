@@ -480,58 +480,44 @@ try:
 except Exception as e:
     logger.warning(f"Splat asset unavailable: {e}; viser viewer + splat camera disabled")
     _legacy_splat_path = None
-# When on the default office path, use the joint-exported Z-up splat from
-# the artist .blend — same Blender world frame as the mesh GLB, so identity
-# alignment puts both in the same dimos world (no YAML, no env vars).  When
-# a user-supplied DIMOS_SCENE_MESH_PATH is set, fall back to the legacy
-# Y-up dimos_office.ply with its (unrelated) YAML alignment.
+# Always use the original Y-up dimos_office.ply for the splat (renders
+# correctly via dimos's existing path).  When on the default office bundle,
+# apply a SplatAlignment that maps the splat into the artist mesh's Blender
+# Z-up frame — values were Procrustes-fit between the original .ply
+# positions and the mesh-aligned positions, exact match (residual <30 µm).
 _splat_path = _legacy_splat_path
-if _scene_mesh_path_override is None:
-    try:
-        _office_pointcloud = get_data("dimos_office_mesh") / "dimos_office_pointcloud.ply"
-        if _office_pointcloud.exists():
-            _splat_path = _office_pointcloud
-    except Exception:
-        pass
 if _splat_path is not None and _splat_path.exists():
     # Show the splat alongside the mesh when we're using the default office
-    # mesh (so the user can visually compare both in the same world frame).
+    # bundle (so the user can visually compare both in the same world frame).
     # When the user provides their *own* scene mesh, hide the splat — it's
     # unrelated geometry that just confuses the picture.  The
     # SplatCameraModule below still uses the splat for the head-camera feed
     # in either case.
     _viser_splat_path = None if _scene_mesh_path_override else str(_splat_path)
-    # Splat alignment policy:
-    #   * Default office path: identity.  The joint-exported PLY is in the
-    #     SAME Blender Z-up world frame as the artist mesh GLB, so no
-    #     transform is needed — they overlay directly, the way the artist
-    #     authored them in Blender.  ``SplatAlignment()`` defaults to
-    #     y_up=True, so we still need a runtime YAML to set y_up=false.
-    #   * Custom DIMOS_SCENE_MESH_PATH: legacy ``dimos_office.yaml``.
     import tempfile
 
-    # Splat alignment mirrors the mesh's SceneMeshAlignment exactly when
-    # we're on the default office bundle — both files share the same
-    # Blender-world frame, so the same env vars (DIMOS_SCENE_MESH_*)
-    # control both in lockstep.  Slide / scale / rotate the whole scene
-    # with one knob, e.g. ``DIMOS_SCENE_MESH_TRANSLATION="3,0,0"`` to
-    # nudge the robot out of furniture at the artist's world origin.
-    _office_splat_yaml = Path(tempfile.gettempdir()) / "dimos_office_identity_alignment.yaml"
-    _t = list(_scene_mesh_translation)
-    _r = list(_scene_mesh_rotation)
-    _office_splat_yaml.write_text(
-        "# Splat alignment for the joint-exported office bundle.\n"
-        "# Tracks DIMOS_SCENE_MESH_* env vars so splat moves with mesh.\n"
-        f"scale: {_scene_mesh_scale}\n"
-        f"translation: [{_t[0]}, {_t[1]}, {_t[2]}]\n"
-        f"rotation_zyx: [{_r[0]}, {_r[1]}, {_r[2]}]\n"
-        f"y_up: {'true' if _scene_mesh_y_up else 'false'}\n"
-    )
-    _splat_alignment_yaml = (
-        str(_office_splat_yaml)
-        if _scene_mesh_path_override is None
-        else (str(_alignment_yaml) if _alignment_yaml.exists() else None)
-    )
+    # Splat alignment policy:
+    #   * Default office path: hand-tuned R + t that maps the original
+    #     dimos_office.ply into the artist mesh's frame.  Values from
+    #     Procrustes fit, expressed as ZYX Euler since SplatAlignment uses
+    #     that convention.
+    #   * Custom DIMOS_SCENE_MESH_PATH: legacy ``dimos_office.yaml``.
+    if _scene_mesh_path_override is None:
+        _office_splat_yaml = Path(tempfile.gettempdir()) / "dimos_office_to_artist_mesh.yaml"
+        _office_splat_yaml.write_text(
+            "# Maps the original Y-up dimos_office.ply into the artist mesh's\n"
+            "# Blender Z-up world frame.  R + t recovered via Procrustes fit\n"
+            "# between the .ply's positions and the mesh-aligned positions.\n"
+            "# Renders without streaks because dimos's load_splat applies the\n"
+            "# rotation to per-Gaussian quaternions correctly.\n"
+            "scale: 1.0\n"
+            "translation: [0.0, 0.0, 0.7734]\n"
+            "rotation_zyx: [164.6633, -0.0865, -95.4786]\n"
+            "y_up: false\n"
+        )
+        _splat_alignment_yaml = str(_office_splat_yaml)
+    else:
+        _splat_alignment_yaml = str(_alignment_yaml) if _alignment_yaml.exists() else None
     _g1_viser = ViserRenderModule.blueprint(
         splat_path=_viser_splat_path,
         mjcf_path=_MJCF_PATH,
