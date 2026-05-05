@@ -154,7 +154,6 @@ class RecordReplay:
         for unsub in self._unsubscribes:
             unsub()
         self._unsubscribes.clear()
-        self._ts_offsets.clear()
         logger.info("Recording stopped")
 
     def _on_message(self, msg: object, topic: Topic) -> None:
