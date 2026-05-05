@@ -12,14 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ACT inference blueprint. ActionReplayer is registered by the per-robot
-coordinator blueprint (passed in below). v1 placeholder uses the existing
-teleop coordinator; replace with a coordinator that registers ActionReplayer.
+"""ACT inference blueprints.
+
+`ChunkPolicyModule` publishes `joint_command` directly so a coordinator's
+servo / position task can consume it without an `ActionReplayer` task in
+the tick loop. Compose with the user's coordinator blueprint at the call
+site, e.g.::
+
+    autoconnect(learning_infer_chunkpolicy_only, my_servo_coordinator)
 """
 
 from __future__ import annotations
 
-from dimos.control.blueprints.teleop import coordinator_teleop_xarm7
 from dimos.core.coordination.blueprints import autoconnect
 from dimos.core.transport import LCMTransport
 from dimos.hardware.sensors.camera.realsense.camera import RealSenseCamera
@@ -28,25 +32,27 @@ from dimos.learning.policy.base import ActionChunk
 from dimos.msgs.sensor_msgs.Image import Image
 from dimos.msgs.sensor_msgs.JointState import JointState
 
-_T_COLOR_IMAGE = "/camera/color_image"
-_T_JOINT_STATE = "/coordinator/joint_state"
-_T_ACTION_CHUNK = "/learning/action_chunk"
+# Stable topics so external tools (lcmspy, dimos topic echo) work without rebuild.
+_T_COLOR_IMAGE   = "/camera/color_image"
+_T_JOINT_STATE   = "/coordinator/joint_state"
+_T_ACTION_CHUNK  = "/learning/action_chunk"
+_T_JOINT_COMMAND = "/teleop/joint_command"  # matches coordinator_servo_* default
+
+_INFER_TRANSPORTS = {
+    ("color_image",   Image):       LCMTransport(_T_COLOR_IMAGE,   Image),
+    ("joint_state",   JointState):  LCMTransport(_T_JOINT_STATE,   JointState),
+    ("action_chunk",  ActionChunk): LCMTransport(_T_ACTION_CHUNK,  ActionChunk),
+    ("joint_command", JointState):  LCMTransport(_T_JOINT_COMMAND, JointState),
+}
 
 
-learning_infer_xarm7 = autoconnect(
+learning_infer_chunkpolicy_only = autoconnect(
     RealSenseCamera.blueprint(enable_pointcloud=False),
     ChunkPolicyModule.blueprint(
-        policy_path="data/runs/act_pick_red",
+        policy_path="data/runs/act_pickplace_001",
         inference_rate_hz=30.0,
     ),
-    coordinator_teleop_xarm7,  # TODO: replace with coordinator_action_replayer_xarm7
-).transports(
-    {
-        ("color_image", Image): LCMTransport(_T_COLOR_IMAGE, Image),
-        ("joint_state", JointState): LCMTransport(_T_JOINT_STATE, JointState),
-        ("action_chunk", ActionChunk): LCMTransport(_T_ACTION_CHUNK, ActionChunk),
-    }
-)
+).transports(_INFER_TRANSPORTS)
 
 
-__all__ = ["learning_infer_xarm7"]
+__all__ = ["learning_infer_chunkpolicy_only"]

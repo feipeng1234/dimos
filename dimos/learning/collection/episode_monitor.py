@@ -15,13 +15,16 @@
 """Single point of teleop-input → EpisodeStatus translation.
 
 Watches buttons / keyboard, runs the start/save/discard state machine,
-publishes EpisodeStatus on every transition. RecordReplay captures that
-stream into session.db; DataPrep reads only the recorded EpisodeStatus
-events offline — never raw buttons or keypresses.
+publishes EpisodeStatus on every transition. RecordReplay (or whatever
+records the bus) captures that stream into session.db; DataPrep reads
+only the recorded EpisodeStatus events offline — never raw buttons or
+keypresses.
 """
 
 from __future__ import annotations
 
+import threading
+import time
 from typing import Any, Literal
 
 from pydantic import BaseModel
@@ -87,37 +90,96 @@ class EpisodeMonitorModule(Module):
         self._discarded: int = 0
         self._current_start_ts: float | None = None
         self._prev_bits: dict[str, bool] = {}  # rising-edge detection for buttons
+        self._lock = threading.Lock()
 
     @rpc
     def start(self) -> None:
-        raise NotImplementedError
+        super().start()
+        self.buttons.subscribe(self._on_buttons)
+        self.keyboard.subscribe(self._on_keyboard)
+        # Emit an initial idle status so subscribers (and recorders) have a
+        # known starting point in the timeline.
+        self._publish("init")
 
     @rpc
     def stop(self) -> None:
-        raise NotImplementedError
+        super().stop()
 
     @rpc
     def reset_counters(self) -> EpisodeStatus:
-        raise NotImplementedError
+        with self._lock:
+            self._state = "idle"
+            self._saved = 0
+            self._discarded = 0
+            self._current_start_ts = None
+            self._prev_bits = {}
+        return self._publish("init")
 
     @rpc
     def get_status(self) -> EpisodeStatus:
-        raise NotImplementedError
+        with self._lock:
+            return EpisodeStatus(
+                state=self._state,
+                episodes_saved=self._saved,
+                episodes_discarded=self._discarded,
+                current_episode_start_ts=self._current_start_ts,
+                last_event="init",
+                task_label=self.config.default_task_label,
+            )
+
+    # ── port handlers ────────────────────────────────────────────────────────
 
     def _on_buttons(self, msg: Buttons) -> None:
         """Rising-edge detect against `config.button_map`; advance state machine."""
-        raise NotImplementedError
+        ts = time.time()
+        for event_name, alias_or_attr in self.config.button_map.items():
+            attr = BUTTON_ALIASES.get(alias_or_attr, alias_or_attr)
+            try:
+                pressed = bool(getattr(msg, attr))
+            except AttributeError:
+                continue
+            prev = self._prev_bits.get(attr, False)
+            self._prev_bits[attr] = pressed
+            if pressed and not prev:  # rising edge
+                self._transition(event_name, ts)
 
     def _on_keyboard(self, msg: KeyPress) -> None:
         """Match `msg.key` against `config.keyboard_map`; advance state machine."""
-        raise NotImplementedError
+        for event_name, key in self.config.keyboard_map.items():
+            if msg.key == key:
+                self._transition(event_name, msg.ts)
+                break
 
     def _transition(self, event: Literal["start", "save", "discard"], ts: float) -> None:
-        """Apply the state-machine transition and publish EpisodeStatus.
+        """State-machine transition. Publishes EpisodeStatus on every change."""
+        with self._lock:
+            if event == "start":
+                # Auto-commit any in-progress episode (matches DataPrep extractor).
+                if self._state == "recording" and self._current_start_ts is not None:
+                    self._saved += 1
+                self._state = "recording"
+                self._current_start_ts = ts
+            elif event == "save":
+                if self._state == "recording":
+                    self._saved += 1
+                self._state = "idle"
+                self._current_start_ts = None
+            elif event == "discard":
+                if self._state == "recording":
+                    self._discarded += 1
+                self._state = "idle"
+                self._current_start_ts = None
+        self._publish(event)
 
-        IDLE      --start-->     RECORDING
-        RECORDING --save-->      IDLE        (commit, saved += 1)
-        RECORDING --discard-->   IDLE        (drop, discarded += 1)
-        RECORDING --start-->     RECORDING   (auto-commit prev, begin new)
-        """
-        raise NotImplementedError
+    def _publish(self, last_event: Literal["start", "save", "discard", "init"]) -> EpisodeStatus:
+        with self._lock:
+            status = EpisodeStatus(
+                state=self._state,
+                episodes_saved=self._saved,
+                episodes_discarded=self._discarded,
+                current_episode_start_ts=self._current_start_ts,
+                last_event=last_event,
+                task_label=self.config.default_task_label,
+            )
+        self.status.publish(status)
+        return status
