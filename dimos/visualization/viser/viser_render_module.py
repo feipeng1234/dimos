@@ -128,20 +128,29 @@ class ViserRenderModule(Module):
         self._render_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._path_handle: Any = None
-        # Lidar overlay state.  GUI checkbox toggles visibility; the
-        # handle holds the most recently uploaded scene element so we
-        # can replace it on the next /lidar message instead of
-        # accumulating cloud-on-cloud.  `_lidar_visible` is read by
-        # the In subscriber so toggling off skips the upload entirely.
+        # Layer-visibility state.  Three independent toggles in the
+        # viser GUI panel — Splat / Mesh / Lidar — each gating one
+        # backdrop so any subset can be shown.  The current and
+        # previous designs (a Splat-vs-Mesh dropdown plus separate
+        # checkboxes) were redundant because they overlapped on mesh
+        # visibility and forced exclusivity the user didn't want.
+        # GaussianSplatHandle in viser 1.0.26 advertises `.visible` but
+        # the splat shader pipeline (still labeled "work-in-progress"
+        # in the docstring) ignores it — flipping the property does
+        # nothing in the browser.  Keep a copy of the loaded splat so
+        # the toggle can re-add the handle on demand instead.
+        self._splat_visible: bool = True
+        self._splat_checkbox: Any = None
+        self._splat_data: Any = None  # cached load_splat() result
+        self._scene_mesh_visible: bool = True
+        self._scene_mesh_checkbox: Any = None
+        # Lidar overlay handle is replaced (not appended) on every
+        # incoming /global_map message so we don't accumulate
+        # cloud-on-cloud.  `_lidar_visible` gates the upload itself
+        # so toggling off costs nothing.
         self._lidar_handle: Any = None
         self._lidar_visible: bool = True
         self._lidar_checkbox: Any = None
-        # Independent scene-mesh visibility toggle.  Lets a viewer hide
-        # the loaded `.usdz`/`.glb` mesh while keeping the lidar
-        # overlay visible — useful for sanity-checking what the lidar
-        # actually sees vs what the scene "should" look like.
-        self._scene_mesh_visible: bool = True
-        self._scene_mesh_checkbox: Any = None
 
     @rpc
     def start(self) -> None:
@@ -186,6 +195,7 @@ class ViserRenderModule(Module):
         logger.info(f"Viser viewer: http://localhost:{self._port}/")
 
         if splat is not None:
+            self._splat_data = splat
             self._splat_handle = self._server.scene.add_gaussian_splats(
                 "/splat",
                 centers=splat.centers,
@@ -271,43 +281,46 @@ class ViserRenderModule(Module):
             except Exception as e:
                 logger.warning(f"Viser: scene mesh load failed: {e}")
 
-        # View-mode toggle in the GUI — only shown when *both* a splat
-        # and a scene mesh are loaded (so the user has something to
-        # switch between).  In every other case we just show whatever
-        # backdrop got loaded; no dropdown clutter.
-        if self._splat_handle is not None and self._scene_mesh_handle is not None:
-            view_mode_dropdown = self._server.gui.add_dropdown(
-                "View mode", ["Splat", "Mesh"], initial_value="Mesh"
+        # Three independent layer toggles: Splat / Mesh / Lidar.
+        # Each checkbox only appears when the corresponding backdrop
+        # actually exists in this run (no point in a "Show splat" toggle
+        # when no splat was loaded).  Combined, they cover every subset
+        # — splat-only, mesh-only, lidar-only, splat+mesh, splat+lidar,
+        # mesh+lidar, all three.
+        if self._splat_handle is not None:
+            self._splat_checkbox = self._server.gui.add_checkbox(
+                "Show splat", initial_value=self._splat_visible
             )
 
-            def _apply_view_mode(mode: str) -> None:
-                if self._splat_handle is not None:
-                    self._splat_handle.visible = mode == "Splat"
-                if self._scene_mesh_handle is not None:
-                    self._scene_mesh_handle.visible = mode == "Mesh"
+            @self._splat_checkbox.on_update
+            def _on_splat_toggle(_: Any) -> None:
+                visible = bool(self._splat_checkbox.value)
+                self._splat_visible = visible
+                # `.visible = False` is silently ignored on
+                # GaussianSplatHandle in viser 1.0.26, so add/remove
+                # the handle outright.  Re-add costs ~one frame from
+                # the cached splat data.
+                if visible:
+                    if self._splat_handle is None and self._splat_data is not None:
+                        d = self._splat_data
+                        self._splat_handle = self._server.scene.add_gaussian_splats(
+                            "/splat",
+                            centers=d.centers,
+                            covariances=d.covariances,
+                            rgbs=d.rgbs,
+                            opacities=d.opacities,
+                        )
+                else:
+                    if self._splat_handle is not None:
+                        try:
+                            self._splat_handle.remove()
+                        except Exception as e:
+                            logger.debug(f"Viser splat remove failed: {e}")
+                        self._splat_handle = None
 
-            _apply_view_mode("Mesh")
-
-        # Lidar overlay toggle.  Shown unconditionally — when no
-        # publisher is connected the cloud just stays empty, but the
-        # checkbox makes it discoverable that the overlay exists.
-        self._lidar_checkbox = self._server.gui.add_checkbox(
-            "Show lidar pointcloud", initial_value=self._lidar_visible
-        )
-
-        @self._lidar_checkbox.on_update
-        def _on_lidar_toggle(_: Any) -> None:
-            self._lidar_visible = bool(self._lidar_checkbox.value)
-            if self._lidar_handle is not None:
-                self._lidar_handle.visible = self._lidar_visible
-
-        # Scene-mesh visibility toggle (only when a mesh is loaded).
-        # Independent of the splat-vs-mesh `view_mode_dropdown` above,
-        # which only appears when *both* are loaded.  Useful for
-        # inspecting the lidar overlay without the mesh occluding it.
         if self._scene_mesh_handle is not None:
             self._scene_mesh_checkbox = self._server.gui.add_checkbox(
-                "Show scene mesh", initial_value=self._scene_mesh_visible
+                "Show mesh", initial_value=self._scene_mesh_visible
             )
 
             @self._scene_mesh_checkbox.on_update
@@ -316,14 +329,18 @@ class ViserRenderModule(Module):
                 if self._scene_mesh_handle is not None:
                     self._scene_mesh_handle.visible = self._scene_mesh_visible
 
-        # Wire the splat<->mesh dropdown only when both backdrops are
-        # loaded (matches the conditional above where view_mode_dropdown
-        # is created — referencing it outside that branch is a NameError).
-        if self._splat_handle is not None and self._scene_mesh_handle is not None:
+        # Lidar overlay toggle is unconditional — when no publisher is
+        # connected the cloud stays empty, but having the checkbox
+        # always present makes the overlay discoverable.
+        self._lidar_checkbox = self._server.gui.add_checkbox(
+            "Show lidar", initial_value=self._lidar_visible
+        )
 
-            @view_mode_dropdown.on_update
-            def _on_view_mode(_event: Any) -> None:
-                _apply_view_mode(view_mode_dropdown.value)
+        @self._lidar_checkbox.on_update
+        def _on_lidar_toggle(_: Any) -> None:
+            self._lidar_visible = bool(self._lidar_checkbox.value)
+            if self._lidar_handle is not None:
+                self._lidar_handle.visible = self._lidar_visible
 
         # One frame per body; meshes are added as children so they
         # follow when the body frame moves.

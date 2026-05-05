@@ -550,14 +550,17 @@ if _splat_path is not None and _splat_path.exists():
             ("pointcloud_overlay", PointCloud2): LCMTransport("/global_map", PointCloud2),
         },
     )
-    # Camera publisher.  When the user provided their own scene mesh we
-    # render the head camera by ray-casting that mesh (so /splat/color_image
-    # actually shows the loaded scene); otherwise we fall back to the splat
-    # rasterizer driving dimos_office.  Set ``DIMOS_DISABLE_MESH_CAMERA=1``
-    # to force the splat path even when a mesh is provided (escape hatch
-    # while debugging — accepts any non-empty value other than "0").
-    _disable_mesh_cam = os.environ.get("DIMOS_DISABLE_MESH_CAMERA", "0") not in ("", "0")
-    if _scene_mesh_path and not _disable_mesh_cam:
+    # Camera publisher.  Splat wins when present — gsplat rasterization
+    # gives real colors regardless of what the scene mesh has baked in
+    # (artist meshes often export with flat-grey ColorVisuals + no
+    # textures).  MeshCameraModule's job is the fallback when there's
+    # no splat: ray-casts whatever colors the mesh actually carries.
+    # Override the default with DIMOS_USE_MESH_CAMERA=1 (e.g. when a
+    # custom scene's mesh has reliable colors and the splat is
+    # unrelated), or with the legacy DIMOS_DISABLE_MESH_CAMERA=1 which
+    # is a no-op now since splat is already the default.
+    _use_mesh_cam = os.environ.get("DIMOS_USE_MESH_CAMERA", "0") not in ("", "0")
+    if _scene_mesh_path and _use_mesh_cam:
         _g1_camera = MeshCameraModule.blueprint(
             scene_path=_scene_mesh_path,
             mjcf_path=_MJCF_PATH,
