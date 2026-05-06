@@ -42,9 +42,6 @@ def get_assets() -> dict[str, bytes]:
     # Assets used from https://sketchfab.com/3d-models/mersus-office-8714be387bcd406898b2615f7dae3a47
     # Created by Ryan Cassidy and Coleman Costello
     mjx_env.update_assets(assets, data_dir, "*.xml")
-    mjx_env.update_assets(
-        assets, data_dir, "*.obj"
-    )  # top-level scene meshes (e.g. dimos_office.obj)
     mjx_env.update_assets(assets, data_dir / "scene_office1/textures", "*.png")
     mjx_env.update_assets(assets, data_dir / "scene_office1/office_split", "*.obj")
     mjx_env.update_assets(assets, mjx_env.MENAGERIE_PATH / "unitree_go1" / "assets")
@@ -59,19 +56,8 @@ def get_assets() -> dict[str, bytes]:
 
 
 def load_model(
-    input_device: InputController,
-    robot: str,
-    scene_xml: str,
-    skip_controller: bool = False,
+    input_device: InputController, robot: str, scene_xml: str
 ) -> tuple[mujoco.MjModel, mujoco.MjData]:
-    """Load a MuJoCo model + data for ``robot`` inside ``scene_xml``.
-
-    When ``skip_controller=True``, the baked-in ONNX locomotion policy is
-    NOT installed as the MuJoCo control callback. Used by low-level
-    passthrough mode where an external caller (e.g. the dimos
-    ControlCoordinator via shared memory) drives ``data.ctrl`` each
-    tick.
-    """
     mujoco.set_mjcb_control(None)
 
     xml_string = get_model_xml(robot, scene_xml)
@@ -89,9 +75,6 @@ def load_model(
     ctrl_dt = 0.02
     n_substeps = round(ctrl_dt / sim_dt)
     model.opt.timestep = sim_dt
-
-    if skip_controller:
-        return model, data
 
     params = {
         "policy_path": (_get_data_dir() / f"{robot}_policy.onnx").as_posix(),
