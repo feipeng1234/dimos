@@ -50,6 +50,9 @@ from dimos.core.core import rpc
 from dimos.core.module import Module
 from dimos.core.stream import In, Out
 from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
+from dimos.msgs.geometry_msgs.Quaternion import Quaternion
+from dimos.msgs.geometry_msgs.Transform import Transform
+from dimos.msgs.geometry_msgs.Vector3 import Vector3
 from dimos.msgs.sensor_msgs.CameraInfo import CameraInfo
 from dimos.msgs.sensor_msgs.Image import Image, ImageFormat
 from dimos.msgs.sensor_msgs.JointState import JointState
@@ -694,7 +697,7 @@ class SplatCameraModule(Module):
         camera_spec: CameraSpec | None = None,
         render_hz: float = 10.0,
         info_hz: float = 1.0,
-        frame_id: str = "camera_optical",
+        frame_id: str = "splat_camera_optical_frame",
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -972,9 +975,34 @@ class SplatCameraModule(Module):
                 cam_pos, cam_wxyz = world_pose(body_pos, body_wxyz, self._camera_spec)
                 rgb = self._backend.render(cam_pos, cam_wxyz)
                 rgb = self._composite_scene_meshes(rgb, cam_pos, cam_wxyz)
+                ts = time.time()
+                # Publish tf for the actual rendering pose so consumers
+                # of the published image (perception2 etc.) can do
+                # ``tf.get(image.frame_id, world_frame, ts)`` and get
+                # the *correct* world->optical transform — even when
+                # ``camera_spec`` differs from the MJCF camera pose
+                # MujocoSimModule's tf publish refers to (e.g. when
+                # DIMOS_CAMERA_FORWARD=1 is set).
+                self.tf.publish(
+                    Transform(
+                        translation=Vector3(
+                            float(cam_pos[0]), float(cam_pos[1]), float(cam_pos[2])
+                        ),
+                        # ``world_pose`` returns wxyz; Quaternion stores xyzw.
+                        rotation=Quaternion(
+                            float(cam_wxyz[1]),
+                            float(cam_wxyz[2]),
+                            float(cam_wxyz[3]),
+                            float(cam_wxyz[0]),
+                        ),
+                        frame_id="world",
+                        child_frame_id=self._frame_id,
+                        ts=ts,
+                    )
+                )
                 self.color_image.publish(
                     Image(
-                        ts=time.time(),
+                        ts=ts,
                         frame_id=self._frame_id,
                         format=ImageFormat.RGB,
                         data=rgb,

@@ -54,7 +54,6 @@ from dimos.msgs.sensor_msgs.JointState import JointState
 from dimos.msgs.sensor_msgs.PointCloud2 import PointCloud2
 from dimos.simulation.engines.mujoco_engine import (
     CameraConfig,
-    CameraFrame,
     MujocoEngine,
 )
 from dimos.simulation.engines.mujoco_shm import (
@@ -634,7 +633,7 @@ class MujocoSimModule(
                 )
                 self.depth_image.publish(depth_img)
 
-            self._publish_tf(ts, frame)
+            self._publish_tf(ts, frame.cam_pos, frame.cam_mat)
 
             published_count += 1
             if published_count == 1:
@@ -667,16 +666,14 @@ class MujocoSimModule(
         self.camera_info.publish(info)
         self.depth_camera_info.publish(info)
 
-    def _publish_tf(self, ts: float, frame: CameraFrame | None) -> None:
-        if frame is None:
-            return
-        mj_rot = R.from_matrix(frame.cam_mat.reshape(3, 3))
+    def _publish_tf(self, ts: float, cam_pos: np.ndarray, cam_mat: np.ndarray) -> None:
+        mj_rot = R.from_matrix(cam_mat.reshape(3, 3))
         optical_rot = mj_rot * _RX180
         q = optical_rot.as_quat()  # xyzw
         pos = Vector3(
-            float(frame.cam_pos[0]),
-            float(frame.cam_pos[1]),
-            float(frame.cam_pos[2]),
+            float(cam_pos[0]),
+            float(cam_pos[1]),
+            float(cam_pos[2]),
         )
         rot = Quaternion(float(q[0]), float(q[1]), float(q[2]), float(q[3]))
         self.tf.publish(
@@ -699,6 +696,17 @@ class MujocoSimModule(
                 rotation=rot,
                 frame_id="world",
                 child_frame_id=self._camera_link,
+                ts=ts,
+            ),
+            # Alias for Detection3DModule's hardcoded "camera_optical"
+            # target frame (perception/detection/module3D.py:181).  Same
+            # pose as color_optical; lets the lidar-driven object DB do
+            # tf.get("camera_optical", "world", ts) without code changes.
+            Transform(
+                translation=pos,
+                rotation=rot,
+                frame_id="world",
+                child_frame_id="camera_optical",
                 ts=ts,
             ),
         )
@@ -745,6 +753,17 @@ class MujocoSimModule(
                 self.pointcloud.publish(
                     PointCloud2(pointcloud=pcd_o3d, ts=latest_ts or time.time(), frame_id="world")
                 )
+                # Publish head-camera TF here so consumers (ObjectDBModule,
+                # MeshCameraModule's TF lookups, etc.) see the optical
+                # frame even when ``enable_color`` / ``enable_depth`` are
+                # off and the camera-publish loop never registers
+                # head_color as a renderer.  Pose comes from MjData
+                # directly — populated every physics step regardless of
+                # rendering, so no GPU work added.
+                pose = self._engine.get_camera_pose(self.config.camera_name)
+                if pose is not None:
+                    cam_pos, cam_mat = pose
+                    self._publish_tf(latest_ts or time.time(), cam_pos, cam_mat)
             except Exception as exc:
                 logger.error("Multi-camera lidar fusion error", error=str(exc))
             return
