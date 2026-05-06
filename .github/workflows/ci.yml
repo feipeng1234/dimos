@@ -39,7 +39,7 @@ jobs:
         uses: pre-commit/action@v3.0.1
 
   tests:
-    timeout-minutes: 15
+    timeout-minutes: 20
     strategy:
       matrix:
         pyver: ['3.10', '3.11', '3.12', '3.13', '3.14']
@@ -125,7 +125,7 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       ALIBABA_API_KEY: ${{ secrets.ALIBABA_API_KEY }}
-    timeout-minutes: 20
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
