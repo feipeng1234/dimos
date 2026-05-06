@@ -420,15 +420,25 @@ class ModuleBase(Configurable, CompositeResource):
         from dimos.memory2.store.sqlite import SqliteStore
 
         self._rec_store = SqliteStore(path=db_path)
+        last_ts: dict[str, float] = {}
         for name, out in self.outputs.items():
             stream = self._rec_store.stream(name, out.type)
             reg = self._rec_store._registry.get(name)
-            if reg and "channel" not in reg:
-                reg["channel"] = f"/{name}#{out.type.msg_name}"
+            # `channel` is only meaningful for LCM-encodable types (used by
+            # RecordReplay to decode raw bytes via Topic.from_channel_str).
+            # Pickle/Pydantic streams store decoded Python objects directly.
+            msg_name = getattr(out.type, "msg_name", None)
+            if reg and "channel" not in reg and msg_name is not None:
+                reg["channel"] = f"/{name}#{msg_name}"
                 self._rec_store._registry.put(name, reg)
 
-            def cb(msg: Any, _stream: "Stream[object]" = stream) -> None:
+            def cb(msg: Any, _stream: "Stream[object]" = stream, _name: str = name) -> None:
                 ts = msg.ts if isinstance(msg, Timestamped) else time.time()
+                if last_ts.get(_name) == ts:
+                    # Same-ts republish (e.g. teleop loop ticking faster than
+                    # fresh controller poses arrive). SQLite enforces UNIQUE(ts).
+                    return
+                last_ts[_name] = ts
                 _stream.append(msg, ts=ts)
 
             self._rec_unsubs.append(out.subscribe(cb))

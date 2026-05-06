@@ -246,7 +246,9 @@ class QuestTeleopModule(Module):
             name="QuestTeleopWebServer",
         )
         self._web_server_thread.start()
-        logger.info(f"Quest teleop web server started on https://0.0.0.0:{self.config.server_port}")
+        logger.info(
+            f"Quest teleop web server started on https://{self._web_server.host}:{self.config.server_port}"
+        )
 
     def _stop_server(self) -> None:
         """Shutdown the embedded web server."""
@@ -282,29 +284,64 @@ class QuestTeleopModule(Module):
         """
         Holds self._lock for the entire iteration so overridable methods
         don't need to acquire it themselves.
+
+        Each step is wrapped in its own try/except so a failure in one
+        operation (e.g. publishing the right hand pose) does not mask or
+        block the others, and the log line names the failing operation.
         """
         period = 1.0 / self.config.control_loop_hz
 
         while not self._stop_event.is_set():
             loop_start = time.perf_counter()
-            try:
-                with self._lock:
-                    self._handle_engage()
 
-                    for hand in Hand:
+            with self._lock:
+                try:
+                    self._handle_engage()
+                except Exception as e:
+                    logger.error(f"_handle_engage failed: {type(e).__name__}: {e}", exc_info=True)
+
+                for hand in Hand:
+                    try:
                         if not self._should_publish(hand):
                             continue
-                        output_pose = self._get_output_pose(hand)
-                        if output_pose is not None:
-                            self._publish_msg(hand, output_pose)
+                    except Exception as e:
+                        logger.error(
+                            f"_should_publish({hand.name}) failed: {type(e).__name__}: {e}",
+                            exc_info=True,
+                        )
+                        continue
 
-                    # Always publish buttons regardless of engage state,
-                    # so UI/listeners can react to button presses (e.g., trigger engage).
+                    try:
+                        output_pose = self._get_output_pose(hand)
+                    except Exception as e:
+                        logger.error(
+                            f"_get_output_pose({hand.name}) failed: {type(e).__name__}: {e}",
+                            exc_info=True,
+                        )
+                        continue
+
+                    if output_pose is None:
+                        continue
+
+                    try:
+                        self._publish_msg(hand, output_pose)
+                    except Exception as e:
+                        logger.error(
+                            f"_publish_msg({hand.name}) failed: {type(e).__name__}: {e}",
+                            exc_info=True,
+                        )
+
+                # Always publish buttons regardless of engage state,
+                # so UI/listeners can react to button presses (e.g., trigger engage).
+                try:
                     left = self._controllers.get(Hand.LEFT)
                     right = self._controllers.get(Hand.RIGHT)
                     self._publish_button_state(left, right)
-            except Exception:
-                logger.exception("Error in teleop control loop")
+                except Exception as e:
+                    logger.error(
+                        f"_publish_button_state failed: {type(e).__name__}: {e}",
+                        exc_info=True,
+                    )
 
             elapsed = time.perf_counter() - loop_start
             sleep_time = period - elapsed

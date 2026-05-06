@@ -16,61 +16,68 @@
 
 from __future__ import annotations
 
+from dimos.control.coordinator import ControlCoordinator
 from dimos.core.coordination.blueprints import autoconnect
-from dimos.core.transport import LCMTransport
+from dimos.core.transport import LCMTransport, pLCMTransport
 from dimos.hardware.sensors.camera.realsense.camera import RealSenseCamera
 from dimos.learning.collection.episode_monitor import (
     EpisodeMonitorModule,
     EpisodeStatus,
 )
 from dimos.msgs.sensor_msgs.Image import Image
-from dimos.teleop.quest.blueprints import (
-    teleop_quest_dual,
-    teleop_quest_piper,
-    teleop_quest_xarm6,
-    teleop_quest_xarm7,
-)
+from dimos.simulation.engines.mujoco_sim_module import MujocoSimModule
+from dimos.teleop.quest.blueprints import teleop_quest_xarm7, teleop_quest_xarm7_sim
+from dimos.teleop.quest.quest_extensions import ArmTeleopModule
 from dimos.teleop.quest.quest_types import Buttons
 
 _DEFAULT_BUTTON_MAP = {"start": "A", "save": "B", "discard": "X"}
-_TRANSPORTS = {
-    ("buttons", Buttons): LCMTransport("/teleop/buttons", Buttons),
-    ("color_image", Image): LCMTransport("/camera/color_image", Image),
-    ("status", EpisodeStatus): LCMTransport("/learning/episode_status", EpisodeStatus),
-}
+# EpisodeStatus is a Pydantic BaseModel (no lcm_encode), so it travels
+# over a pickle transport.
+_STATUS_TRANSPORT = pLCMTransport("/learning/episode_status")
+_BUTTONS_TRANSPORT = LCMTransport("/teleop/buttons", Buttons)
 
 
-learning_collect_quest_xarm7 = autoconnect(
-    teleop_quest_xarm7,
-    RealSenseCamera.blueprint(enable_pointcloud=False),
-    EpisodeMonitorModule.blueprint(button_map=_DEFAULT_BUTTON_MAP),
-).transports(_TRANSPORTS)
+learning_collect_quest_xarm7 = (
+    autoconnect(
+        teleop_quest_xarm7,
+        RealSenseCamera.blueprint(enable_pointcloud=False),
+        EpisodeMonitorModule.blueprint(button_map=_DEFAULT_BUTTON_MAP),
+    )
+    .transports(
+        {
+            ("buttons", Buttons): _BUTTONS_TRANSPORT,
+            ("color_image", Image): LCMTransport("/camera/color_image", Image),
+            ("status", EpisodeStatus): _STATUS_TRANSPORT,
+        }
+    )
+    .default_record_modules(
+        ArmTeleopModule,
+        ControlCoordinator,
+        RealSenseCamera,
+        EpisodeMonitorModule,
+    )
+)
 
 
-learning_collect_quest_piper = autoconnect(
-    teleop_quest_piper,
-    RealSenseCamera.blueprint(enable_pointcloud=False),
-    EpisodeMonitorModule.blueprint(button_map=_DEFAULT_BUTTON_MAP),
-).transports(_TRANSPORTS)
-
-
-learning_collect_quest_xarm6 = autoconnect(
-    teleop_quest_xarm6,
-    RealSenseCamera.blueprint(enable_pointcloud=False),
-    EpisodeMonitorModule.blueprint(button_map=_DEFAULT_BUTTON_MAP),
-).transports(_TRANSPORTS)
-
-
-learning_collect_quest_dual = autoconnect(
-    teleop_quest_dual,
-    RealSenseCamera.blueprint(enable_pointcloud=False),
-    EpisodeMonitorModule.blueprint(button_map=_DEFAULT_BUTTON_MAP),
-).transports(_TRANSPORTS)
+# Sim records the MuJoCo color_image stream in place of RealSenseCamera.
+# teleop_quest_xarm7_sim already declares ArmTeleopModule, ControlCoordinator,
+# and MujocoSimModule for recording, so we only extend with the EpisodeMonitor.
+learning_collect_quest_xarm7_sim = (
+    autoconnect(
+        teleop_quest_xarm7_sim,
+        EpisodeMonitorModule.blueprint(button_map=_DEFAULT_BUTTON_MAP),
+    )
+    .transports(
+        {
+            ("buttons", Buttons): _BUTTONS_TRANSPORT,
+            ("status", EpisodeStatus): _STATUS_TRANSPORT,
+        }
+    )
+    .default_record_modules(EpisodeMonitorModule)
+)
 
 
 __all__ = [
-    "learning_collect_quest_dual",
-    "learning_collect_quest_piper",
-    "learning_collect_quest_xarm6",
     "learning_collect_quest_xarm7",
+    "learning_collect_quest_xarm7_sim",
 ]
