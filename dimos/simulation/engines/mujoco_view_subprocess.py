@@ -58,7 +58,18 @@ def main(mjcf_path: str) -> None:
         suffix = parts[1] if len(parts) > 1 else parts[0]
         return f"{suffix}_joint"
 
-    model = mujoco.MjModel.from_xml_path(mjcf_path)
+    # G1 GR00T MJCF references meshes by bare filename (menagerie convention);
+    # from_xml_path can't find them on disk.  Inject the dimos-bundled mesh
+    # bytes by name — same trick MujocoEngine uses.
+    try:
+        from dimos.simulation.mujoco.model import get_assets
+
+        with open(mjcf_path) as _f:
+            _xml_str = _f.read()
+        model = mujoco.MjModel.from_xml_string(_xml_str, assets=get_assets())
+    except Exception:
+        # Self-contained MJCFs (xarm scene.xml etc.) don't need assets.
+        model = mujoco.MjModel.from_xml_path(mjcf_path)
     data = mujoco.MjData(model)
     mujoco.mj_forward(model, data)
 
