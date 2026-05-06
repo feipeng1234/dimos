@@ -171,67 +171,69 @@ def make_quadruped_joints(hardware_id: HardwareId) -> list[JointName]:
     """Create joint names for a 12-DOF quadruped.
 
     Uses standard leg naming: FR/FL/RR/RL with 3 joints each
-    (hip, thigh, calf).
+    (hip, thigh, calf).  Slash-separated to match
+    ``split_joint_name`` (consistent with ``make_humanoid_joints``
+    and ``make_twist_base_joints``).
 
     Args:
         hardware_id: The hardware identifier (e.g., "go2")
 
     Returns:
-        List of 12 joint names like ["go2_FR_0", "go2_FR_1", ..., "go2_RL_2"]
+        List of 12 joint names like ["go2/FR_0", "go2/FR_1", ..., "go2/RL_2"]
     """
-    return [f"{hardware_id}_{j}" for j in _QUADRUPED_LEG_JOINTS]
+    return [f"{hardware_id}/{j}" for j in _QUADRUPED_LEG_JOINTS]
 
 
 _HUMANOID_29DOF_JOINTS = [
     # Left leg (0-5)
-    "LeftHipPitch",
-    "LeftHipRoll",
-    "LeftHipYaw",
-    "LeftKnee",
-    "LeftAnklePitch",
-    "LeftAnkleRoll",
+    "left_hip_pitch",
+    "left_hip_roll",
+    "left_hip_yaw",
+    "left_knee",
+    "left_ankle_pitch",
+    "left_ankle_roll",
     # Right leg (6-11)
-    "RightHipPitch",
-    "RightHipRoll",
-    "RightHipYaw",
-    "RightKnee",
-    "RightAnklePitch",
-    "RightAnkleRoll",
+    "right_hip_pitch",
+    "right_hip_roll",
+    "right_hip_yaw",
+    "right_knee",
+    "right_ankle_pitch",
+    "right_ankle_roll",
     # Waist (12-14)
-    "WaistYaw",
-    "WaistRoll",
-    "WaistPitch",
+    "waist_yaw",
+    "waist_roll",
+    "waist_pitch",
     # Left arm (15-21)
-    "LeftShoulderPitch",
-    "LeftShoulderRoll",
-    "LeftShoulderYaw",
-    "LeftElbow",
-    "LeftWristRoll",
-    "LeftWristPitch",
-    "LeftWristYaw",
+    "left_shoulder_pitch",
+    "left_shoulder_roll",
+    "left_shoulder_yaw",
+    "left_elbow",
+    "left_wrist_roll",
+    "left_wrist_pitch",
+    "left_wrist_yaw",
     # Right arm (22-28)
-    "RightShoulderPitch",
-    "RightShoulderRoll",
-    "RightShoulderYaw",
-    "RightElbow",
-    "RightWristRoll",
-    "RightWristPitch",
-    "RightWristYaw",
+    "right_shoulder_pitch",
+    "right_shoulder_roll",
+    "right_shoulder_yaw",
+    "right_elbow",
+    "right_wrist_roll",
+    "right_wrist_pitch",
+    "right_wrist_yaw",
 ]
 
 
 def make_humanoid_joints(hardware_id: HardwareId) -> list[JointName]:
     """Create joint names for a 29-DOF humanoid.
 
-    Covers 6-DOF legs, 3-DOF waist, and 7-DOF arms (with wrist).
+    Covers 6-DOF legs, 3-DOF waist, and 7-DOF arms.
 
     Args:
         hardware_id: The hardware identifier (e.g., "g1")
 
     Returns:
-        List of 29 joint names like ["g1_LeftHipPitch", ..., "g1_RightWristYaw"]
+        List of 29 joint names like ["g1/left_hip_pitch", ..., "g1/right_wrist_yaw"]
     """
-    return [f"{hardware_id}_{j}" for j in _HUMANOID_29DOF_JOINTS]
+    return [f"{hardware_id}/{j}" for j in _HUMANOID_29DOF_JOINTS]
 
 
 __all__ = [

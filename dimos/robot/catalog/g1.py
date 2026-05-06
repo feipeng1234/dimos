@@ -17,7 +17,7 @@
 Treats one G1 arm as a stationary 7-DOF manipulator rooted at
 ``torso_link``.  The G1 ``WHOLE_BODY`` HardwareComponent already
 publishes joint state under dimos canonical names
-(``g1_LeftShoulderPitch``, …) but the G1 URDF uses the upstream
+(``g1/left_shoulder_pitch``, …) but the G1 URDF uses the upstream
 Unitree names (``left_shoulder_pitch_joint``, …) — we expose
 ``joint_name_mapping`` so the manipulation module can translate
 between the two.
@@ -50,22 +50,22 @@ _G1_PACKAGE_DIR = LfsPath("g1_urdf")
 # what ``make_humanoid_joints("g1")`` emits — we hand-mirror them
 # rather than slicing g1_arms to keep this file standalone.
 _LEFT_ARM_JOINT_PAIRS = [
-    ("left_shoulder_pitch_joint", "g1_LeftShoulderPitch"),
-    ("left_shoulder_roll_joint", "g1_LeftShoulderRoll"),
-    ("left_shoulder_yaw_joint", "g1_LeftShoulderYaw"),
-    ("left_elbow_joint", "g1_LeftElbow"),
-    ("left_wrist_roll_joint", "g1_LeftWristRoll"),
-    ("left_wrist_pitch_joint", "g1_LeftWristPitch"),
-    ("left_wrist_yaw_joint", "g1_LeftWristYaw"),
+    ("left_shoulder_pitch_joint", "g1/left_shoulder_pitch"),
+    ("left_shoulder_roll_joint", "g1/left_shoulder_roll"),
+    ("left_shoulder_yaw_joint", "g1/left_shoulder_yaw"),
+    ("left_elbow_joint", "g1/left_elbow"),
+    ("left_wrist_roll_joint", "g1/left_wrist_roll"),
+    ("left_wrist_pitch_joint", "g1/left_wrist_pitch"),
+    ("left_wrist_yaw_joint", "g1/left_wrist_yaw"),
 ]
 _RIGHT_ARM_JOINT_PAIRS = [
-    ("right_shoulder_pitch_joint", "g1_RightShoulderPitch"),
-    ("right_shoulder_roll_joint", "g1_RightShoulderRoll"),
-    ("right_shoulder_yaw_joint", "g1_RightShoulderYaw"),
-    ("right_elbow_joint", "g1_RightElbow"),
-    ("right_wrist_roll_joint", "g1_RightWristRoll"),
-    ("right_wrist_pitch_joint", "g1_RightWristPitch"),
-    ("right_wrist_yaw_joint", "g1_RightWristYaw"),
+    ("right_shoulder_pitch_joint", "g1/right_shoulder_pitch"),
+    ("right_shoulder_roll_joint", "g1/right_shoulder_roll"),
+    ("right_shoulder_yaw_joint", "g1/right_shoulder_yaw"),
+    ("right_elbow_joint", "g1/right_elbow"),
+    ("right_wrist_roll_joint", "g1/right_wrist_roll"),
+    ("right_wrist_pitch_joint", "g1/right_wrist_pitch"),
+    ("right_wrist_yaw_joint", "g1/right_wrist_yaw"),
 ]
 
 

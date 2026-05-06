@@ -105,6 +105,7 @@ dimos = "dimos.robot.cli.dimos:main"
 rerun-bridge = "dimos.visualization.rerun.bridge:app"
 doclinks = "dimos.utils.docs.doclinks:main"
 dtop = "dimos.utils.cli.dtop:main"
+dtop-plot = "dimos.utils.cli.dtop_plot:main"
 
 [project.urls]
 Homepage = "https://dimensionalos.com"
@@ -204,7 +205,7 @@ unitree = [
 
 unitree-dds = [
     "dimos[unitree]",
-    "unitree-sdk2py-dimos>=1.0.1",
+    "unitree-sdk2py-dimos>=1.0.2",
     "cyclonedds>=0.10.5",
 ]
 
@@ -455,6 +456,7 @@ module = [
     "torchreid",
     "turbojpeg",
     "ultralytics.*",
+    "unitree_sdk2py.*",
     "unitree_webrtc_connect.*",
     "xarm.*",
     "ament_index_python.*",

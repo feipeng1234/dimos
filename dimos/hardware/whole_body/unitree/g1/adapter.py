@@ -38,7 +38,6 @@ G1-specific protocol details:
 
 from __future__ import annotations
 
-import logging
 import threading
 import time
 from typing import TYPE_CHECKING
@@ -50,12 +49,13 @@ from dimos.hardware.whole_body.spec import (
     MotorCommand,
     MotorState,
 )
+from dimos.utils.logging_config import setup_logger
 
 if TYPE_CHECKING:
     from dimos.hardware.whole_body.registry import WholeBodyAdapterRegistry
     from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 _NUM_MOTORS = 29
 _NUM_MOTOR_SLOTS = 35

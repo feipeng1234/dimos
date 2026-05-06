@@ -29,7 +29,6 @@ Motor ordering (12 leg joints):
 
 from __future__ import annotations
 
-import logging
 import threading
 import time
 from typing import TYPE_CHECKING
@@ -41,11 +40,12 @@ from dimos.hardware.whole_body.spec import (
     MotorCommand,
     MotorState,
 )
+from dimos.utils.logging_config import setup_logger
 
 if TYPE_CHECKING:
     from dimos.hardware.whole_body.registry import WholeBodyAdapterRegistry
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 _NUM_MOTORS = 12
 

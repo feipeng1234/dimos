@@ -70,7 +70,7 @@ def main(mjcf_path: str) -> None:
     latest: dict[str, Any] = {"joints": {}, "base_pos": None, "base_wxyz": None}
 
     def _on_joint_state(msg: JointState) -> None:
-        # Coordinator publishes dimos canonical names ("g1_LeftHipPitch")
+        # Coordinator publishes dimos canonical names ("g1/left_hip_pitch")
         # but the MJCF uses MuJoCo names ("left_hip_pitch_joint"); translate
         # so the lookup against ``name_to_qposadr`` actually hits.
         try:

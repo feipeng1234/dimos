@@ -54,6 +54,7 @@ from dimos.hardware.drive_trains.spec import (
     TwistBaseAdapter,
 )
 from dimos.hardware.manipulators.spec import ManipulatorAdapter
+from dimos.hardware.whole_body.spec import WholeBodyAdapter
 from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
 from dimos.msgs.geometry_msgs.Twist import Twist
 from dimos.msgs.sensor_msgs.JointState import JointState
@@ -274,7 +275,7 @@ class ControlCoordinator(Module):
 
     def _setup_hardware(self, component: HardwareComponent) -> None:
         """Connect and add a single hardware adapter."""
-        adapter: ManipulatorAdapter | TwistBaseAdapter
+        adapter: ManipulatorAdapter | TwistBaseAdapter | WholeBodyAdapter
         if component.hardware_type == HardwareType.WHOLE_BODY:
             adapter = self._create_whole_body_adapter(component)
         elif component.hardware_type == HardwareType.BASE:
@@ -315,6 +316,31 @@ class ControlCoordinator(Module):
             dof=len(component.joints),
             address=component.address,
             hardware_id=component.hardware_id,
+            **component.adapter_kwargs,
+        )
+
+    def _create_whole_body_adapter(self, component: HardwareComponent) -> WholeBodyAdapter:
+        """Create a whole-body adapter from component config.
+
+        ``component.address`` carries the DDS network interface — int (CAN port)
+        or str ("enp60s0"); cyclonedds requires the right type, so try int() first
+        and fall back to keeping the original string.
+        """
+        from dimos.hardware.whole_body.registry import whole_body_adapter_registry
+
+        addr: int | str | None = component.address
+        if addr is not None:
+            try:
+                addr = int(addr)
+            except ValueError:
+                pass  # keep as string (e.g. "enp60s0")
+
+        return whole_body_adapter_registry.create(
+            component.adapter_type,
+            dof=len(component.joints),
+            hardware_id=component.hardware_id,
+            network_interface=addr if addr is not None else "",
+            **component.adapter_kwargs,
         )
 
     def _create_whole_body_adapter(self, component: HardwareComponent) -> object:
@@ -467,12 +493,10 @@ class ControlCoordinator(Module):
     @rpc
     def add_hardware(
         self,
-        adapter: ManipulatorAdapter | TwistBaseAdapter | object,
+        adapter: ManipulatorAdapter | TwistBaseAdapter | WholeBodyAdapter,
         component: HardwareComponent,
     ) -> bool:
         """Register a hardware adapter with the coordinator."""
-        from dimos.hardware.whole_body.spec import WholeBodyAdapter
-
         is_base = component.hardware_type == HardwareType.BASE
         is_whole_body = component.hardware_type == HardwareType.WHOLE_BODY
 
@@ -496,7 +520,7 @@ class ControlCoordinator(Module):
                 return False
 
             if isinstance(adapter, WholeBodyAdapter):
-                connected: ConnectedHardware | ConnectedWholeBody = ConnectedWholeBody(
+                connected: ConnectedHardware = ConnectedWholeBody(
                     adapter=adapter,
                     component=component,
                 )

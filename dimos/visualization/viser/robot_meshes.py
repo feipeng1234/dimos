@@ -25,7 +25,6 @@ stepping, without forcing a separate URDF or duplicating geometry.
 from __future__ import annotations
 
 from dataclasses import dataclass
-import re
 from typing import TYPE_CHECKING
 
 import mujoco
@@ -34,17 +33,16 @@ import numpy as np
 if TYPE_CHECKING:
     from pathlib import Path
 
-# dimos joint names look like ``g1_LeftHipPitch``.  MJCF joint names look
-# like ``left_hip_pitch_joint``.  Strip the hardware prefix, snake-case
-# the camel suffix, append ``_joint``.
-_CAMEL_RE = re.compile(r"(?<!^)(?=[A-Z])")
 
-
+# dimos joint names look like ``g1/left_hip_pitch`` (slash-separated
+# hardware id + snake_case suffix — the canonical convention since
+# Mustafa's #1954 G1 coordinator integration unified naming with the
+# Unitree SDK).  MJCF joint names look like ``left_hip_pitch_joint``.
+# Strip the hardware prefix and append ``_joint``.
 def dimos_joint_to_mjcf(name: str) -> str:
-    parts = name.split("_", 1)
+    parts = name.split("/", 1)
     suffix = parts[1] if len(parts) > 1 else parts[0]
-    snake = _CAMEL_RE.sub("_", suffix).lower()
-    return f"{snake}_joint"
+    return f"{suffix}_joint"
 
 
 @dataclass

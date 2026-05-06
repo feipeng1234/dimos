@@ -31,15 +31,15 @@ Sequence:
 
 from __future__ import annotations
 
-import logging
 import threading
 import time
 from typing import Any
 
 from dimos.core import In, Module, Out, rpc
 from dimos.msgs.sensor_msgs import JointState
+from dimos.utils.logging_config import setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 # ---------------------------------------------------------------------------
 # Target positions from Unitree SDK go2_stand_example.py

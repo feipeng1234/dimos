@@ -156,6 +156,12 @@ class SimMujocoG1WholeBodyAdapter:
             MotorState(q=positions[i], dq=velocities[i], tau=efforts[i]) for i in range(_NUM_MOTORS)
         ]
 
+    def has_motor_states(self) -> bool:
+        # Sim ground truth is available the moment SHM attaches.
+        # No ramp-up window like real DDS adapters need before the
+        # first state msg arrives.
+        return self._connected and self._shm is not None
+
     def read_imu(self) -> IMUState:
         if not self._connected or self._shm is None:
             return IMUState()

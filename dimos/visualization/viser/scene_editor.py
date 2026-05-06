@@ -32,7 +32,6 @@ companion is also written for Blender / external tooling.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-import logging
 from pathlib import Path
 import threading
 import time
@@ -40,7 +39,9 @@ from typing import Any
 
 import numpy as np
 
-logger = logging.getLogger(__name__)
+from dimos.utils.logging_config import setup_logger
+
+logger = setup_logger()
 
 # Defaults for newly-spawned primitives. The size sliders adopt these
 # on first use; the user is expected to tweak from the panel.

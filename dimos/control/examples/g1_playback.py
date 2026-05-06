@@ -24,7 +24,6 @@ Usage (via blueprint):
 from __future__ import annotations
 
 import json
-import logging
 import os
 import threading
 import time
@@ -34,8 +33,9 @@ from dimos.core.core import rpc
 from dimos.core.module import Module
 from dimos.core.stream import In, Out
 from dimos.msgs.sensor_msgs import JointState
+from dimos.utils.logging_config import setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 INTERP_DURATION = 1.0  # seconds to interpolate to first sample
 CMD_HZ = 500

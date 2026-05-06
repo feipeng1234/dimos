@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # Copyright 2025-2026 Dimensional Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,77 +13,56 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unitree Go2 keyboard teleop via ControlCoordinator.
+"""Unitree Go2 keyboard teleop via ControlCoordinator (DDS/SDK2 path).
 
-WASD keys → Twist → coordinator twist_command → UnitreeGo2Adapter.
-
-Controls:
-    W/S: Forward/backward (linear.x)
-    Q/E: Strafe left/right (linear.y)
-    A/D: Turn left/right (angular.z)
-    Shift: 2x boost
-    Ctrl: 0.5x slow
-    Space: Emergency stop
-    ESC: Quit
+WASD keys -> Twist -> coordinator twist_command -> UnitreeGo2TwistAdapter (DDS).
 
 Usage:
-    dimos --simulation run unitree-go2-keyboard-teleop   # MuJoCo sim
-    dimos run unitree-go2-keyboard-teleop                # real hardware
+    dimos run unitree-go2-keyboard-teleop
 """
 
 from __future__ import annotations
 
-from dimos.core.blueprints import autoconnect
-from dimos.core.global_config import global_config
-from dimos.robot.unitree.keyboard_teleop import keyboard_teleop
+from dimos.control.components import HardwareComponent, HardwareType, make_twist_base_joints
+from dimos.control.coordinator import ControlCoordinator, TaskConfig
+from dimos.core.coordination.blueprints import autoconnect
+from dimos.core.transport import LCMTransport
+from dimos.msgs.geometry_msgs.Twist import Twist
+from dimos.msgs.sensor_msgs.JointState import JointState
+from dimos.robot.unitree.keyboard_teleop import KeyboardTeleop
 
-if global_config.simulation:
-    from dimos.robot.unitree.go2.connection import go2_connection
+_go2_joints = make_twist_base_joints("go2")
 
-    # go2_connection automatically uses MujocoConnection when simulation=True.
-    # keyboard_teleop.cmd_vel is wired directly to go2_connection.cmd_vel
-    # by autoconnect — no LCM needed.
-    _go2 = go2_connection()
-    _teleop = keyboard_teleop()
-else:
-    from dimos.control.components import HardwareComponent, HardwareType, make_twist_base_joints
-    from dimos.control.coordinator import TaskConfig, control_coordinator
-    from dimos.core.transport import LCMTransport
-    from dimos.msgs.geometry_msgs import Twist
-    from dimos.msgs.sensor_msgs import JointState
-
-    _go2_joints = make_twist_base_joints("go2")
-
-    _go2 = control_coordinator(
-        hardware=[
-            HardwareComponent(
-                hardware_id="go2",
-                hardware_type=HardwareType.BASE,
-                joints=_go2_joints,
-                adapter_type="unitree_go2",
-            ),
-        ],
-        tasks=[
-            TaskConfig(
-                name="vel_go2",
-                type="velocity",
-                joint_names=_go2_joints,
-                priority=10,
-            ),
-        ],
-    ).transports(
+unitree_go2_keyboard_teleop = (
+    autoconnect(
+        ControlCoordinator.blueprint(
+            hardware=[
+                HardwareComponent(
+                    hardware_id="go2",
+                    hardware_type=HardwareType.BASE,
+                    joints=_go2_joints,
+                    adapter_type="unitree_go2",
+                    adapter_kwargs={"rage_mode": False},
+                ),
+            ],
+            tasks=[
+                TaskConfig(
+                    name="vel_go2",
+                    type="velocity",
+                    joint_names=_go2_joints,
+                    priority=10,
+                ),
+            ],
+        ),
+        KeyboardTeleop.blueprint(),
+    )
+    .transports(
         {
-            ("joint_state", JointState): LCMTransport("/coordinator/joint_state", JointState),
             ("twist_command", Twist): LCMTransport("/cmd_vel", Twist),
+            ("joint_state", JointState): LCMTransport("/coordinator/joint_state", JointState),
         }
     )
-
-    _teleop = keyboard_teleop().transports(
-        {
-            ("cmd_vel", Twist): LCMTransport("/cmd_vel", Twist),
-        }
-    )
-
-unitree_go2_keyboard_teleop = autoconnect(_go2, _teleop)
+    .global_config(obstacle_avoidance=True)
+)
 
 __all__ = ["unitree_go2_keyboard_teleop"]

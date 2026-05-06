@@ -26,7 +26,6 @@ through per-joint arbitration, and writes to the UnitreeG1LowLevelAdapter.
 
 from __future__ import annotations
 
-import logging
 import math
 import threading
 import time
@@ -36,8 +35,9 @@ from dimos.core.core import rpc
 from dimos.core.module import Module
 from dimos.core.stream import In, Out
 from dimos.msgs.sensor_msgs import JointState
+from dimos.utils.logging_config import setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 # ---------------------------------------------------------------------------
 # G1 joint indices (matching G1JointIndex in the SDK example)

@@ -114,6 +114,17 @@ class WholeBodyAdapter(Protocol):
         """Read motor states for all joints."""
         ...
 
+    def has_motor_states(self) -> bool:
+        """Whether ``read_motor_states`` will return live data.
+
+        Real-hardware adapters return False until the first DDS state
+        message arrives; sim adapters that always have ground truth
+        can hardcode True.  ConnectedWholeBody uses this to defer
+        publishing joint_state until the adapter is producing real
+        feedback, avoiding a leading zero-quat pose.
+        """
+        ...
+
     def read_imu(self) -> IMUState:
         """Read IMU state."""
         ...
@@ -144,4 +155,5 @@ __all__ = [
     "MotorCommand",
     "MotorState",
     "WholeBodyAdapter",
+    "WholeBodyConfig",
 ]
