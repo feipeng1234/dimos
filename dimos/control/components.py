@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from dimos.hardware.whole_body.spec import WholeBodyConfig
+
 HardwareId = str
 JointName = str
 TaskName = str
@@ -37,6 +39,7 @@ def split_joint_name(joint_name: str) -> tuple[str, str]:
 class HardwareType(Enum):
     MANIPULATOR = "manipulator"
     BASE = "base"
+    GRIPPER = "gripper"
     WHOLE_BODY = "whole_body"
 
 
@@ -61,6 +64,16 @@ class HardwareComponent:
         address: Connection address - IP for TCP, port for CAN
         auto_enable: Whether to auto-enable servos
         gripper_joints: Joints that use adapter gripper methods (separate from joints).
+        domain_id: DDS domain ID for adapters that use DDS transport
+            (e.g. Unitree G1). Real robot uses 0; unitree_mujoco sim
+            defaults to 1. Ignored by non-DDS adapters.
+        adapter_kwargs: Generic untyped kwargs forwarded to the adapter
+            constructor — use for adapter-specific knobs that don't
+            belong in the spec.
+        wb_config: Whole-body-specific config (PD gains etc.).  Populate
+            on hardware_type=WHOLE_BODY components.  Keeps WB-only knobs
+            off the generic HardwareComponent shared by manipulators,
+            bases, and grippers.
     """
 
     hardware_id: HardwareId
@@ -70,7 +83,9 @@ class HardwareComponent:
     address: str | None = None
     auto_enable: bool = True
     gripper_joints: list[JointName] = field(default_factory=list)
+    domain_id: int = 0
     adapter_kwargs: dict[str, Any] = field(default_factory=dict)
+    wb_config: WholeBodyConfig | None = None
 
     @property
     def all_joints(self) -> list[JointName]:
@@ -136,6 +151,39 @@ def make_twist_base_joints(
     return [f"{hardware_id}/{s}" for s in suffixes]
 
 
+_QUADRUPED_LEG_JOINTS = [
+    "FR_0",
+    "FR_1",
+    "FR_2",
+    "FL_0",
+    "FL_1",
+    "FL_2",
+    "RR_0",
+    "RR_1",
+    "RR_2",
+    "RL_0",
+    "RL_1",
+    "RL_2",
+]
+
+
+def make_quadruped_joints(hardware_id: HardwareId) -> list[JointName]:
+    """Create joint names for a 12-DOF quadruped.
+
+    Uses standard leg naming: FR/FL/RR/RL with 3 joints each
+    (hip, thigh, calf).  Slash-separated to match
+    ``split_joint_name`` (consistent with ``make_humanoid_joints``
+    and ``make_twist_base_joints``).
+
+    Args:
+        hardware_id: The hardware identifier (e.g., "go2")
+
+    Returns:
+        List of 12 joint names like ["go2/FR_0", "go2/FR_1", ..., "go2/RL_2"]
+    """
+    return [f"{hardware_id}/{j}" for j in _QUADRUPED_LEG_JOINTS]
+
+
 _HUMANOID_29DOF_JOINTS = [
     # Left leg (0-5)
     "left_hip_pitch",
@@ -199,6 +247,7 @@ __all__ = [
     "make_gripper_joints",
     "make_humanoid_joints",
     "make_joints",
+    "make_quadruped_joints",
     "make_twist_base_joints",
     "split_joint_name",
 ]

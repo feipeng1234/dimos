@@ -58,6 +58,7 @@ from dimos.hardware.whole_body.spec import WholeBodyAdapter
 from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
 from dimos.msgs.geometry_msgs.Twist import Twist
 from dimos.msgs.sensor_msgs.JointState import JointState
+from dimos.msgs.std_msgs.Bool import Bool
 from dimos.teleop.quest.quest_types import (
     Buttons,
 )
@@ -75,22 +76,26 @@ class TaskConfig:
 
     Attributes:
         name: Task name (e.g., "traj_arm")
-        type: Task type ("trajectory", "servo", "velocity", "cartesian_ik", "teleop_ik")
+        type: Task type ("trajectory", "servo", "velocity", "cartesian_ik", "teleop_ik", "groot_wbc")
         joint_names: List of joint names this task controls
         priority: Task priority (higher wins arbitration)
-        model_path: Path to URDF/MJCF for IK solver (cartesian_ik/teleop_ik only)
+        model_path: Path to URDF/MJCF for IK solver (cartesian_ik/teleop_ik)
+            or directory containing balance.onnx/walk.onnx (groot_wbc).
         ee_joint_id: End-effector joint ID in model (cartesian_ik/teleop_ik only)
         hand: "left" or "right" controller hand (teleop_ik only)
         gripper_joint: Joint name for gripper virtual joint
         gripper_open_pos: Gripper position at trigger 0.0
         gripper_closed_pos: Gripper position at trigger 1.0
+        hardware_id: Hardware id this task reads extra state from
+            (required by groot_wbc — pulls the WholeBodyAdapter for IMU
+            and the full joint list for observation assembly).
     """
 
     name: str
     type: str = "trajectory"
     joint_names: list[str] = field(default_factory=lambda: [])
     priority: int = 10
-    # Cartesian IK / Teleop IK specific
+    # Cartesian IK / Teleop IK / GR00T WBC specific
     model_path: str | Path | None = None
     ee_joint_id: int = 6
     hand: Literal["left", "right"] | None = None  # teleop_ik only
@@ -98,6 +103,35 @@ class TaskConfig:
     gripper_joint: str | None = None
     gripper_open_pos: float = 0.0
     gripper_closed_pos: float = 0.0
+    # Tasks that need a hardware reference (e.g. groot_wbc for IMU + 29-DOF state)
+    hardware_id: str | None = None
+    # Servo task: optional initial target held until/unless a new one arrives.
+    default_positions: list[float] | None = None
+    # Call ``task.start()`` right after registration so the task is live
+    # from the first tick (e.g. GR00T balance/walk needs to drive joints
+    # immediately).  Default False keeps the existing convention where
+    # tasks wait for an explicit activation (e.g. from teleop).
+    auto_start: bool = False
+    # Arm the task's policy automatically on ``start()`` (applies to
+    # tasks exposing ``arm()``, e.g. ``GrootWBCTask``).  Simulation
+    # blueprints set this True; real-hardware blueprints leave it False
+    # so the operator arms via dashboard button after settling.
+    auto_arm: bool = False
+    # Start the task in dry-run mode (policy computes but output is
+    # suppressed).  For real-hardware safety checks.
+    auto_dry_run: bool = False
+    # Ramp duration (seconds) used by ``arm()`` when called without an
+    # explicit argument — applies to tasks that interpolate from the
+    # current pose toward a default on arming.
+    default_ramp_seconds: float = 10.0
+    # GR00T WBC only: run policy inference every N coordinator ticks.
+    # Effective policy rate = ``tick_rate / decimation``.  The model was
+    # trained at 50 Hz, so the original convention was tick_rate=500 +
+    # decimation=10.  At tick_rate=50 set decimation=1 (matches upstream
+    # `run_g1_control_loop.py` which spins the policy directly at 50 Hz).
+    # Mismatched rates make the policy hold actions for too long and
+    # the robot tips over.  ``None`` keeps the task's own default (10).
+    decimation: int | None = None
 
 
 class ControlCoordinatorConfig(ModuleConfig):
@@ -107,6 +141,9 @@ class ControlCoordinatorConfig(ModuleConfig):
         tick_rate: Control loop frequency in Hz (default: 100)
         publish_joint_state: Whether to publish aggregated JointState
         joint_state_frame_id: Frame ID for published JointState
+        publish_odom: Whether to poll WholeBodyAdapter.read_odom() each
+            tick and publish on the ``odom`` Out port (silent no-op when
+            no adapter exposes odom).
         log_ticks: Whether to log tick information (verbose)
         hardware: List of hardware configurations to create on start
         tasks: List of task configurations to create on start
@@ -115,6 +152,7 @@ class ControlCoordinatorConfig(ModuleConfig):
     tick_rate: float = 100.0
     publish_joint_state: bool = True
     joint_state_frame_id: str = "coordinator"
+    publish_odom: bool = True
     log_ticks: bool = False
     hardware: list[HardwareComponent] = field(default_factory=lambda: [])
     tasks: list[TaskConfig] = field(default_factory=lambda: [])
@@ -153,6 +191,11 @@ class ControlCoordinator(Module):
     # Output: Aggregated joint state for external consumers
     joint_state: Out[JointState]
 
+    # Output: Latest base pose, when any whole-body adapter exposes one
+    # via ``read_odom()`` (sim adapters do; real-hw adapters typically
+    # don't until an estimator is wired).  Quiet when no source.
+    odom: Out[PoseStamped]
+
     # Input: Streaming joint commands for real-time control
     joint_command: In[JointState]
 
@@ -166,11 +209,22 @@ class ControlCoordinator(Module):
     # Input: Teleop buttons for engage/disengage signaling
     buttons: In[Buttons]
 
+    # Input: Arm/disarm velocity-policy tasks (e.g. GrootWBCTask).  True
+    # → task.arm(); False → task.disarm().  Routed to every task that
+    # duck-types an ``arm`` method (and ``disarm`` for False).
+    activate: In[Bool]
+
+    # Input: Toggle dry-run on velocity-policy tasks.  In dry-run the
+    # policy keeps computing but the coordinator forwards no command to
+    # the adapter — operators use this to sanity-check commands on real
+    # hardware before committing motor torques.
+    dry_run: In[Bool]
+
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
         # Connected hardware (keyed by hardware_id)
-        self._hardware: dict[HardwareId, ConnectedHardware] = {}
+        self._hardware: dict[HardwareId, ConnectedHardware | ConnectedWholeBody] = {}
         self._hardware_lock = threading.Lock()
 
         # Joint -> hardware mapping (built when hardware added)
@@ -188,6 +242,8 @@ class ControlCoordinator(Module):
         self._cartesian_command_unsub: Callable[[], None] | None = None
         self._twist_command_unsub: Callable[[], None] | None = None
         self._buttons_unsub: Callable[[], None] | None = None
+        self._activate_unsub: Callable[[], None] | None = None
+        self._dry_run_unsub: Callable[[], None] | None = None
 
         logger.info(f"ControlCoordinator initialized at {self.config.tick_rate}Hz")
 
@@ -203,6 +259,10 @@ class ControlCoordinator(Module):
             for task_cfg in self.config.tasks:
                 task = self._create_task_from_config(task_cfg)
                 self.add_task(task)
+                if task_cfg.auto_start:
+                    start = getattr(task, "start", None)
+                    if callable(start):
+                        start()
 
         except Exception:
             # Rollback: clean up all successfully added hardware
@@ -283,6 +343,28 @@ class ControlCoordinator(Module):
             **component.adapter_kwargs,
         )
 
+    def _create_whole_body_adapter(self, component: HardwareComponent) -> object:
+        """Create a whole-body adapter from component config."""
+        from dimos.hardware.whole_body.registry import whole_body_adapter_registry
+
+        # ``address`` is overloaded: real-hw adapters use it as the DDS
+        # network interface (string like "enp60s0" or int).  Sim adapters
+        # use it as the MJCF path (string).  Pass it raw under both names
+        # so each adapter can pick whichever is meaningful.
+        addr = component.address
+        net_iface: int | str = 0
+        if addr is not None:
+            try:
+                net_iface = int(addr)
+            except ValueError:
+                net_iface = addr
+        return whole_body_adapter_registry.create(
+            component.adapter_type,
+            network_interface=net_iface,
+            domain_id=component.domain_id,
+            address=addr,
+        )
+
     def _create_task_from_config(self, cfg: TaskConfig) -> ControlTask:
         """Create a control task from config."""
         task_type = cfg.type.lower()
@@ -304,12 +386,18 @@ class ControlCoordinator(Module):
         elif task_type == "servo":
             from dimos.control.tasks.servo_task import JointServoTask, JointServoTaskConfig
 
+            servo_cfg_kwargs: dict[str, object] = {
+                "joint_names": cfg.joint_names,
+                "priority": cfg.priority,
+            }
+            if cfg.default_positions is not None:
+                servo_cfg_kwargs["default_positions"] = cfg.default_positions
+                # Zero timeout pairs naturally with default-hold — otherwise
+                # the task times out even though it's holding a valid target.
+                servo_cfg_kwargs["timeout"] = 0.0
             return JointServoTask(
                 cfg.name,
-                JointServoTaskConfig(
-                    joint_names=cfg.joint_names,
-                    priority=cfg.priority,
-                ),
+                JointServoTaskConfig(**servo_cfg_kwargs),  # type: ignore[arg-type]
             )
 
         elif task_type == "velocity":
@@ -357,6 +445,46 @@ class ControlCoordinator(Module):
                     gripper_open_pos=cfg.gripper_open_pos,
                     gripper_closed_pos=cfg.gripper_closed_pos,
                 ),
+            )
+
+        elif task_type == "groot_wbc":
+            from dimos.control.tasks.groot_wbc_task import (
+                GrootWBCTask,
+                GrootWBCTaskConfig,
+            )
+
+            if cfg.model_path is None:
+                raise ValueError(
+                    f"GrootWBCTask '{cfg.name}' requires model_path "
+                    f"(directory containing balance.onnx + walk.onnx)"
+                )
+            if cfg.hardware_id is None:
+                raise ValueError(f"GrootWBCTask '{cfg.name}' requires hardware_id in TaskConfig")
+            hw = self._hardware.get(cfg.hardware_id)
+            if hw is None:
+                raise ValueError(
+                    f"GrootWBCTask '{cfg.name}' references unknown hardware "
+                    f"'{cfg.hardware_id}'. List the hardware before the task "
+                    f"in the blueprint config."
+                )
+
+            model_dir = Path(cfg.model_path)
+            wbc_kwargs: dict[str, Any] = dict(
+                balance_onnx=model_dir / "balance.onnx",
+                walk_onnx=model_dir / "walk.onnx",
+                joint_names=cfg.joint_names,
+                all_joint_names=hw.joint_names,
+                priority=cfg.priority,
+                auto_arm=cfg.auto_arm,
+                auto_dry_run=cfg.auto_dry_run,
+                default_ramp_seconds=cfg.default_ramp_seconds,
+            )
+            if cfg.decimation is not None:
+                wbc_kwargs["decimation"] = cfg.decimation
+            return GrootWBCTask(
+                cfg.name,
+                GrootWBCTaskConfig(**wbc_kwargs),
+                adapter=hw.adapter,
             )
 
         else:
@@ -594,11 +722,51 @@ class ControlCoordinator(Module):
             joint_state = JointState(name=names, velocity=velocities)
             self._on_joint_command(joint_state)
 
+        # Also route to tasks that accept a (vx, vy, yaw_rate) command —
+        # e.g. locomotion policies like GrootWBCTask.  Duck-typed: any
+        # task exposing set_velocity_command opts in.
+        t_now = time.perf_counter()
+        with self._task_lock:
+            for task in self._tasks.values():
+                set_vel = getattr(task, "set_velocity_command", None)
+                if set_vel is not None:
+                    set_vel(msg.linear.x, msg.linear.y, msg.angular.z, t_now)
+
     def _on_buttons(self, msg: Buttons) -> None:
         """Forward button state to all tasks."""
         with self._task_lock:
             for task in self._tasks.values():
                 task.on_buttons(msg)
+
+    def _on_activate(self, msg: Bool) -> None:
+        """Arm/disarm every task exposing ``arm()`` / ``disarm()``.
+
+        Duck-typed to match the ``set_velocity_command`` convention used
+        by ``_on_twist_command``.  The blueprint wires this input to a
+        dashboard button; operators can also drive it directly via LCM.
+        """
+        engage = bool(msg.data)
+        with self._task_lock:
+            for task in self._tasks.values():
+                method_name = "arm" if engage else "disarm"
+                handler = getattr(task, method_name, None)
+                if callable(handler):
+                    try:
+                        handler()
+                    except Exception:
+                        logger.exception(f"{method_name}() raised on task {task.name!r}")
+
+    def _on_dry_run(self, msg: Bool) -> None:
+        """Forward dry-run toggle to every task exposing ``set_dry_run``."""
+        enabled = bool(msg.data)
+        with self._task_lock:
+            for task in self._tasks.values():
+                handler = getattr(task, "set_dry_run", None)
+                if callable(handler):
+                    try:
+                        handler(enabled)
+                    except Exception:
+                        logger.exception(f"set_dry_run() raised on task {task.name!r}")
 
     @rpc
     def task_invoke(
@@ -671,6 +839,7 @@ class ControlCoordinator(Module):
 
         # Create and start tick loop
         publish_cb = self.joint_state.publish if self.config.publish_joint_state else None
+        odom_cb = self.odom.publish if self.config.publish_odom else None
         self._tick_loop = TickLoop(
             tick_rate=self.config.tick_rate,
             hardware=self._hardware,
@@ -679,6 +848,7 @@ class ControlCoordinator(Module):
             task_lock=self._task_lock,
             joint_to_hardware=self._joint_to_hardware,
             publish_callback=publish_cb,
+            odom_callback=odom_cb,
             frame_id=self.config.joint_state_frame_id,
             log_ticks=self.config.log_ticks,
         )
@@ -711,16 +881,25 @@ class ControlCoordinator(Module):
                     "Use task_invoke RPC or set transport via blueprint."
                 )
 
-        # Subscribe to twist commands if any twist base hardware configured
+        # Subscribe to twist commands if any twist base hardware is configured
+        # OR if any task accepts velocity commands (locomotion policies like
+        # GrootWBCTask duck-type with set_velocity_command).  Without the
+        # latter check, a whole-body locomotion blueprint with no BASE
+        # hardware silently drops every Twist on /cmd_vel.
         has_twist_base = any(c.hardware_type == HardwareType.BASE for c in self.config.hardware)
-        if has_twist_base:
+        with self._task_lock:
+            has_velocity_task = any(
+                callable(getattr(task, "set_velocity_command", None))
+                for task in self._tasks.values()
+            )
+        if has_twist_base or has_velocity_task:
             try:
                 self._twist_command_unsub = self.twist_command.subscribe(self._on_twist_command)
-                logger.info("Subscribed to twist_command for twist base control")
+                logger.info("Subscribed to twist_command for twist base / velocity-capable tasks")
             except Exception:
                 logger.warning(
-                    "Twist base configured but could not subscribe to twist_command. "
-                    "Use task_invoke RPC or set transport via blueprint."
+                    "Twist base or velocity-capable task configured but could not subscribe "
+                    "to twist_command. Use task_invoke RPC or set transport via blueprint."
                 )
 
         # Subscribe to buttons if any teleop_ik tasks configured (engage/disengage)
@@ -728,6 +907,32 @@ class ControlCoordinator(Module):
         if has_teleop_ik:
             self._buttons_unsub = self.buttons.subscribe(self._on_buttons)
             logger.info("Subscribed to buttons for engage/disengage")
+
+        # Subscribe to activate / dry_run if any task exposes arm() / set_dry_run()
+        # (duck-typed, same convention as twist_command / set_velocity_command).
+        with self._task_lock:
+            has_arm = any(callable(getattr(t, "arm", None)) for t in self._tasks.values())
+            has_dry_run = any(
+                callable(getattr(t, "set_dry_run", None)) for t in self._tasks.values()
+            )
+        if has_arm:
+            try:
+                self._activate_unsub = self.activate.subscribe(self._on_activate)
+                logger.info("Subscribed to activate for arm()/disarm() routing")
+            except Exception:
+                logger.warning(
+                    "Arm-capable task configured but could not subscribe to activate. "
+                    "Use task_invoke RPC or set transport via blueprint."
+                )
+        if has_dry_run:
+            try:
+                self._dry_run_unsub = self.dry_run.subscribe(self._on_dry_run)
+                logger.info("Subscribed to dry_run for dry-run routing")
+            except Exception:
+                logger.warning(
+                    "Dry-run-capable task configured but could not subscribe to dry_run. "
+                    "Use task_invoke RPC or set transport via blueprint."
+                )
 
         logger.info(f"ControlCoordinator started at {self.config.tick_rate}Hz")
 
@@ -746,6 +951,12 @@ class ControlCoordinator(Module):
         if self._twist_command_unsub:
             self._twist_command_unsub()
             self._twist_command_unsub = None
+        if self._activate_unsub:
+            self._activate_unsub()
+            self._activate_unsub = None
+        if self._dry_run_unsub:
+            self._dry_run_unsub()
+            self._dry_run_unsub = None
         if self._buttons_unsub:
             self._buttons_unsub()
             self._buttons_unsub = None
