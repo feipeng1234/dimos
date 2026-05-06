@@ -158,13 +158,13 @@ jobs:
       - name: Fix permissions
         run: |
           git config --global --add safe.directory '*'
-          git clean -ffdx -e .venv
+          git clean -ffdx
       - name: Install uv
         uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
       - name: Install dependencies
-        run: uv sync --group tests-self-hosted --frozen --reinstall-package dimos --reinstall-package opencv-python
+        run: uv sync --group tests-self-hosted --frozen
       - name: Run tests
         run: uv run pytest --cov=dimos/ --junitxml=junit.xml -m '(${{ matrix.markers }}) and not (tool or mujoco)'
       - name: Re-run the failing tests with maximum verbosity

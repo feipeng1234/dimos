@@ -44,7 +44,7 @@ class DimosCliCall:
             global_overrides += ["--mcp-port", str(self.mcp_port)]
             blueprint_overrides += [
                 "-o",
-                f"McpClient.mcp_server_url=http://localhost:{self.mcp_port}/mcp",
+                f"mcpclient.mcp_server_url=http://localhost:{self.mcp_port}/mcp",
             ]
 
         self.process = subprocess.Popen(
