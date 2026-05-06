@@ -88,3 +88,8 @@ recording*.db
 recording_*.db
 recording_*.db-shm
 recording_*.db-wal
+
+# perception2 object DB (memory2-backed)
+perception2_*.db
+perception2_*.db-shm
+perception2_*.db-wal

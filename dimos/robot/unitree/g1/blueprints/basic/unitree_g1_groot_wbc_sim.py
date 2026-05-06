@@ -84,6 +84,7 @@ from dimos.navigation.replanning_a_star.module import ReplanningAStarPlanner
 from dimos.perception.experimental.temporal_memory.temporal_memory import TemporalMemory
 from dimos.perception.perceive_loop_skill import PerceiveLoopSkill
 from dimos.perception.spatial_perception import SpatialMemory
+from dimos.perception2 import ObjectBoundingBoxes, ObjectPerception
 from dimos.robot.catalog.g1 import g1_left_arm, g1_right_arm
 from dimos.robot.unitree.g1.blueprints.basic._groot_wbc_common import (
     G1_GROOT_KD,
@@ -97,7 +98,7 @@ from dimos.simulation.engines.mujoco_sim_module import MujocoSimModule
 from dimos.utils.data import get_data
 from dimos.utils.logging_config import setup_logger
 from dimos.visualization.viser import SplatCameraModule, ViserRenderModule
-from dimos.visualization.viser.camera import g1_d435_forward
+from dimos.visualization.viser.camera import g1_d435_default, g1_d435_forward
 from dimos.web.websocket_vis.websocket_vis_module import WebsocketVisModule
 
 logger = setup_logger()
@@ -199,6 +200,19 @@ _disable_lidar = os.environ.get("DIMOS_DISABLE_LIDAR", "0") not in ("", "0")
 # exploration where the agent wants to see walls and people, not the floor.
 _camera_forward = os.environ.get("DIMOS_CAMERA_FORWARD", "0") not in ("", "0")
 _camera_spec = g1_d435_forward() if _camera_forward else None
+# Resolve the active spec so downstream consumers (ObjectDBModule's
+# camera_info, etc.) can read intrinsics without re-running the
+# default-vs-override branch.
+_active_camera_spec = _camera_spec if _camera_spec is not None else g1_d435_default()
+_perception2_camera_info = CameraInfo.from_intrinsics(
+    fx=_active_camera_spec.focal_pixels(),
+    fy=_active_camera_spec.focal_pixels(),
+    cx=_active_camera_spec.cx(),
+    cy=_active_camera_spec.cy(),
+    width=_active_camera_spec.width,
+    height=_active_camera_spec.height,
+    frame_id="head_color_color_optical_frame",
+)
 
 if _scene_mesh_path:
     from dimos.mapping.mesh_scene import SceneMeshAlignment, floor_z_under_origin
@@ -596,9 +610,12 @@ if _splat_path is not None and _splat_path.exists():
             mjcf_path=_MJCF_PATH,
             alignment_yaml=_splat_alignment_yaml,
             render_hz=10.0,
-            # Match MujocoSimModule's depth camera frame so RGB and depth
-            # share frame_id; ObjectSceneRegistration's tf lookup needs that.
-            frame_id="head_color_color_optical_frame",
+            # Use the splat's own ``splat_camera_optical_frame`` default
+            # (publishes its own tf for the actual rendering pose).
+            # When DIMOS_CAMERA_FORWARD=1 the splat camera looks
+            # forward but the MJCF camera stays pitched-down; sharing
+            # frame names with MujocoSimModule's tf would race two
+            # publishers for the same frame with conflicting poses.
             camera_spec=_camera_spec,
         ).transports(
             {
@@ -653,6 +670,25 @@ _g1_perception_stack = (
     # — ObjectTracking and the G1Memory recorder dropped to keep the
     # module set close to unitree-go2-temporal-memory.
     SpatialMemory.blueprint(),
+    # Lidar-driven 3D object DB (perception2 — replaces the legacy
+    # YoloE-PF / moduleDB.ObjectDBModule pipeline).  Runs Qwen-VL at
+    # ~1 Hz on the splat camera image, back-projects each 2D bbox
+    # through the world-frame /lidar pointcloud, and stores per-object
+    # world centers + accumulated pointclouds in a memory2 SqliteStore.
+    # Same-label-within-0.5m detections merge into one record; older
+    # entries LRU-evict past max_objects.  Publishes ObjectBoundingBoxes
+    # at 1 Hz for the viser overlay.
+    ObjectPerception.blueprint(
+        camera_info=_perception2_camera_info,
+    ).transports(
+        {
+            ("color_image", Image): LCMTransport("/splat/color_image", Image),
+            ("pointcloud", PointCloud2): LCMTransport("/lidar", PointCloud2),
+            ("object_bboxes", ObjectBoundingBoxes): LCMTransport(
+                "/perception2/object_bboxes", ObjectBoundingBoxes
+            ),
+        }
+    ),
 )
 
 # Agentic stack — Go2 parity minus xArm and minus PersonFollow.
