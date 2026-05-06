@@ -1,0 +1,111 @@
+- pr: 1791
+  comment_id: 3091083046
+  author: leshy
+  file: dimos/hardware/sensors/lidar/livox/cpp/flake.nix
+  line: 12
+  problem: "what is this stuff?"
+  solution: "Jeff replied: MacOS support (gtsam-extended python package is similar, but both linux arm-support and macos support). No code change needed — this is Nix packaging for cross-platform lidar SDK builds."
+
+- pr: 1791
+  comment_id: 3091103980
+  author: leshy
+  file: dimos/hardware/sensors/lidar/fastlio2/cpp/main.cpp
+  line: 68
+  problem: "shouldn't we use named frames and TF tree for this? I see below you are doing coordinate frame transforms by hand"
+  solution: "Jeff replied: first attempt used TFs, but for debugging it's nice when 0,0 is roughly ground height. Prefers removal after merge. Leshy followed up reiterating TF approach. This is an active design discussion — Jeff acknowledges the concern and plans post-merge cleanup."
+
+- pr: 1791
+  comment_id: 3091114008
+  author: leshy
+  file: dimos/navigation/smart_nav/modules/global_map_updater/global_map_updater.py
+  line: 83
+  problem: "this is a less efficient clone of existing voxels.py module, can just use voxels.py"
+  solution: "Jeff agreed: 'yep, I'll delete it, it was optional with no blueprints using it anyways'. Planned for removal."
+
+- pr: 1791
+  comment_id: 3091115157
+  author: leshy
+  file: dimos/navigation/smart_nav/modules/global_map_updater/global_map_updater.py
+  line: 94
+  problem: "what is this getstate/setstate for?"
+  solution: "No direct reply from Jeff. The getstate/setstate methods appear to be for pickling support for multiprocess coordination. Needs Jeff's clarification."
+
+- pr: 1791
+  comment_id: 3091118566
+  author: leshy
+  file: dimos/navigation/smart_nav/modules/global_map_updater/global_map_updater.py
+  line: 115
+  problem: "try not to depend on odometry messages but a transform tree — mapper shouldn't know about robot positions, it's just assembling global frames into a global map. Allows mapping via multiple sensors, multiple robots."
+  solution: "No direct reply from Jeff on this specific comment. Related to the broader TF tree discussion — leshy wants the mapper to use the transform system rather than consuming odometry directly. Needs Jeff's response."
+
+- pr: 1791
+  comment_id: 3098196509
+  author: leshy
+  file: dimos/msgs/geometry_msgs/Point32.py
+  line: 23
+  problem: "I don't mind being able to debug FAR planner? I'd push the other direction and add to_rerun for Polygon etc"
+  solution: "This is a response to Jeff's note that Point32/Polygon/etc. will be removed. Leshy disagrees and wants to keep them for FAR planner debugging, suggesting adding to_rerun methods. Active design discussion — no code change needed from autofix."
+
+- pr: 1791
+  comment_id: 3098254147
+  author: leshy
+  file: dimos/hardware/sensors/lidar/fastlio2/cpp/cloud_filter.hpp
+  line: 25
+  problem: "This is already mid360 sdk config (blind: 0.5). Don't run custom code for this on fastlio side, configure the lidar."
+  solution: "No direct reply from Jeff. Leshy says body-filtering should use lidar SDK config (mid360.yaml blind parameter) rather than custom cloud_filter code. Needs Jeff's response."
+
+- pr: 1791
+  comment_id: 3098262031
+  author: leshy
+  file: dimos/hardware/sensors/lidar/fastlio2/cpp/flake.nix
+  line: 16
+  problem: "let's decide upon and start creating actual dimensional hosted repos, above was my 2 day experiment, this is a serious feature now, I'd like to see the diff"
+  solution: "No direct reply from Jeff. Leshy wants the Nix flake to point to official dimensionalOS-hosted forks rather than personal repos. Needs organizational decision on repo hosting."
+
+- pr: 1791
+  comment_id: 3098263094
+  author: leshy
+  file: dimos/hardware/sensors/lidar/fastlio2/cpp/flake.nix
+  line: 20
+  problem: "what is this repository? should this be in dimos-lcm? what was changed?"
+  solution: "No direct reply from Jeff. Leshy asking about the provenance of a Nix input repo and whether changes belong in dimos-lcm. Needs Jeff's clarification."
+
+- pr: 1791
+  comment_id: 3098280684
+  author: leshy
+  file: dimos/hardware/sensors/lidar/fastlio2/module.py
+  line: 96
+  problem: "you should only be setting frame_id, actual structural relationships are defined by a transform system"
+  solution: "No direct reply from Jeff. Part of the broader TF tree discussion — leshy wants frame relationships defined via TF, not hardcoded in the module. Needs Jeff's response."
+
+- pr: 1791
+  comment_id: 3098291978
+  author: leshy
+  file: dimos/hardware/sensors/lidar/fastlio2/cpp/main.cpp
+  line: 68
+  problem: "you can move things using TF, emitting one message world -> whatever_your_frame is would peg your frame to the ground"
+  solution: "Follow-up to the earlier TF discussion. Leshy providing specific guidance on how to use TF for the ground-height adjustment Jeff wants. Active design discussion — no autofix code change."
+
+- pr: 1791
+  comment_id: 4257743222
+  author: leshy
+  file: null
+  line: null
+  problem: "maybe I'd think of a better name than 'smartnav' — does this nav stack have some official name?"
+  solution: "Jeff replied explaining naming history (rosnav docker vs non_ros_nav, nav2 taken, smart_nav was interim). Suggested NavCore. Leshy countered with CMUNav/ProfYangNav, saying it needs a unique project name. Active naming discussion — no code change from autofix."
+
+- pr: 1791
+  comment_id: 4265816310
+  author: leshy
+  file: null
+  line: null
+  problem: "CMUNav? ProfYangNav? this nav stack does have an actual name afaik, don't name it NavCore"
+  solution: "Follow-up to naming discussion. Leshy wants the official upstream name or a unique project name, not a generic one. Needs Jeff to decide on final name."
+
+- pr: 1791
+  comment_id: 4265932188
+  author: leshy
+  file: null
+  line: null
+  problem: "hey for how to test usually the idea is for people to test feature IRL on hardware or in sim — can we get docs for this so I can give them out to G1 owners and test in sim by myself?"
+  solution: "No direct reply from Jeff. Leshy requesting user-facing docs for testing the nav stack on hardware/sim so G1 owners can try it. Needs Jeff to provide testing documentation."
