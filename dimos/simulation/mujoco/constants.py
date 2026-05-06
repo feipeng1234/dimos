@@ -20,8 +20,11 @@ VIDEO_HEIGHT = 360
 VIDEO_CAMERA_FOV = 45  # MuJoCo default FOV for head_camera (degrees)
 DEPTH_CAMERA_FOV = 160
 
-# Depth camera range/filtering constants
-MAX_RANGE = 3
+# Depth camera range/filtering constants.  20 m horizontal radius
+# matches a typical office / warehouse footprint; height stays at
+# 1.2 m to mirror the real G1 lidar's vertical FOV (the unit's scan
+# doesn't go above chest height either).
+MAX_RANGE = 20
 MIN_RANGE = 0.2
 MAX_HEIGHT = 1.2
 

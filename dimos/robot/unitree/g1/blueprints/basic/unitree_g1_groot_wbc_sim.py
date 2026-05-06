@@ -84,7 +84,10 @@ from dimos.navigation.replanning_a_star.module import ReplanningAStarPlanner
 from dimos.perception.experimental.temporal_memory.temporal_memory import TemporalMemory
 from dimos.perception.perceive_loop_skill import PerceiveLoopSkill
 from dimos.perception.spatial_perception import SpatialMemory
-from dimos.perception2 import ObjectBoundingBoxes, ObjectPerception
+
+# perception2 disabled in this blueprint pending its own PR — kept the
+# import on a noqa so the re-enable is a one-liner without re-adding it.
+from dimos.perception2 import ObjectBoundingBoxes, ObjectPerception  # noqa: F401
 from dimos.robot.catalog.g1 import g1_left_arm, g1_right_arm
 from dimos.robot.unitree.g1.blueprints.basic._groot_wbc_common import (
     G1_GROOT_KD,
@@ -678,17 +681,24 @@ _g1_perception_stack = (
     # Same-label-within-0.5m detections merge into one record; older
     # entries LRU-evict past max_objects.  Publishes ObjectBoundingBoxes
     # at 1 Hz for the viser overlay.
-    ObjectPerception.blueprint(
-        camera_info=_perception2_camera_info,
-    ).transports(
-        {
-            ("color_image", Image): LCMTransport("/splat/color_image", Image),
-            ("pointcloud", PointCloud2): LCMTransport("/lidar", PointCloud2),
-            ("object_bboxes", ObjectBoundingBoxes): LCMTransport(
-                "/perception2/object_bboxes", ObjectBoundingBoxes
-            ),
-        }
-    ),
+    #
+    # TEMPORARILY DISABLED for the dev-merge / PR-cleanup pass — the
+    # viser bbox overlay was visually overwhelming and the upstream
+    # detector + back-projection still need tuning before it ships.
+    # Re-enable once perception2 lands as its own PR.  Keep the
+    # _perception2_camera_info / ObjectPerception import alive
+    # (cheap) so re-enabling is a one-line uncomment.
+    # ObjectPerception.blueprint(
+    #     camera_info=_perception2_camera_info,
+    # ).transports(
+    #     {
+    #         ("color_image", Image): LCMTransport("/splat/color_image", Image),
+    #         ("pointcloud", PointCloud2): LCMTransport("/lidar", PointCloud2),
+    #         ("object_bboxes", ObjectBoundingBoxes): LCMTransport(
+    #             "/perception2/object_bboxes", ObjectBoundingBoxes
+    #         ),
+    #     }
+    # ),
 )
 
 # Agentic stack — Go2 parity minus xArm and minus PersonFollow.
