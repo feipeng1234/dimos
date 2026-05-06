@@ -15,8 +15,7 @@
 """MCP server integration tests.
 
 These tests build a real StressTestModule + McpServer blueprint and exercise
-every CLI command and JSON-RPC method.  They are marked ``slow`` so local
-``pytest`` skips them by default (CI runs them).
+every CLI command and JSON-RPC method.
 
 **Performance note:** Fixtures that create a running blueprint are
 *class-scoped* so the ~4 s startup cost is paid once per class instead of
