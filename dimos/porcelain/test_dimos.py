@@ -102,7 +102,6 @@ def test_peek_stream_unknown_raises(running_app):
         running_app.peek_stream("definitely_not_a_stream")
 
 
-@pytest.mark.slow
 def test_peek_stream_returns_published_value(app):
     app.run(TickerModule)
     value = app.peek_stream("tick", timeout=2.0)
