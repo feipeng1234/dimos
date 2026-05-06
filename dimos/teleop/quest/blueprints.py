@@ -24,11 +24,9 @@ from dimos.control.blueprints.teleop import (
     coordinator_teleop_xarm6,
     coordinator_teleop_xarm7,
 )
-from dimos.control.coordinator import ControlCoordinator
 from dimos.core.coordination.blueprints import autoconnect
 from dimos.core.transport import LCMTransport
 from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
-from dimos.simulation.engines.mujoco_sim_module import MujocoSimModule
 from dimos.teleop.quest.quest_extensions import ArmTeleopModule
 from dimos.teleop.quest.quest_types import Buttons
 from dimos.visualization.rerun.bridge import RerunBridgeModule
@@ -61,20 +59,16 @@ teleop_quest_xarm7 = autoconnect(
 
 
 # Single XArm7 teleop in MuJoCo sim
-teleop_quest_xarm7_sim = (
-    autoconnect(
-        ArmTeleopModule.blueprint(task_names={"right": "teleop_xarm"}),
-        coordinator_teleop_sim_xarm7,
-    )
-    .transports(
-        {
-            ("right_controller_output", PoseStamped): LCMTransport(
-                "/coordinator/cartesian_command", PoseStamped
-            ),
-            ("buttons", Buttons): LCMTransport("/teleop/buttons", Buttons),
-        }
-    )
-    .default_record_modules(ArmTeleopModule, ControlCoordinator, MujocoSimModule)
+teleop_quest_xarm7_sim = autoconnect(
+    ArmTeleopModule.blueprint(task_names={"right": "teleop_xarm"}),
+    coordinator_teleop_sim_xarm7,
+).transports(
+    {
+        ("right_controller_output", PoseStamped): LCMTransport(
+            "/coordinator/cartesian_command", PoseStamped
+        ),
+        ("buttons", Buttons): LCMTransport("/teleop/buttons", Buttons),
+    }
 )
 
 

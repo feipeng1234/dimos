@@ -96,8 +96,6 @@ class MujocoEngine(SimulationEngine):
         self._xml_path = xml_path
 
         self._data = mujoco.MjData(self._model)
-        if self._model.nkey > 0:
-            mujoco.mj_resetDataKeyframe(self._model, self._data, 0)
         self._joint_mappings = build_joint_mappings(self._xml_path, self._model)
         self._joint_names = [mapping.name for mapping in self._joint_mappings]
         self._num_joints = len(self._joint_names)
