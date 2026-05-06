@@ -70,7 +70,12 @@ _g1_engine = MujocoSimModule.blueprint(
 )
 
 _g1_coordinator = ControlCoordinator.blueprint(
-    tick_rate=500.0,
+    # 50 Hz coordinator tick — matches the rate the GR00T policy was
+    # trained at (decoupled_wbc/control/envs/g1/utils/joint_safety.py:38).
+    # Combined with the 200 Hz physics in g1_gear_wbc.xml gives a 4:1
+    # sim/control ratio.  Running faster (e.g. tick_rate=500) only burns
+    # CPU on duplicate inference.
+    tick_rate=50.0,
     publish_joint_state=True,
     joint_state_frame_id="coordinator",
     hardware=[
@@ -95,7 +100,15 @@ _g1_coordinator = ControlCoordinator.blueprint(
             auto_start=True,
             auto_arm=True,
             auto_dry_run=False,
-            default_ramp_seconds=2.0,
+            # No ramp — policy commands torques the moment it arms, so
+            # the robot doesn't free-fall between MJCF spawn and policy
+            # takeover.  Sim only; real hardware uses a non-zero ramp.
+            default_ramp_seconds=0.0,
+            # decimation=1 with tick_rate=50 → policy at 50 Hz (training
+            # rate).  GrootWBCTaskConfig defaults to 10 (paired with the
+            # legacy 500 Hz tick); leaving the default with our 50 Hz
+            # tick yields 5 Hz policy and the robot tips over.
+            decimation=1,
         ),
         TaskConfig(
             name="servo_arms",
