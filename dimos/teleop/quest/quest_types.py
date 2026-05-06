@@ -43,11 +43,11 @@ class QuestControllerState:
         0: thumbstick X, 1: thumbstick Y, 2: trigger (analog), 3: grip (analog)
     Button indices (digital, 0 or 1):
         0: trigger, 1: grip, 2: touchpad, 3: thumbstick,
-        4: X/A, 5: Y/B, 6: menu (optional — PICO controllers omit this)
+        4: X/A, 5: Y/B, 6: menu
     """
 
     EXPECTED_AXES: ClassVar[int] = 4
-    EXPECTED_BUTTONS: ClassVar[int] = 6
+    EXPECTED_BUTTONS: ClassVar[int] = 7
 
     is_left: bool = True
     # Analog values (0.0-1.0)
@@ -86,7 +86,7 @@ class QuestControllerState:
             thumbstick_press=buttons[3] > 0.5,
             primary=buttons[4] > 0.5,
             secondary=buttons[5] > 0.5,
-            menu=buttons[6] > 0.5 if len(buttons) > 6 else False,
+            menu=buttons[6] > 0.5,
             thumbstick=ThumbstickState(x=float(axes[0]), y=float(axes[1])),
         )
 
