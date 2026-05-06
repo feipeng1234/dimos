@@ -26,6 +26,9 @@ Usage:
 
 from __future__ import annotations
 
+import os
+import sys
+
 from dimos.control.components import HardwareComponent, HardwareType
 from dimos.control.coordinator import ControlCoordinator, TaskConfig
 from dimos.core.coordination.blueprints import autoconnect
@@ -45,7 +48,10 @@ from dimos.robot.unitree.g1.blueprints.basic._groot_wbc_common import (
 )
 from dimos.simulation.engines.mujoco_sim_module import MujocoSimModule
 from dimos.utils.data import get_data
+from dimos.utils.logging_config import setup_logger
 from dimos.web.websocket_vis.websocket_vis_module import WebsocketVisModule
+
+logger = setup_logger()
 
 _MJCF_PATH = "data/mujoco_sim/g1_gear_wbc.xml"
 
@@ -120,5 +126,43 @@ _g1_ws_vis = WebsocketVisModule.blueprint().transports(
 )
 
 unitree_g1_groot_wbc_sim = autoconnect(_g1_engine, _g1_coordinator, _g1_ws_vis)
+
+
+# Optional native MuJoCo viewer in a separate process — read-only, mirrors
+# the engine's joint state via LCM (no physics, no perf hit on the engine).
+# Spawn from MainProcess only — worker imports of this module must be
+# no-ops (workers are daemonic and can't spawn children).
+import multiprocessing as _mp
+
+if (
+    os.environ.get("DIMOS_MUJOCO_VIEW", "0") not in ("", "0")
+    and _mp.current_process().name == "MainProcess"
+):
+    import shutil
+    import subprocess
+
+    # mujoco.viewer.launch_passive needs ``mjpython`` on macOS; Linux
+    # runs fine under regular python.
+    if sys.platform == "darwin":
+        _viewer_python = shutil.which("mjpython") or shutil.which("python")
+    else:
+        _viewer_python = sys.executable
+    if _viewer_python is None:
+        logger.warning(
+            "DIMOS_MUJOCO_VIEW=1: couldn't locate mjpython/python on PATH; viewer not launched"
+        )
+    else:
+        _viewer_proc = subprocess.Popen(
+            [
+                _viewer_python,
+                "-m",
+                "dimos.simulation.engines.mujoco_view_subprocess",
+                _MJCF_PATH,
+            ],
+        )
+        logger.info(
+            f"DIMOS_MUJOCO_VIEW=1: MuJoCo viewer subprocess started "
+            f"(pid={_viewer_proc.pid}, executable={_viewer_python}, mjcf={_MJCF_PATH})"
+        )
 
 __all__ = ["unitree_g1_groot_wbc_sim"]
