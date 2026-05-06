@@ -403,10 +403,10 @@ name = "bitsandbytes"
 version = "0.49.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11' or (extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
-    { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11' or (extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
-    { name = "packaging" },
-    { name = "torch" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and platform_machine == 'aarch64' and sys_platform == 'darwin') or (python_full_version >= '3.11' and platform_machine == 'aarch64' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (python_full_version >= '3.11' and platform_machine == 'aarch64' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds') or (python_full_version < '3.11' and sys_platform != 'darwin' and sys_platform != 'win32') or (python_full_version >= '3.11' and sys_platform != 'darwin' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (python_full_version >= '3.11' and sys_platform != 'darwin' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds') or (platform_machine != 'aarch64' and sys_platform == 'darwin' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (platform_machine != 'aarch64' and sys_platform == 'darwin' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds') or (sys_platform == 'win32' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (sys_platform == 'win32' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
+    { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and platform_machine == 'aarch64' and sys_platform == 'darwin') or (python_full_version < '3.11' and platform_machine == 'aarch64' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (python_full_version < '3.11' and platform_machine == 'aarch64' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds') or (python_full_version >= '3.11' and sys_platform != 'darwin' and sys_platform != 'win32') or (python_full_version < '3.11' and sys_platform != 'darwin' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (python_full_version < '3.11' and sys_platform != 'darwin' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds') or (platform_machine != 'aarch64' and sys_platform == 'darwin' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (platform_machine != 'aarch64' and sys_platform == 'darwin' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds') or (sys_platform == 'win32' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (sys_platform == 'win32' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
+    { name = "packaging", marker = "(platform_machine == 'aarch64' and sys_platform == 'darwin') or (sys_platform != 'darwin' and sys_platform != 'win32') or (sys_platform == 'darwin' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (sys_platform == 'darwin' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds') or (sys_platform == 'win32' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (sys_platform == 'win32' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
+    { name = "torch", marker = "(platform_machine == 'aarch64' and sys_platform == 'darwin') or (sys_platform != 'darwin' and sys_platform != 'win32') or (sys_platform == 'darwin' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (sys_platform == 'darwin' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds') or (sys_platform == 'win32' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (sys_platform == 'win32' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/19/6f/32d0526e4e4ad309d9e7502c018399bb23b63f39277a361c305092e2f885/bitsandbytes-0.49.1-py3-none-macosx_14_0_arm64.whl", hash = "sha256:9de01d4384b6c71ef9ab052b98457dc0e4fff8fe06ab14833b5b712700deb005", size = 129848, upload-time = "2026-01-08T14:31:26.134Z" },
@@ -1598,9 +1598,9 @@ name = "cupy-cuda12x"
 version = "13.6.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "fastrlock" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11' or (extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
-    { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11' or (extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
+    { name = "fastrlock", marker = "platform_machine != 'aarch64' or (extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and platform_machine != 'aarch64') or (python_full_version >= '3.11' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (python_full_version >= '3.11' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds') or (platform_machine == 'aarch64' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (platform_machine == 'aarch64' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
+    { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and platform_machine != 'aarch64') or (python_full_version < '3.11' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (python_full_version < '3.11' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds') or (platform_machine == 'aarch64' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (platform_machine == 'aarch64' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f7/2e/db22c5148884e4e384f6ebbc7971fa3710f3ba67ca492798890a0fdebc45/cupy_cuda12x-13.6.0-cp310-cp310-manylinux2014_aarch64.whl", hash = "sha256:9e37f60f27ff9625dfdccc4688a09852707ec613e32ea9404f425dd22a386d14", size = 126341714, upload-time = "2025-08-18T08:24:08.335Z" },
@@ -1978,6 +1978,7 @@ lint = [
     { name = "openai" },
     { name = "openai-whisper" },
     { name = "pandas-stubs" },
+    { name = "python-can" },
     { name = "python-socketio" },
     { name = "ruff" },
     { name = "sounddevice" },
@@ -2252,6 +2253,7 @@ lint = [
     { name = "openai" },
     { name = "openai-whisper" },
     { name = "pandas-stubs", specifier = ">=2.3.2.250926,<3" },
+    { name = "python-can", specifier = ">=4" },
     { name = "python-socketio", specifier = ">=5.16.1" },
     { name = "ruff", specifier = "==0.14.3" },
     { name = "sounddevice", specifier = ">=0.5.5" },
@@ -2634,7 +2636,7 @@ name = "exceptiongroup"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "typing-extensions", marker = "python_full_version < '3.13' or (extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11' or (extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/50/79/66800aadf48771f6b62f7eb014e352e5d06856655206165d775e675a02c9/exceptiongroup-1.3.1.tar.gz", hash = "sha256:8b412432c6055b0b7d14c310000ae93352ed6754f70fa8f7c34141f91c4e3219", size = 30371, upload-time = "2025-11-21T23:01:54.787Z" }
 wheels = [
@@ -6067,10 +6069,10 @@ wheels = [
 
 [package.optional-dependencies]
 all = [
-    { name = "nvidia-libnvcomp-cu12" },
-    { name = "nvidia-nvjpeg-cu12" },
-    { name = "nvidia-nvjpeg2k-cu12" },
-    { name = "nvidia-nvtiff-cu12" },
+    { name = "nvidia-libnvcomp-cu12", marker = "platform_machine != 'aarch64' or (extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
+    { name = "nvidia-nvjpeg-cu12", marker = "platform_machine != 'aarch64' or (extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
+    { name = "nvidia-nvjpeg2k-cu12", marker = "platform_machine != 'aarch64' or (extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
+    { name = "nvidia-nvtiff-cu12", marker = "platform_machine != 'aarch64' or (extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
 ]
 
 [[package]]
@@ -6244,12 +6246,12 @@ name = "onnxruntime-gpu"
 version = "1.24.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "flatbuffers" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11' or (extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
-    { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11' or (extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
-    { name = "packaging" },
-    { name = "protobuf" },
-    { name = "sympy" },
+    { name = "flatbuffers", marker = "platform_machine != 'aarch64' or (extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and platform_machine != 'aarch64') or (python_full_version >= '3.11' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (python_full_version >= '3.11' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds') or (platform_machine == 'aarch64' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (platform_machine == 'aarch64' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
+    { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and platform_machine != 'aarch64') or (python_full_version < '3.11' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (python_full_version < '3.11' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds') or (platform_machine == 'aarch64' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (platform_machine == 'aarch64' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
+    { name = "packaging", marker = "platform_machine != 'aarch64' or (extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
+    { name = "protobuf", marker = "platform_machine != 'aarch64' or (extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
+    { name = "sympy", marker = "platform_machine != 'aarch64' or (extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ca/c7/07d06175f1124fc89e8b7da30d70eb8e0e1400d90961ae1cbea9da69e69b/onnxruntime_gpu-1.24.1-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:ac4bfc90c376516b13d709764ab257e4e3d78639bf6a2ccfc826e9db4a5c7ddf", size = 252616647, upload-time = "2026-02-05T17:24:02.993Z" },
@@ -6323,13 +6325,13 @@ name = "open3d-unofficial-arm"
 version = "0.19.0.post5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "configargparse" },
-    { name = "dash" },
-    { name = "flask" },
-    { name = "nbformat" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11' or (extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
-    { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11' or (extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
-    { name = "werkzeug" },
+    { name = "configargparse", marker = "(platform_machine == 'aarch64' and sys_platform != 'win32') or (platform_machine != 'aarch64' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (platform_machine != 'aarch64' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds') or (sys_platform == 'win32' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (sys_platform == 'win32' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
+    { name = "dash", marker = "(platform_machine == 'aarch64' and sys_platform != 'win32') or (platform_machine != 'aarch64' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (platform_machine != 'aarch64' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds') or (sys_platform == 'win32' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (sys_platform == 'win32' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
+    { name = "flask", marker = "(platform_machine == 'aarch64' and sys_platform != 'win32') or (platform_machine != 'aarch64' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (platform_machine != 'aarch64' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds') or (sys_platform == 'win32' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (sys_platform == 'win32' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
+    { name = "nbformat", marker = "(platform_machine == 'aarch64' and sys_platform != 'win32') or (platform_machine != 'aarch64' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (platform_machine != 'aarch64' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds') or (sys_platform == 'win32' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (sys_platform == 'win32' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and platform_machine == 'aarch64' and sys_platform != 'win32') or (python_full_version >= '3.11' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (python_full_version >= '3.11' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds') or (platform_machine != 'aarch64' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (platform_machine != 'aarch64' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds') or (sys_platform == 'win32' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (sys_platform == 'win32' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
+    { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and platform_machine == 'aarch64' and sys_platform != 'win32') or (python_full_version < '3.11' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (python_full_version < '3.11' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds') or (platform_machine != 'aarch64' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (platform_machine != 'aarch64' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds') or (sys_platform == 'win32' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (sys_platform == 'win32' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
+    { name = "werkzeug", marker = "(platform_machine == 'aarch64' and sys_platform != 'win32') or (platform_machine != 'aarch64' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (platform_machine != 'aarch64' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds') or (sys_platform == 'win32' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (sys_platform == 'win32' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/02/87/95d3cf9017a0e89a708e611d003abeb66c88d7947fa7238962971cc8b0cb/open3d_unofficial_arm-0.19.0.post5-cp310-cp310-manylinux_2_35_aarch64.whl", hash = "sha256:26bc160f3326a74b232f026d741a576bf0d1fa7b1d5128c5e979d7b4d2d1b983", size = 48230542, upload-time = "2026-02-10T08:37:33.928Z" },
@@ -10991,9 +10993,9 @@ name = "xformers"
 version = "0.0.34"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11' or (extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
-    { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11' or (extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
-    { name = "torch" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and platform_machine != 'aarch64') or (python_full_version >= '3.11' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (python_full_version >= '3.11' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds') or (platform_machine == 'aarch64' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (platform_machine == 'aarch64' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
+    { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and platform_machine != 'aarch64') or (python_full_version < '3.11' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (python_full_version < '3.11' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds') or (platform_machine == 'aarch64' and extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (platform_machine == 'aarch64' and extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
+    { name = "torch", marker = "platform_machine != 'aarch64' or (extra == 'extra-5-dimos-dds' and extra == 'extra-5-dimos-unitree-dds') or (extra == 'extra-5-dimos-unitree' and extra == 'extra-5-dimos-unitree-dds')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/ef/2b/365151a1e2e6aa70c1bd66e0532e3d71915a28a34ebde3d9b068e8849f66/xformers-0.0.34.tar.gz", hash = "sha256:716bd9ffe61f46c2cc0536abf8b8c43ec594bea47a49394ea5cfa417e9de6a6f", size = 14303297, upload-time = "2026-01-23T18:14:31.457Z" }
 wheels = [
