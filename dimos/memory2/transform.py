@@ -277,7 +277,7 @@ def _gap_threshold(values: list[float]) -> float:
 
 
 def significant(
-    method: Literal["mad", "otsu", "gap"] = "mad",
+    method: Literal["mad", "otsu", "gap"] = "gap",
     k: float = 3.0,
     tag: str = "peak_prominence",
 ) -> FnIterTransformer[T, T]:
@@ -292,18 +292,24 @@ def significant(
     Each surviving observation gets ``tags["significance"]`` attached.
 
     - ``method``:
-        - ``"mad"``: keep values above ``median + k * 1.4826 * MAD``. Robust
-          default; assumes most upstream values are noise. ``significance``
-          is the resulting (value - median) / scale, i.e. a robust z-score.
+        - ``"gap"`` (default): largest ratio gap between consecutive sorted
+          values — picks the threshold where prominences "step up" most.
+          Matches what you'd eyeball off the graph: the few peaks visibly
+          separated from the noise floor. ``significance`` is value /
+          threshold.
+        - ``"mad"``: keep values above ``median + k * 1.4826 * MAD``. Assumes
+          most upstream values are noise centred symmetrically — works for
+          large, normal-ish distributions. On short or right-skewed peak
+          lists (typical for prominence data), MAD gets inflated by the
+          upper tail and ``k=3`` rejects everything; lower ``k`` to ~1.5 in
+          that regime. ``significance`` is ``(value - median) / scale``
+          (a robust z-score).
         - ``"otsu"``: 1D Otsu — picks the threshold maximizing between-class
           variance over the value distribution. Parameter-free; works when
           the distribution is roughly bimodal. ``significance`` is value /
           threshold.
-        - ``"gap"``: largest ratio gap between consecutive sorted values.
-          Crisp when peaks are well separated from noise, brittle otherwise
-          (a single tiny value at the bottom of the list can dominate).
-          ``significance`` is value / threshold.
-    - ``k``: only used by ``"mad"`` (≈3 ≙ 3-sigma equivalent).
+    - ``k``: only used by ``"mad"`` (≈3 ≙ 3-sigma equivalent for normal data;
+      try 1.5 for skewed / small-n peak distributions).
     - ``tag``: which tag holds the scalar to threshold on. Defaults to
       ``peak_prominence`` (set by :func:`peaks`).
     """
@@ -337,24 +343,37 @@ def significant(
 
 
 def smooth_time(seconds: float) -> FnIterTransformer[float, float]:
-    """Sliding window average over obs.data, by time.
+    """Sliding window average over obs.data, by time. Centered (no time shift).
 
-    Averages all observations whose timestamp is within ``seconds`` of the
-    current observation's timestamp. Unlike ``smooth(window)`` (which uses a
-    fixed sample count and so depends on sampling rate), the effective window
-    here adapts: dense regions average more samples, sparse regions average
-    fewer.
+    Averages all observations whose timestamp is within ``±seconds`` of the
+    current observation's timestamp, so the smoothed peak sits at the same
+    ts as the underlying peak — important when visual peaks need to align
+    with peaks detected on the raw signal. Unlike ``smooth(window)`` (which
+    uses a fixed sample count and so depends on sampling rate), the
+    effective window here adapts: dense regions average more samples,
+    sparse regions average fewer.
+
+    Requires the upstream to be ordered by ``ts`` (the default).
     """
     if seconds <= 0:
         raise ValueError(f"smooth_time(seconds) requires seconds > 0, got {seconds}")
 
     def _smooth(upstream: Iterator[Observation[float]]) -> Iterator[Observation[float]]:
-        buf: collections.deque[Observation[float]] = collections.deque()
-        for obs in upstream:
-            buf.append(obs)
-            while buf and obs.ts - buf[0].ts > seconds:
-                buf.popleft()
-            yield obs.derive(data=sum(o.data for o in buf) / len(buf))
+        items = list(upstream)
+        n = len(items)
+        if n == 0:
+            return
+        lo = hi = 0
+        running = 0.0
+        for obs in items:
+            t = obs.ts
+            while lo < n and items[lo].ts < t - seconds:
+                running -= items[lo].data
+                lo += 1
+            while hi < n and items[hi].ts <= t + seconds:
+                running += items[hi].data
+                hi += 1
+            yield obs.derive(data=running / (hi - lo))
 
     return FnIterTransformer(_smooth)
 

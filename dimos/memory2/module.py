@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from reactivex.abc import DisposableBase
 
     from dimos.core.stream import In, Out
+    from dimos.protocol.tf.tf import TFSpec
 
 logger = setup_logger()
 
@@ -65,9 +66,37 @@ def stream_to_port(stream: Stream[T], out: Out[T]) -> DisposableBase:
     )
 
 
-def port_to_stream(in_: In[T], stream: Stream[T]) -> DisposableBase:
-    """Append each message received on a Module ``In`` port to *stream*."""
-    return Disposable(in_.subscribe(stream.append))
+def port_to_stream(
+    in_: In[T],
+    stream: Stream[T],
+    *,
+    tf: TFSpec | None = None,
+    default_frame_id: str = "base_link",
+    tf_tolerance: float = 0.5,
+) -> DisposableBase:
+    """Append each message received on a Module ``In`` port to *stream*.
+
+    If *tf* is provided, look up the world pose of the message's frame at
+    its timestamp and attach it as ``Observation.pose``. Stamped messages
+    use their own ``.frame_id`` and ``.ts``; unstamped messages (or ones
+    whose frame isn't in the tf graph, e.g. a payload already in world
+    coords) fall back to *default_frame_id* — so every observation gets
+    a robot-pose anchor when tf is publishing.
+    """
+    if tf is None:
+        return Disposable(in_.subscribe(stream.append))
+
+    def _on_msg(msg: T) -> None:
+        ts = getattr(msg, "ts", None)
+        frame_id = getattr(msg, "frame_id", None) or default_frame_id
+        pose = tf.get_pose("world", frame_id, time_point=ts, time_tolerance=tf_tolerance)
+        if pose is None and frame_id != default_frame_id:
+            pose = tf.get_pose(
+                "world", default_frame_id, time_point=ts, time_tolerance=tf_tolerance
+            )
+        stream.append(msg, ts=ts, pose=pose)
+
+    return Disposable(in_.subscribe(_on_msg))
 
 
 class StreamModule(Module, Generic[TIn, TOut]):
@@ -173,6 +202,8 @@ class MemoryModuleConfig(ModuleConfig):
 
 class RecorderConfig(MemoryModuleConfig):
     overwrite: bool = True
+    default_frame_id: str = "base_link"
+    tf_tolerance: float = 0.5
 
 
 class MemoryModule(Module):
@@ -287,6 +318,13 @@ class Recorder(MemoryModule):
 
         for name, port in self.inputs.items():
             stream: Stream[Any] = self.store.stream(name, port.type)
-            self.register_disposable(port_to_stream(port, stream))
-            logger.info("Recording %s (%s)", name, port.type.__name__)
+            self.register_disposable(
+                port_to_stream(
+                    port,
+                    stream,
+                    tf=self.tf,
+                    default_frame_id=self.config.default_frame_id,
+                    tf_tolerance=self.config.tf_tolerance,
+                )
+            )
             logger.info("Recording %s (%s)", name, port.type.__name__)
