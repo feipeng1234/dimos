@@ -344,7 +344,19 @@ def _worker_entrypoint(conn: Connection, worker_id: int) -> None:
     except KeyboardInterrupt:
         logger.info("Worker got KeyboardInterrupt.", worker_id=worker_id)
     except Exception as e:
-        logger.error(f"Worker process error: {e}", exc_info=True)
+        # `f"... {e}"` is often empty (some exceptions stringify to "")
+        # and structlog's `exc_info` rendering may be elided in captured
+        # CI logs. Always emit the full traceback to stderr so the cause
+        # is visible regardless of the structured-log handler config.
+        traceback.print_exception(e, file=sys.stderr)
+        sys.stderr.flush()
+        logger.error(
+            "Worker process error",
+            worker_id=worker_id,
+            error_type=type(e).__name__,
+            error_repr=repr(e),
+            exc_info=True,
+        )
     finally:
         for module_id, instance in reversed(list(state.instances.items())):
             try:
