@@ -109,3 +109,67 @@
   line: null
   problem: "hey for how to test usually the idea is for people to test feature IRL on hardware or in sim — can we get docs for this so I can give them out to G1 owners and test in sim by myself?"
   solution: "No direct reply from Jeff. Leshy requesting user-facing docs for testing the nav stack on hardware/sim so G1 owners can try it. Needs Jeff to provide testing documentation."
+
+- pr: 1791
+  comment_id: 3098343051
+  author: leshy
+  file: dimos/simulation/unity/module.py
+  line: null
+  problem: "hey better to add stuff like this in code comments? IMO leave commenting to reviewers? all of these comments can be in the code itself, no?"
+  solution: "Jeff has multiple [NOTE] comments on the same file explaining design choices (overhead view, sim alignment with rosnav). Leshy's feedback is about PR comment style — preferring code comments over PR annotations. Jeff acknowledged by continuing to use [NOTE] and [POST-MERGE] tags. No code change needed."
+
+- pr: 1791
+  comment_id: 3098355067
+  author: leshy
+  file: dimos/msgs/nav_msgs/ContourPolygons3D.py
+  line: null
+  problem: "why [remove this], this looks totally legit to me? we do want to be able to visualize useful stuff, I see it has to_rerun etc"
+  solution: "Response to Jeff's note about removing ContourPolygons3D. Leshy disagrees and wants to keep it since it has to_rerun. Jeff replied acknowledging they're non-standard ROS types and tagged it [POST-MERGE] to find a better solution. Active design discussion."
+
+- pr: 1791
+  comment_id: 3098366177
+  author: leshy
+  file: dimos/msgs/nav_msgs/ContourPolygons3D.py
+  line: null
+  problem: "actually wait, you invented these types? these are not ros nav_msgs? How are you using those? I can't find in the code"
+  solution: "Jeff replied: they're non-standard ROS message types used for FAR planner visualization. Ideally they'd be rr.log'd but with the FAR planner being a native module that gets messy. Tagged as post-merge change. Active discussion — no autofix code change."
+
+- pr: 1791
+  comment_id: 3114893796
+  author: leshy
+  file: dimos/navigation/nav_stack/tests/test_cross_wall_planning_simple.py
+  line: null
+  problem: "actually yeah, if your module start() has returned your module is assumed ready"
+  solution: "Leshy confirming module readiness semantics — agreeing with Jeff's approach. No action needed, this is an affirmative reply."
+
+- pr: 1791
+  comment_id: 3114897517
+  author: leshy
+  file: dimos/navigation/nav_stack/modules/path_follower/path_follower.py
+  line: null
+  problem: "we shouldn't use pure pursuit for holonomic robots, just for an issue for later"
+  solution: "Leshy noting pure pursuit is wrong for holonomic robots but flagging for later, not blocking. Jeff has [POST-MERGE] notes on the path follower. No immediate code change needed — tracked as future improvement."
+
+- pr: 1791
+  comment_id: 3114900310
+  author: leshy
+  file: dimos/navigation/smart_nav/modules/movement_manager/movement_manager.py
+  line: null
+  problem: "why aren't you simply using self.tf.get? what is this for? I see cache mentioned but tf service does offer built in caching"
+  solution: "No direct reply from Jeff to this specific comment. Jeff has [POST-MERGE] notes on the movement_manager for making configs configurable and switching to async. The TF caching question is architecturally significant — needs Jeff's clarification on why custom caching vs. tf.get built-in."
+
+- pr: 1791
+  comment_id: 3114904926
+  author: leshy
+  file: dimos/navigation/nav_stack/modules/pgo/pgo.py
+  line: null
+  problem: "why do we have DIY python only PGO? aren't we using some fastlio pgo stuff?"
+  solution: "No direct reply from Jeff to this specific comment. Jeff has multiple [AGENT-TODO] and [POST-MERGE] notes on pgo.py for config inputs, magic numbers, and test improvements. The question about DIY Python PGO vs. FastLIO PGO is architecturally significant — needs Jeff's clarification."
+
+- pr: 1791
+  comment_id: 3114920804
+  author: leshy
+  file: dimos/msgs/nav_msgs/GraphNodes3D.py
+  line: null
+  problem: "actually re-read this, this is just a diff renderer for Path, why not add it to actual Path as a to_rerun functionality"
+  solution: "Jeff replied with [POST-MERGE] tag: 'find a better solution for this (official support for graph nodes would be nice)'. Acknowledges the concern and plans to address post-merge. No immediate code change."
