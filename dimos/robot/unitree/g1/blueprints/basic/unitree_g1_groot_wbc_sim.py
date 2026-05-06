@@ -575,16 +575,22 @@ if _splat_path is not None and _splat_path.exists():
             ("pointcloud_overlay", PointCloud2): LCMTransport("/global_map", PointCloud2),
         },
     )
-    # Camera publisher.  Splat wins when present — gsplat rasterization
-    # gives real colors regardless of what the scene mesh has baked in
-    # (artist meshes often export with flat-grey ColorVisuals + no
-    # textures).  MeshCameraModule's job is the fallback when there's
-    # no splat: ray-casts whatever colors the mesh actually carries.
-    # Override the default with DIMOS_USE_MESH_CAMERA=1 (e.g. when a
-    # custom scene's mesh has reliable colors and the splat is
-    # unrelated), or with the legacy DIMOS_DISABLE_MESH_CAMERA=1 which
-    # is a no-op now since splat is already the default.
-    _use_mesh_cam = os.environ.get("DIMOS_USE_MESH_CAMERA", "0") not in ("", "0")
+    # Camera publisher.  Splat wins on the *default* office bundle —
+    # gsplat rasterization gives real colors regardless of what the
+    # scene mesh has baked in (artist meshes often export with
+    # flat-grey ColorVisuals + no textures).  When the user provides
+    # their *own* scene mesh via DIMOS_SCENE_MESH_PATH, the
+    # dimos_office splat is unrelated geometry — rendering it as the
+    # camera feed shows the wrong room — so MeshCameraModule takes
+    # over and ray-casts the user's mesh instead.  Same gate that
+    # line ~523 uses to hide the splat from the viser viewer.
+    # DIMOS_USE_MESH_CAMERA=1 forces mesh camera even on the default
+    # bundle (for cases where the bundle's mesh has reliable colors
+    # and you'd rather see the mesh than the splat).
+    _use_mesh_cam = (
+        os.environ.get("DIMOS_USE_MESH_CAMERA", "0") not in ("", "0")
+        or _scene_mesh_path_override is not None
+    )
     if _scene_mesh_path and _use_mesh_cam:
         _g1_camera = MeshCameraModule.blueprint(
             scene_path=_scene_mesh_path,
