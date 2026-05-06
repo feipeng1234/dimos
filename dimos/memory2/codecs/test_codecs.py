@@ -30,7 +30,6 @@ from dimos.memory2.codecs.lcm import LcmCodec
 from dimos.memory2.codecs.pickle import PickleCodec
 from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
 from dimos.msgs.sensor_msgs.Image import Image, ImageFormat
-from dimos.utils.testing.replay import TimedSensorReplay
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -129,16 +128,25 @@ def _jpeg_case() -> Case | None:
         from turbojpeg import TurboJPEG
 
         TurboJPEG()  # fail fast if native lib is missing
-
-        replay = TimedSensorReplay("go2_bigoffice/color_image")
-        frames = [replay.find_closest_seek(float(i)) for i in range(1, 4)]
-        codec = JpegCodec(quality=95)
     except (ImportError, RuntimeError):
         return None
 
+    import numpy as np
+
+    h, w = 240, 320
+    ys = np.linspace(0, 255, h, dtype=np.float32)[:, None]
+    xs = np.linspace(0, 255, w, dtype=np.float32)[None, :]
+    frames: list[Image] = []
+    for i in range(3):
+        r = (ys * 0.5 + xs * 0.5 + i * 30).clip(0, 255)
+        g = (ys * 0.3 + xs * 0.7 + i * 20).clip(0, 255)
+        b = (ys * 0.7 + xs * 0.3 + i * 10).clip(0, 255)
+        data = np.stack([b, g, r], axis=-1).astype(np.uint8)
+        frames.append(Image(data=data, format=ImageFormat.BGR, frame_id="test", ts=float(i)))
+
     return Case(
         name="jpeg",
-        codec=codec,
+        codec=JpegCodec(quality=95),
         values=frames,
         eq=_jpeg_eq,
     )

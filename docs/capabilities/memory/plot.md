@@ -103,7 +103,10 @@ from dimos.memory2.transform import normalize, smooth_time
 
 from dimos.models.embedding.clip import CLIPModel
 clip = CLIPModel()
-search_vector = clip.embed_text("plant")
+
+search_string = "plant"
+
+search_vector = clip.embed_text(search_string)
 
 # we will cache this into memory since it takes a second,
 # and use it to play with graphing
@@ -238,14 +241,14 @@ moondream.start()
 
 # peaks is still a stream of image observations (with prominence and semantic similarity metadata)
 # so we can just draw it directly via mosaic that takes image streams
-m = mosaic(semantic_peaks.map_data(lambda obs: moondream.query_detections(obs.data, "plant")))
+m = mosaic(semantic_peaks.map_data(lambda obs: moondream.query_detections(obs.data, search_string)))
 
 m.data.save("assets/plants_auto.png")
 ```
 
 <!--Result:-->
 ```
-12:29:03.978 [inf][dimos/mapping/voxels.py       ] VoxelGrid using device: CUDA:0
+13:10:02.321 [inf][dimos/mapping/voxels.py       ] VoxelGrid using device: CUDA:0
 ```
 
 
@@ -326,17 +329,35 @@ drawing.add(meaningful_peak.pose_stamped, color=color.green)
 
 # run a detector, filter small weird detections
 detections = (near_images
-    .map_data(lambda obs: moondream.query_detections(obs.data, "plant"))
-    .map_data(lambda obs: obs.data.filter(lambda det: det.bbox_2d_volume() > 3000))
+    .map_data(lambda obs: moondream.query_detections(obs.data, search_string))
+    .map_data(lambda obs: obs.data.filter(lambda det: det.bbox_2d_volume() > 15000))
     .filter(lambda obs: len(obs.data) > 0)
     .materialize())
     # materialize this stream since we'll want to re-use it later
+
+for imagedetections in detections:
+    for detection in imagedetections.data:
+       print(detection.bbox_2d_volume())
 
 drawing.add(detections)
 drawing.to_svg("assets/peak_space.svg")
 
 m = mosaic(detections)
 m.data.save("assets/plants_peak_detections.png")
+```
+
+<!--Result:-->
+```
+313809.28602764546
+307494.9311187061
+320253.3267173585
+285409.9658367837
+315942.76869479765
+139171.88038184104
+168246.00232151916
+192662.44564284134
+291270.8485502135
+36631.58247878539
 ```
 
 ![output](assets/peak_space.svg)

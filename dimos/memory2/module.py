@@ -89,12 +89,10 @@ def port_to_stream(
     def _on_msg(msg: T) -> None:
         ts = getattr(msg, "ts", None)
         frame_id = getattr(msg, "frame_id", None) or default_frame_id
-        pose = tf.get_pose("world", frame_id, time_point=ts, time_tolerance=tf_tolerance)
-        if pose is None and frame_id != default_frame_id:
-            pose = tf.get_pose(
-                "world", default_frame_id, time_point=ts, time_tolerance=tf_tolerance
-            )
-        stream.append(msg, ts=ts, pose=pose)
+        tr = tf.get("world", frame_id, time_point=ts, time_tolerance=tf_tolerance)
+        if tr is None and frame_id != default_frame_id:
+            tr = tf.get("world", default_frame_id, time_point=ts, time_tolerance=tf_tolerance)
+        stream.append(msg, ts=ts, pose=tr.to_pose() if tr is not None else None)
 
     return Disposable(in_.subscribe(_on_msg))
 
