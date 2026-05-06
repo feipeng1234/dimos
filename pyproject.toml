@@ -102,6 +102,7 @@ dio = "dimos.utils.cli.dio.app:main"
 rerun-bridge = "dimos.visualization.rerun.bridge:app"
 doclinks = "dimos.utils.docs.doclinks:main"
 dtop = "dimos.utils.cli.dtop:main"
+dtop-plot = "dimos.utils.cli.dtop_plot:main"
 
 [project.urls]
 Homepage = "https://dimensionalos.com"
@@ -214,6 +215,10 @@ manipulation = [
     "piper-sdk",
     "pyrealsense2; sys_platform != 'darwin'",
     "xarm-python-sdk>=1.17.0",
+
+    # Mesh conversion (STL/DAE → OBJ for Drake collision geometry)
+    "trimesh",
+    "pycollada",
 
     # Visualization (Optional)
     "kaleido>=0.2.1",

@@ -15,14 +15,14 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-import logging
 import os
 import subprocess
 
 from dimos.utils import prompt
+from dimos.utils.logging_config import setup_logger
 from dimos.utils.prompt import confirm, sudo_prompt
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 
 def _is_root_user() -> bool:
