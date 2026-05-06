@@ -44,6 +44,9 @@ def back_project_bbox(
     world_to_optical: Transform,
     *,
     margin_px: int = 5,
+    depth_band_m: float = 0.5,
+    cluster_eps_m: float = 0.20,
+    cluster_min_points: int = 3,
     radius_outlier_nb: int = 3,
     radius_outlier_radius: float = 0.20,
     statistical_outlier_nb: int = 6,
@@ -71,6 +74,22 @@ def back_project_bbox(
     margin_px:
         Extra pixels to expand the bbox by before slicing — accounts
         for slight bbox imprecision and lidar discretization.
+    depth_band_m:
+        Half-width of the depth band kept around the median depth of
+        the bbox slice (in camera-frame meters).  Without this filter
+        the AABB stretches from the foreground object to the wall
+        behind it because the lidar sees both — the bbox becomes a
+        pencil pointing away from the camera.  Default 0.5 m
+        (object + 50 cm of slack each side); shrink for tighter,
+        bias toward foreground only; widen for thick objects.
+    cluster_eps_m / cluster_min_points:
+        DBSCAN connectivity radius and minimum cluster size for the
+        post-depth-band cluster step.  Picks the largest connected
+        cluster as "the object" and discards everything else — drops
+        floor strips, neighbor-object spillover, and the trail of
+        wall points still inside the depth band.  ``eps_m`` should be
+        ~3-4x the lidar voxel size (5cm -> ~20cm) so a thin target
+        stays one cluster but neighbouring objects don't merge.
     radius_outlier_nb / radius_outlier_radius:
         Open3D radius outlier removal — drops points without
         ``radius_outlier_nb`` neighbors in ``radius_outlier_radius`` m.
@@ -137,6 +156,7 @@ def back_project_bbox(
         )
         return None
     pix = pix[in_image]
+    cam_xyz = cam_xyz[in_image]
     world_xyz = world_xyz[in_image]
 
     x_min, y_min, x_max, y_max = bbox_xyxy
@@ -147,6 +167,7 @@ def back_project_bbox(
         & (pix[:, 1] <= y_max + margin_px)
     )
     n_in_bbox = int(in_bbox.sum())
+    cam_xyz = cam_xyz[in_bbox]
     detection_pts = world_xyz[in_bbox]
     if detection_pts.shape[0] < min_points:
         logger.info(
@@ -156,6 +177,65 @@ def back_project_bbox(
             n_in_front,
             n_in_image,
             n_total,
+        )
+        return None
+
+    # Depth-band filter: strip background points so the AABB hugs the
+    # foreground object instead of stretching out to the wall behind
+    # it.  Take the median camera-frame depth of the bbox slice — the
+    # mode of "the object the VLM bbox is actually about" — and keep
+    # only points within ±depth_band_m of it.
+    cam_z = cam_xyz[:, 2]
+    depth_med = float(np.median(cam_z))
+    in_band = np.abs(cam_z - depth_med) <= depth_band_m
+    n_in_band = int(in_band.sum())
+    detection_pts = detection_pts[in_band]
+    if detection_pts.shape[0] < min_points:
+        logger.info(
+            "back_project_bbox bbox=%s: depth band kept %d (median=%.2fm, band=±%.2fm)",
+            bbox_xyxy,
+            n_in_band,
+            depth_med,
+            depth_band_m,
+        )
+        return None
+
+    # Cluster step: even after the depth band, a tall bbox can drag in
+    # disconnected fragments — a floor strip below the chair, the wall
+    # behind it that happens to fall inside ±depth_band_m near the
+    # bbox edges, etc.  DBSCAN groups points by connectivity in 3D;
+    # keep the largest cluster (the object the VLM bbox actually
+    # points at) and discard the rest.
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(detection_pts)
+    labels = np.asarray(
+        pcd.cluster_dbscan(
+            eps=cluster_eps_m,
+            min_points=cluster_min_points,
+            print_progress=False,
+        )
+    )
+    valid = labels >= 0  # -1 == noise per Open3D's convention
+    if not valid.any():
+        logger.info(
+            "back_project_bbox bbox=%s: DBSCAN found no clusters in %d points (eps=%.2fm)",
+            bbox_xyxy,
+            detection_pts.shape[0],
+            cluster_eps_m,
+        )
+        return None
+    counts = np.bincount(labels[valid])
+    largest_label = int(counts.argmax())
+    largest_mask = labels == largest_label
+    n_clusters = int(counts.size)
+    n_largest = int(counts[largest_label])
+    detection_pts = detection_pts[largest_mask]
+    if detection_pts.shape[0] < min_points:
+        logger.info(
+            "back_project_bbox bbox=%s: largest cluster only %d points (clusters=%d)",
+            bbox_xyxy,
+            n_largest,
+            n_clusters,
         )
         return None
 

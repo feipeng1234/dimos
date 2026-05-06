@@ -93,8 +93,11 @@ class ObjectPerceptionConfig(MemoryModuleConfig):
     """Same-label detections within this distance merge into one
     ``Object3D``.  Tune up for sparser scenes, down for cluttered."""
 
-    max_objects: int = 500
-    """LRU cap on the in-memory dict (memory2 stream is uncapped log)."""
+    max_objects: int = 15
+    """LRU cap on the in-memory dict (memory2 stream is uncapped log).
+    Kept low (15) by default so the viser overlay stays readable; the
+    SQLite log accumulates everything regardless and replay() will
+    only restore up to this many on startup."""
 
     publish_min_obs: int = 1
     """Only objects with ``n_obs >= this`` are published to the viser
