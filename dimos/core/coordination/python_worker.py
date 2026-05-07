@@ -424,6 +424,11 @@ def _handle_request(request: Any, state: _WorkerState) -> WorkerResponse:
                     "allow_pickle": True,
                 },
             )
+            # `ThreadedServer.__init__` binds the socket but does not call
+            # `listen()` — that happens in `start()` on the thread. Call
+            # `_listen()` synchronously first so the port we return is
+            # actually accepting connections.
+            state.rpyc_server._listen()
             state.rpyc_thread = threading.Thread(target=state.rpyc_server.start, daemon=True)
             state.rpyc_thread.start()
             return WorkerResponse(result=state.rpyc_server.port)
