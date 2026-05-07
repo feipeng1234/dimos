@@ -167,12 +167,6 @@ class MemoryModuleConfig(ModuleConfig):
         return p
 
 
-class RecorderConfig(MemoryModuleConfig):
-    overwrite: bool = True
-    default_frame_id: str = "base_link"
-    tf_tolerance: float = 0.5
-
-
 class MemoryModule(Module):
     """Base class for memory-related modules, like recorders and search systems.
     Provides a config with a db_path for the module's MemoryStore, and common start/stop logic.
@@ -241,6 +235,13 @@ class SemanticSearch(MemoryModule):
             return cast("EmbeddedObservation[Any]", obs).similarity or 0.0
 
         return results.transform(peaks(key=_similarity, distance=1.0)).last().pose_stamped
+
+
+class RecorderConfig(MemoryModuleConfig):
+    overwrite: bool = True
+    default_frame_id: str = "base_link"
+    tf_tolerance: float = 0.5
+    db_path: str | Path = "recording.db"
 
 
 class Recorder(MemoryModule):
