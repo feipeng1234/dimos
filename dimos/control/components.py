@@ -39,7 +39,6 @@ def split_joint_name(joint_name: str) -> tuple[str, str]:
 class HardwareType(Enum):
     MANIPULATOR = "manipulator"
     BASE = "base"
-    GRIPPER = "gripper"
     WHOLE_BODY = "whole_body"
 
 
@@ -151,39 +150,6 @@ def make_twist_base_joints(
     return [f"{hardware_id}/{s}" for s in suffixes]
 
 
-_QUADRUPED_LEG_JOINTS = [
-    "FR_0",
-    "FR_1",
-    "FR_2",
-    "FL_0",
-    "FL_1",
-    "FL_2",
-    "RR_0",
-    "RR_1",
-    "RR_2",
-    "RL_0",
-    "RL_1",
-    "RL_2",
-]
-
-
-def make_quadruped_joints(hardware_id: HardwareId) -> list[JointName]:
-    """Create joint names for a 12-DOF quadruped.
-
-    Uses standard leg naming: FR/FL/RR/RL with 3 joints each
-    (hip, thigh, calf).  Slash-separated to match
-    ``split_joint_name`` (consistent with ``make_humanoid_joints``
-    and ``make_twist_base_joints``).
-
-    Args:
-        hardware_id: The hardware identifier (e.g., "go2")
-
-    Returns:
-        List of 12 joint names like ["go2/FR_0", "go2/FR_1", ..., "go2/RL_2"]
-    """
-    return [f"{hardware_id}/{j}" for j in _QUADRUPED_LEG_JOINTS]
-
-
 _HUMANOID_29DOF_JOINTS = [
     # Left leg (0-5)
     "left_hip_pitch",
@@ -247,7 +213,6 @@ __all__ = [
     "make_gripper_joints",
     "make_humanoid_joints",
     "make_joints",
-    "make_quadruped_joints",
     "make_twist_base_joints",
     "split_joint_name",
 ]
