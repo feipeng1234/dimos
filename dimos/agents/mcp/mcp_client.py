@@ -156,12 +156,7 @@ class McpClient(Module):
             try:
                 self._mcp_request("initialize")
                 break
-            # During cold start uvicorn may briefly answer with 404 (route
-            # table not yet built), close the connection mid-read, or have
-            # the JSON-RPC handler return an error before tools are
-            # registered. Retry on anything httpx raises plus our own
-            # `RuntimeError` from `_mcp_request`'s error-payload check.
-            except (httpx.HTTPError, RuntimeError):
+            except (httpx.ConnectError, httpx.RemoteProtocolError):
                 if time.monotonic() >= deadline:
                     return None
                 time.sleep(interval)

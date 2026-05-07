@@ -375,8 +375,8 @@ lint = [
     "pandas-stubs>=2.3.2.250926,<3",
     "types-pyaudio",
     "types-psycopg2>=2.9.21.20251012",
-    "types-PyYAML>=6.0.12.20250915,<7",  # yaml (msgs/sensor_msgs/CameraInfo.py, perception/common/utils.py)
-    "types-requests>=2.32.4.20260107,<3",  # requests (mcp_adapter, osm, cli, skills/rest, …)
+    "types-PyYAML>=6.0.12.20250915,<7",
+    "types-requests>=2.32.4.20260107,<3",
 
     {include-group = "project-deps"},
 ]
@@ -520,7 +520,7 @@ env = [
   "GOOGLE_MAPS_API_KEY=AIzafake_google_key",
   "PYTHONWARNINGS=ignore:cupyx.jit.rawkernel is experimental:FutureWarning",
 ]
-addopts = "--dist=loadfile -v -r a -p no:warnings -p no:launch_testing -p no:launch_ros --import-mode=importlib --color=yes -m 'not (tool or self_hosted or mujoco)'"
+addopts = "--dist=loadfile --durations=10 -v -ra --showlocals -p no:launch_testing -p no:launch_ros --import-mode=importlib --color=yes -m 'not (tool or self_hosted or mujoco)'"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 
