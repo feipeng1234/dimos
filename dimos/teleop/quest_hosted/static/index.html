@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DimOS Teleop (Hosted)</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #fff; color: #333;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            height: 100vh; overflow: hidden;
+        }
+        #ui {
+            position: absolute; inset: 0;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            z-index: 100; gap: 16px;
+        }
+        h1 { font-size: 36px; font-weight: 600; color: #28283b; }
+        h2 { font-size: 18px; font-weight: 400; color: #6c757d; margin-bottom: 16px; }
+        #status {
+            font-size: 22px; font-weight: 500; color: #0077b6;
+            padding: 12px 24px; border: 2px solid #0077b6; border-radius: 12px;
+            min-width: 320px; text-align: center;
+        }
+        input, select {
+            font-size: 16px; padding: 10px 14px;
+            border: 1px solid #ccc; border-radius: 8px;
+            width: 360px; text-align: left;
+        }
+        button {
+            padding: 16px 36px; font-size: 20px; font-weight: 600;
+            color: white; background: #0077b6; border: none; border-radius: 12px;
+            cursor: pointer; transition: background-color .2s;
+        }
+        button:hover { background: #005f8a; }
+        button:disabled { background: #adb5bd; cursor: not-allowed; }
+        button.secondary { background: #6c757d; }
+        button.secondary:hover { background: #545b62; }
+        #canvas {
+            display: none; position: absolute; inset: 0;
+            width: 100%; height: 100%;
+        }
+        .hidden { display: none !important; }
+        .row { display: flex; gap: 8px; align-items: center; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <h1>DimOS Teleop</h1>
+        <h2>Hosted client (Cloudflare Realtime)</h2>
+        <div id="status">Ready</div>
+
+        <input id="broker-input" type="text" placeholder="Broker URL (https://teleop.dimensional-apps.com)" />
+        <input id="api-key-input" type="password" placeholder="API key (optional)" />
+        <div class="row">
+            <button id="refreshBtn" onclick="refreshRobots()">List robots</button>
+        </div>
+        <select id="robot-select" class="hidden"></select>
+        <button id="connectBtn" class="hidden" onclick="connect()">Connect</button>
+        <button id="disconnectBtn" class="hidden secondary" onclick="disconnect()">Disconnect</button>
+    </div>
+    <canvas id="canvas"></canvas>
+
+    <script type="module">
+        window.onerror = (msg, url, line, col, error) => {
+            console.error(`[ERROR] ${msg} at ${url}:${line}:${col}`, error);
+            document.getElementById('status').textContent = `Error: ${msg}`;
+        };
+
+        import { geometry_msgs, std_msgs, sensor_msgs } from "https://esm.sh/jsr/@dimos/msgs@0.1.4";
+
+        // State
+        let pc = null;
+        let cmdChannel = null;
+        let xrSession = null;
+        let xrRefSpace = null;
+        let gl = null;
+        let lastSendTime = 0;
+        const sendInterval = 1000 / 80; // 80 Hz
+
+        // UI elements
+        const statusEl = document.getElementById('status');
+        const brokerInput = document.getElementById('broker-input');
+        const apiKeyInput = document.getElementById('api-key-input');
+        const refreshBtn = document.getElementById('refreshBtn');
+        const robotSelect = document.getElementById('robot-select');
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const canvas = document.getElementById('canvas');
+
+        const urlParams = new URLSearchParams(window.location.search);
+        brokerInput.value = urlParams.get('broker') || localStorage.getItem('dimos_broker') || '';
+        apiKeyInput.value = urlParams.get('api_key') || localStorage.getItem('dimos_api_key') || '';
+
+        function setStatus(msg) { statusEl.textContent = msg; }
+
+        function authHeaders() {
+            const k = apiKeyInput.value.trim();
+            return k ? { 'Authorization': `Bearer ${k}` } : {};
+        }
+
+        function brokerUrl() {
+            const b = brokerInput.value.trim().replace(/\/$/, '');
+            if (!b) throw new Error('Enter the broker URL');
+            return b;
+        }
+
+        // GET /api/v1/sessions → populate robot dropdown
+        window.refreshRobots = async function() {
+            try {
+                refreshBtn.disabled = true;
+                setStatus('Fetching robot list...');
+                localStorage.setItem('dimos_broker', brokerInput.value.trim());
+                localStorage.setItem('dimos_api_key', apiKeyInput.value.trim());
+
+                const resp = await fetch(`${brokerUrl()}/api/v1/sessions`, {
+                    headers: { ...authHeaders() }
+                });
+                if (!resp.ok) throw new Error(`broker returned ${resp.status}`);
+                const robots = await resp.json();
+
+                robotSelect.innerHTML = '';
+                if (!Array.isArray(robots) || robots.length === 0) {
+                    setStatus('No robots online');
+                    robotSelect.classList.add('hidden');
+                    connectBtn.classList.add('hidden');
+                    return;
+                }
+                for (const r of robots) {
+                    const opt = document.createElement('option');
+                    opt.value = r.session_id;
+                    opt.textContent = `${r.robot_name || r.robot_id || r.session_id}`;
+                    robotSelect.appendChild(opt);
+                }
+                robotSelect.classList.remove('hidden');
+                connectBtn.classList.remove('hidden');
+                setStatus(`${robots.length} robot(s) available`);
+            } catch (e) {
+                console.error(e);
+                setStatus(`List failed: ${e.message}`);
+            } finally {
+                refreshBtn.disabled = false;
+            }
+        };
+
+        async function setupWebRTC(sessionId) {
+            setStatus('Negotiating WebRTC...');
+            pc = new RTCPeerConnection({
+                iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }]
+            });
+
+            // Operator → robot. UDP-like, drop stale frames.
+            cmdChannel = pc.createDataChannel('cmd_unreliable', {
+                ordered: false,
+                maxRetransmits: 0
+            });
+            cmdChannel.binaryType = 'arraybuffer';
+
+            const opened = new Promise((resolve, reject) => {
+                cmdChannel.onopen = () => resolve();
+                cmdChannel.onerror = (e) => reject(e);
+                pc.oniceconnectionstatechange = () => {
+                    if (pc.iceConnectionState === 'failed' ||
+                        pc.iceConnectionState === 'disconnected') {
+                        reject(new Error('ICE ' + pc.iceConnectionState));
+                    }
+                };
+            });
+
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+
+            await new Promise(resolve => {
+                if (pc.iceGatheringState === 'complete') return resolve();
+                pc.onicegatheringstatechange = () => {
+                    if (pc.iceGatheringState === 'complete') resolve();
+                };
+            });
+
+            const resp = await fetch(`${brokerUrl()}/api/v1/sessions/${sessionId}/join`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...authHeaders() },
+                body: JSON.stringify({
+                    sdp: pc.localDescription.sdp,
+                    type: pc.localDescription.type
+                })
+            });
+            if (!resp.ok) throw new Error(`broker join failed: ${resp.status}`);
+            const answer = await resp.json();
+            await pc.setRemoteDescription(answer);
+
+            await opened;
+            setStatus('Connected');
+        }
+
+        function send(bytes) {
+            if (cmdChannel && cmdChannel.readyState === 'open') {
+                cmdChannel.send(bytes);
+            }
+        }
+
+        function initGL() {
+            gl = canvas.getContext('webgl', { xrCompatible: true, alpha: true });
+            if (!gl) throw new Error('WebGL not supported');
+            gl.clearColor(0, 0, 0, 0);
+        }
+
+        function processTracking(frame) {
+            const now = performance.now();
+            if (now - lastSendTime < sendInterval) return;
+            lastSendTime = now;
+
+            for (const inputSource of frame.session.inputSources) {
+                const trackingSpace = inputSource.gripSpace || inputSource.targetRaySpace;
+                if (!trackingSpace) continue;
+                const handedness = inputSource.handedness;
+                if (handedness !== 'left' && handedness !== 'right') continue;
+
+                const pose = frame.getPose(trackingSpace, xrRefSpace);
+                if (!pose) continue;
+
+                const pos = pose.transform.position;
+                const rot = pose.transform.orientation;
+                const nowMs = Date.now();
+
+                const poseStamped = new geometry_msgs.PoseStamped({
+                    header: new std_msgs.Header({
+                        stamp: new std_msgs.Time({
+                            sec: Math.floor(nowMs / 1000),
+                            nsec: (nowMs % 1000) * 1_000_000
+                        }),
+                        frame_id: handedness
+                    }),
+                    pose: new geometry_msgs.Pose({
+                        position: new geometry_msgs.Point({ x: pos.x, y: pos.y, z: pos.z }),
+                        orientation: new geometry_msgs.Quaternion({
+                            x: rot.x, y: rot.y, z: rot.z, w: rot.w
+                        })
+                    })
+                });
+                send(poseStamped.encode());
+
+                const gamepad = inputSource.gamepad;
+                if (gamepad) {
+                    const axes = [
+                        gamepad.axes[0] ?? 0.0,
+                        gamepad.axes[1] ?? 0.0,
+                        gamepad.buttons[0]?.value ?? 0.0,
+                        gamepad.buttons[1]?.value ?? 0.0
+                    ];
+                    const buttons = [];
+                    for (let i = 0; i < gamepad.buttons.length; i++) {
+                        buttons.push(gamepad.buttons[i]?.pressed ? 1 : 0);
+                    }
+                    const joyMsg = new sensor_msgs.Joy({
+                        header: new std_msgs.Header({
+                            stamp: new std_msgs.Time({
+                                sec: Math.floor(nowMs / 1000),
+                                nsec: (nowMs % 1000) * 1_000_000
+                            }),
+                            frame_id: handedness
+                        }),
+                        axes_length: axes.length,
+                        buttons_length: buttons.length,
+                        axes: axes,
+                        buttons: buttons
+                    });
+                    send(joyMsg.encode());
+                }
+            }
+        }
+
+        function onXRFrame(time, frame) {
+            if (!xrSession) return;
+            xrSession.requestAnimationFrame(onXRFrame);
+            processTracking(frame);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+        }
+
+        async function startVR() {
+            setStatus('Initializing WebGL...');
+            initGL();
+            setStatus('Requesting VR session...');
+            let session = null;
+            try {
+                session = await navigator.xr.requestSession('immersive-ar', {
+                    requiredFeatures: ['local-floor'],
+                    optionalFeatures: ['hand-tracking']
+                });
+            } catch (e) {
+                session = await navigator.xr.requestSession('immersive-vr', {
+                    requiredFeatures: ['local-floor'],
+                    optionalFeatures: ['hand-tracking']
+                });
+            }
+            xrSession = session;
+            const glLayer = new XRWebGLLayer(session, gl);
+            await session.updateRenderState({ baseLayer: glLayer });
+            xrRefSpace = await session.requestReferenceSpace('local-floor');
+            setStatus('VR active');
+            session.addEventListener('end', () => {
+                setStatus('VR session ended');
+                xrSession = null;
+                disconnect();
+            });
+            session.requestAnimationFrame(onXRFrame);
+        }
+
+        window.connect = async function() {
+            try {
+                connectBtn.disabled = true;
+                if (!navigator.xr) throw new Error('WebXR not supported. Use Quest 3 browser.');
+                const sessionId = robotSelect.value;
+                if (!sessionId) throw new Error('Pick a robot first');
+                await setupWebRTC(sessionId);
+                await startVR();
+                connectBtn.classList.add('hidden');
+                disconnectBtn.classList.remove('hidden');
+                refreshBtn.classList.add('hidden');
+                robotSelect.classList.add('hidden');
+                brokerInput.classList.add('hidden');
+                apiKeyInput.classList.add('hidden');
+            } catch (e) {
+                setStatus(`Connection failed: ${e.message}`);
+                console.error(e);
+                connectBtn.disabled = false;
+            }
+        };
+
+        window.disconnect = async function() {
+            setStatus('Disconnecting...');
+            if (xrSession) { await xrSession.end().catch(console.error); xrSession = null; }
+            if (cmdChannel) { try { cmdChannel.close(); } catch (_) {} cmdChannel = null; }
+            if (pc)         { try { pc.close(); }         catch (_) {} pc = null; }
+            connectBtn.classList.remove('hidden');
+            connectBtn.disabled = false;
+            disconnectBtn.classList.add('hidden');
+            refreshBtn.classList.remove('hidden');
+            brokerInput.classList.remove('hidden');
+            apiKeyInput.classList.remove('hidden');
+            setStatus('Ready');
+        };
+    </script>
+</body>
+</html>
