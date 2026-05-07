@@ -51,7 +51,12 @@ logger = setup_logger()
 
 _NUM_MOTORS = 29
 _NUM_MOTOR_SLOTS = 35  # G1 hg LowCmd has 35 slots; only 29 are used
-_MODE_MACHINE_WAIT_S = 10.0
+# mode_machine is a static value identifying the G1 firmware/hardware
+# variant.  Older code read it back from the first LowState frame and
+# echoed it into LowCmd; that callback path is unreliable on macOS
+# cyclonedds, and the value never changes for a given robot, so we
+# hardcode it.  29-DOF G1 (gear) reports 5.
+_MODE_MACHINE_G1: int = 5
 
 # Joint names sourced from the canonical helper. Order matches the motor index
 # convention above. Single-source-of-truth so any coordinator-side adapter built
@@ -119,12 +124,19 @@ class G1WholeBodyConnection(Module):
         self._publisher = ChannelPublisher("rt/lowcmd", LowCmd_)
         self._publisher.Init()
 
+        # Passive subscriber — Read() per tick from the publish loop.  The
+        # callback variant (Init(self._on_low_state, 10)) doesn't fire
+        # reliably under cyclonedds on macOS, which used to leave us
+        # blocked here forever waiting for a first LowState.
         self._subscriber = ChannelSubscriber("rt/lowstate", LowState_)
-        self._subscriber.Init(self._on_low_state, 10)
+        self._subscriber.Init(None, 0)
 
         # POS_STOP/VEL_STOP + zero gains so the robot can't twitch pre-command.
         self._low_cmd = unitree_hg_msg_dds__LowCmd_()
         self._low_cmd.mode_pr = 0  # PR (pitch/roll) mode
+        # mode_machine is a static value (see comment above the constant).
+        self._mode_machine = _MODE_MACHINE_G1
+        self._low_cmd.mode_machine = self._mode_machine
         for i in range(_NUM_MOTOR_SLOTS):
             self._low_cmd.motor_cmd[i].mode = 0x01  # enable
             self._low_cmd.motor_cmd[i].q = POS_STOP
@@ -140,16 +152,6 @@ class G1WholeBodyConnection(Module):
             self._release_sport_mode()
         else:
             logger.info("Skipping sport mode release (release_sport_mode=False)")
-
-        logger.info("Waiting for first LowState to capture mode_machine...")
-        deadline = time.time() + _MODE_MACHINE_WAIT_S
-        while self._mode_machine is None and time.time() < deadline:
-            time.sleep(0.1)
-        if self._mode_machine is None:
-            raise RuntimeError(
-                f"Timed out after {_MODE_MACHINE_WAIT_S:.1f}s waiting for "
-                f"first LowState — mode_machine never captured"
-            )
 
         logger.info(f"G1WholeBodyConnection connected (mode_machine={self._mode_machine})")
 
@@ -201,6 +203,15 @@ class G1WholeBodyConnection(Module):
         zero_vec3 = (0.0, 0.0, 0.0)
 
         while not self._stop_event.is_set():
+            # Drain the latest LowState frame (None means no fresh sample
+            # this tick — keep the previous one).
+            sub = self._subscriber
+            if sub is not None:
+                fresh = sub.Read()
+                if fresh is not None:
+                    with self._lock:
+                        self._low_state = fresh
+
             with self._lock:
                 ls = self._low_state
                 if ls is None:
@@ -275,13 +286,6 @@ class G1WholeBodyConnection(Module):
 
             self._low_cmd.crc = self._crc.Crc(self._low_cmd)
             self._publisher.Write(self._low_cmd)
-
-    def _on_low_state(self, msg: Any) -> None:
-        """rt/lowstate callback — captures mode_machine and the latest snapshot."""
-        with self._lock:
-            self._low_state = msg
-            if self._mode_machine is None:
-                self._mode_machine = msg.mode_machine
 
     def _release_sport_mode(self) -> None:
         """Loop ReleaseMode until MotionSwitcher reports no active controller."""
