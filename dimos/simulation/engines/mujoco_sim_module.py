@@ -53,6 +53,7 @@ from dimos.msgs.sensor_msgs.JointState import JointState
 from dimos.msgs.sensor_msgs.PointCloud2 import PointCloud2
 from dimos.simulation.engines.mujoco_engine import (
     CameraConfig,
+    CameraFrame,
     MujocoEngine,
 )
 from dimos.simulation.engines.mujoco_shm import (
@@ -580,7 +581,7 @@ class MujocoSimModule(
                 )
                 self.depth_image.publish(depth_img)
 
-            self._publish_tf(ts, frame.cam_pos, frame.cam_mat)
+            self._publish_tf(ts, frame)
 
             published_count += 1
             if published_count == 1:
@@ -613,14 +614,16 @@ class MujocoSimModule(
         self.camera_info.publish(info)
         self.depth_camera_info.publish(info)
 
-    def _publish_tf(self, ts: float, cam_pos: np.ndarray, cam_mat: np.ndarray) -> None:
-        mj_rot = R.from_matrix(cam_mat.reshape(3, 3))
+    def _publish_tf(self, ts: float, frame: CameraFrame | None) -> None:
+        if frame is None:
+            return
+        mj_rot = R.from_matrix(frame.cam_mat.reshape(3, 3))
         optical_rot = mj_rot * _RX180
         q = optical_rot.as_quat()  # xyzw
         pos = Vector3(
-            float(cam_pos[0]),
-            float(cam_pos[1]),
-            float(cam_pos[2]),
+            float(frame.cam_pos[0]),
+            float(frame.cam_pos[1]),
+            float(frame.cam_pos[2]),
         )
         rot = Quaternion(float(q[0]), float(q[1]), float(q[2]), float(q[3]))
         self.tf.publish(

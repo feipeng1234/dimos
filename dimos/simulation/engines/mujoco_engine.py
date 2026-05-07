@@ -48,13 +48,6 @@ class CameraConfig:
     width: int = 640
     height: int = 480
     fps: float = 15.0
-    # Per-camera ``mjvOption`` applied during ``update_scene``.  Lets a
-    # caller render the same scene through different geom-group masks
-    # — e.g. lidar cameras that should only see the static scene mesh
-    # (group 3) and ignore the robot (groups 0-2), so the lidar
-    # pointcloud doesn't pick up the robot's own hands/torso/legs as
-    # phantom obstacles.  ``None`` keeps MuJoCo's default (all groups).
-    scene_option: mujoco.MjvOption | None = None
 
 
 @dataclass
@@ -266,21 +259,11 @@ class MujocoEngine(SimulationEngine):
                 continue
             state.last_render_time = now
 
-            scene_option = state.cfg.scene_option
-            if scene_option is not None:
-                state.rgb_renderer.update_scene(
-                    self._data, camera=state.cam_id, scene_option=scene_option
-                )
-                rgb = state.rgb_renderer.render().copy()
-                state.depth_renderer.update_scene(
-                    self._data, camera=state.cam_id, scene_option=scene_option
-                )
-                depth = state.depth_renderer.render().copy()
-            else:
-                state.rgb_renderer.update_scene(self._data, camera=state.cam_id)
-                rgb = state.rgb_renderer.render().copy()
-                state.depth_renderer.update_scene(self._data, camera=state.cam_id)
-                depth = state.depth_renderer.render().copy()
+            state.rgb_renderer.update_scene(self._data, camera=state.cam_id)
+            rgb = state.rgb_renderer.render().copy()
+
+            state.depth_renderer.update_scene(self._data, camera=state.cam_id)
+            depth = state.depth_renderer.render().copy()
 
             frame = CameraFrame(
                 rgb=rgb,
@@ -482,24 +465,6 @@ class MujocoEngine(SimulationEngine):
         if cam_id < 0:
             return None
         return float(self._model.cam_fovy[cam_id])
-
-    def get_camera_pose(self, camera_name: str) -> tuple[np.ndarray, np.ndarray] | None:
-        """World pose of a named camera, regardless of whether it renders.
-
-        Returns ``(cam_pos (3,), cam_mat (3, 3))`` from the latest physics
-        step.  ``cam_xpos`` / ``cam_xmat`` are populated for every MJCF
-        camera at every step, so this works even when the camera isn't in
-        the ``cameras`` list passed to MujocoEngine — useful for publishing
-        TF for cameras that exist in the model purely as mount points
-        (e.g. head_color when only the lidar render is consumed).
-        """
-        cam_id = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_CAMERA, camera_name)
-        if cam_id < 0:
-            return None
-        return (
-            self._data.cam_xpos[cam_id].copy(),
-            self._data.cam_xmat[cam_id].copy().reshape(3, 3),
-        )
 
 
 __all__ = [
