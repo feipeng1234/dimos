@@ -18,9 +18,12 @@ import json
 from typing import TYPE_CHECKING, Any
 
 from dimos.porcelain.module_source import ModuleSource
+from dimos.utils.logging_config import setup_logger
 
 if TYPE_CHECKING:
     from dimos.core.module import SkillInfo
+
+logger = setup_logger()
 
 
 class _SkillCallable:
@@ -61,6 +64,7 @@ class SkillsProxy:
                 module_proxy = self._source.get_rpyc_module(name)
                 skills = list(module_proxy.get_skills())
             except Exception:
+                logger.warning("Failed to enumerate skills for module %s", name, exc_info=True)
                 continue
             for info in skills:
                 skill_map.setdefault(info.func_name, []).append((name, module_proxy, info))
