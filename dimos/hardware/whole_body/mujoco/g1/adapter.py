@@ -85,9 +85,7 @@ class SimMujocoG1WholeBodyAdapter:
         self._shm: ManipShmReader | None = None
         self._connected = False
 
-    # ------------------------------------------------------------------
     # Lifecycle
-    # ------------------------------------------------------------------
 
     def connect(self) -> bool:
         # Attach with retry — MujocoSimModule may still be starting up.
@@ -142,9 +140,7 @@ class SimMujocoG1WholeBodyAdapter:
     def is_connected(self) -> bool:
         return self._connected and self._shm is not None
 
-    # ------------------------------------------------------------------
     # IO (WholeBodyAdapter protocol)
-    # ------------------------------------------------------------------
 
     def read_motor_states(self) -> list[MotorState]:
         if not self._connected or self._shm is None:

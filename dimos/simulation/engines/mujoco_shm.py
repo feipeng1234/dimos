@@ -261,7 +261,7 @@ class ManipShmWriter:
     def read_command_mode(self) -> int:
         return int(self._control()[CTRL_COMMAND_MODE])
 
-    # --- Whole-body additions ---
+    # Whole-body additions
 
     def write_imu(
         self,
@@ -390,7 +390,7 @@ class ManipShmReader:
         arr[1] = position
         self._increment_seq(SEQ_GRIPPER_CMD)
 
-    # --- Whole-body additions ---
+    # Whole-body additions
 
     def read_imu(
         self,

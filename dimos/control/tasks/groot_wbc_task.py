@@ -294,10 +294,8 @@ class GrootWBCTask(BaseControlTask):
             pos = state.joints.get_position(jname)
             current_15[i] = pos if pos is not None else 0.0
 
-        # ------------------------------------------------------------------
         # arm() was called — snapshot the ramp start and enter arming /
         # armed state (ramp=0 arms immediately).
-        # ------------------------------------------------------------------
         if self._arm_pending:
             self._ramp_start = current_15.copy()
             self._arming_start_t = state.t_now
@@ -315,12 +313,10 @@ class GrootWBCTask(BaseControlTask):
                 logger.info(f"GrootWBCTask '{self._name}' armed (no ramp)")
             self._arm_pending = False
 
-        # ------------------------------------------------------------------
         # Unarmed & not arming: echo current joint positions.  With the
         # component's kp/kd applied downstream, q_tgt == q_actual yields
         # pure damping (tau = -kd * dq), which mirrors the reference
         # backend's inactive "hold current pose" behaviour.
-        # ------------------------------------------------------------------
         if not self._armed and not self._arming:
             self._last_targets = current_15.tolist()
             return JointCommandOutput(
@@ -329,9 +325,7 @@ class GrootWBCTask(BaseControlTask):
                 mode=ControlMode.SERVO_POSITION,
             )
 
-        # ------------------------------------------------------------------
         # Arming: lerp ramp_start → default_15 over arming_duration.
-        # ------------------------------------------------------------------
         if self._arming:
             assert self._ramp_start is not None
             elapsed = state.t_now - self._arming_start_t
@@ -354,12 +348,10 @@ class GrootWBCTask(BaseControlTask):
                 mode=ControlMode.SERVO_POSITION,
             )
 
-        # ------------------------------------------------------------------
         # Armed: run the policy.  In dry-run mode we still compute (so
         # the obs buffer stays hot), but return None so no command goes
         # downstream.  A throttled log line shows what WOULD have been
         # sent, which is how g1-control-api lets operators verify pre-go.
-        # ------------------------------------------------------------------
         self._tick_count += 1
 
         # Decimation: only run inference every N ticks.  Between inference
@@ -448,9 +440,7 @@ class GrootWBCTask(BaseControlTask):
         if joints & self._joint_names_set:
             logger.warning(f"GrootWBCTask '{self._name}' preempted by {by_task} on {joints}")
 
-    # ------------------------------------------------------------------
     # Velocity command input
-    # ------------------------------------------------------------------
 
     def set_velocity_command(self, vx: float, vy: float, yaw_rate: float, t_now: float) -> None:
         """Set the (vx, vy, yaw_rate) commanded to the policy.
@@ -472,9 +462,7 @@ class GrootWBCTask(BaseControlTask):
         )
         return True
 
-    # ------------------------------------------------------------------
     # Lifecycle
-    # ------------------------------------------------------------------
 
     def start(self) -> None:
         """Enter the coordinator tick loop.
@@ -516,9 +504,7 @@ class GrootWBCTask(BaseControlTask):
         self._last_targets = None
         logger.info(f"GrootWBCTask '{self._name}' stopped")
 
-    # ------------------------------------------------------------------
     # Arming / dry-run (RPC-callable via coordinator.task_invoke)
-    # ------------------------------------------------------------------
 
     def arm(self, ramp_seconds: float | None = None) -> bool:
         """Begin the arming sequence.
@@ -589,9 +575,7 @@ class GrootWBCTask(BaseControlTask):
             "arming_duration": self._arming_duration,
         }
 
-    # ------------------------------------------------------------------
     # Internal helpers
-    # ------------------------------------------------------------------
 
     def _reset_policy_state(self) -> None:
         """Clear inference state — obs history, last action, tick count."""
