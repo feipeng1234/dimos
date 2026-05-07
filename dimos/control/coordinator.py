@@ -322,35 +322,15 @@ class ControlCoordinator(Module):
     def _create_whole_body_adapter(self, component: HardwareComponent) -> WholeBodyAdapter:
         """Create a whole-body adapter from component config.
 
-        ``component.address`` carries the DDS network interface — int (CAN port)
-        or str ("enp60s0"); cyclonedds requires the right type, so try int() first
-        and fall back to keeping the original string.
+        ``component.address`` is overloaded: real-hw adapters use it as
+        the DDS network interface (str ``"enp60s0"`` or int CAN port);
+        sim adapters use it as the MJCF path (str).  We pass it under
+        both ``network_interface`` and ``address`` so each registered
+        adapter can pick whichever is meaningful — extras flow through
+        ``**component.adapter_kwargs``.
         """
         from dimos.hardware.whole_body.registry import whole_body_adapter_registry
 
-        addr: int | str | None = component.address
-        if addr is not None:
-            try:
-                addr = int(addr)
-            except ValueError:
-                pass  # keep as string (e.g. "enp60s0")
-
-        return whole_body_adapter_registry.create(
-            component.adapter_type,
-            dof=len(component.joints),
-            hardware_id=component.hardware_id,
-            network_interface=addr if addr is not None else "",
-            **component.adapter_kwargs,
-        )
-
-    def _create_whole_body_adapter(self, component: HardwareComponent) -> object:
-        """Create a whole-body adapter from component config."""
-        from dimos.hardware.whole_body.registry import whole_body_adapter_registry
-
-        # ``address`` is overloaded: real-hw adapters use it as the DDS
-        # network interface (string like "enp60s0" or int).  Sim adapters
-        # use it as the MJCF path (string).  Pass it raw under both names
-        # so each adapter can pick whichever is meaningful.
         addr = component.address
         net_iface: int | str = 0
         if addr is not None:
@@ -358,11 +338,15 @@ class ControlCoordinator(Module):
                 net_iface = int(addr)
             except ValueError:
                 net_iface = addr
+
         return whole_body_adapter_registry.create(
             component.adapter_type,
+            dof=len(component.joints),
+            hardware_id=component.hardware_id,
             network_interface=net_iface,
             domain_id=component.domain_id,
             address=addr,
+            **component.adapter_kwargs,
         )
 
     def _create_task_from_config(self, cfg: TaskConfig) -> ControlTask:
