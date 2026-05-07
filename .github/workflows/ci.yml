@@ -217,6 +217,8 @@ jobs:
     - self-hosted-tests
 
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write  # For codecov-action's OIDC notify
 
     steps:
     - name: Decide whether the needed jobs succeeded or failed
@@ -224,3 +226,9 @@ jobs:
       with:
         allowed-skips: self-hosted-tests
         jobs: ${{ toJSON(needs) }}
+    - name: Trigger Codecov notifications
+      uses: codecov/codecov-action@v6
+      with:
+        run_command: send-notifications
+        use_oidc: true
+        fail_ci_if_error: true

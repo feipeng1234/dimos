@@ -1,5 +1,7 @@
 codecov:
   branch: dev
+  notify:
+    manual_trigger: true
 
 comment:
   require_head: false
