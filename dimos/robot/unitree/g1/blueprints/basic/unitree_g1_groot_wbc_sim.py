@@ -53,8 +53,10 @@ from dimos.web.websocket_vis.websocket_vis_module import WebsocketVisModule
 
 logger = setup_logger()
 
-# Resolve via get_data so the path works regardless of CWD and the
-# tarball is auto-extracted from LFS on first run.
+# Resolved to an absolute path so MujocoSimModule (parent) and the
+# DIMOS_MUJOCO_VIEW=1 subprocess can both open the file regardless of
+# the shell's CWD.  get_data also auto-extracts the LFS tarball on
+# first run.
 _MJCF_PATH = str(get_data("mujoco_sim") / "g1_gear_wbc.xml")
 
 _g1_engine = MujocoSimModule.blueprint(

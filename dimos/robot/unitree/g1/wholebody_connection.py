@@ -89,8 +89,12 @@ class G1WholeBodyConnection(Module):
         self._low_cmd: LowCmd_ | None = None
         self._low_state: LowState_ | None = None
         self._crc: CRC | None = None
-        # mode_machine: read from first LowState, echoed back in every LowCmd.
+        # mode_machine: hardcoded at start() to the static value for the
+        # 29-DOF G1.  We log a one-shot warning if the first LowState we
+        # read disagrees — that's the early signal of firmware drift on a
+        # variant that needs a different value.
         self._mode_machine: int | None = None
+        self._mode_machine_verified: bool = False
         # Guards _low_cmd / _low_state / _mode_machine across DDS, publish, and LCM threads.
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
@@ -211,6 +215,19 @@ class G1WholeBodyConnection(Module):
                 if fresh is not None:
                     with self._lock:
                         self._low_state = fresh
+                        # One-shot sanity check on the hardcoded mode_machine.
+                        if not self._mode_machine_verified:
+                            self._mode_machine_verified = True
+                            actual = int(getattr(fresh, "mode_machine", -1))
+                            if actual != self._mode_machine:
+                                logger.warning(
+                                    f"mode_machine mismatch: hardcoded "
+                                    f"{self._mode_machine}, robot reports "
+                                    f"{actual}.  Commands may be silently "
+                                    f"rejected by firmware — set "
+                                    f"_MODE_MACHINE_G1 to {actual} for this "
+                                    f"variant."
+                                )
 
             with self._lock:
                 ls = self._low_state
