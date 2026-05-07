@@ -85,7 +85,7 @@ jobs:
         if: ${{ endsWith(matrix.pyver, 't') }}
         run: echo "PYTHON_GIL=0" >> $GITHUB_ENV
       - name: Run tests
-        run: uv run pytest --numprocesses=12 --cov=dimos/ --junitxml=junit.xml -m 'not (tool or self_hosted or mujoco)'
+        run: uv run pytest --numprocesses=4 --cov=dimos/ --junitxml=junit.xml -m 'not (tool or self_hosted or mujoco)'
       - name: Re-run the failing tests with maximum verbosity
         if: failure()
         env:
