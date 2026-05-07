@@ -130,12 +130,22 @@ class UnitreeG1LowLevelAdapter:
             self._publisher = ChannelPublisher("rt/lowcmd", LowCmd_)
             self._publisher.Init()
 
+            # Passive subscriber — Read() per tick, no callback.  Avoids
+            # the macOS cyclonedds callback-not-firing footgun that bit
+            # us when this was Init(self._on_low_state, 10).
             self._subscriber = ChannelSubscriber("rt/lowstate", LowState_)
-            self._subscriber.Init(self._on_low_state, 10)
+            self._subscriber.Init(None, 0)
 
-            # 3. Initialise LowCmd with safe defaults
+            # 3. Initialise LowCmd with safe defaults.  ``mode_machine``
+            # is hardcoded to 5 (the unitree-legged-const value for the
+            # 29-DOF G1).  Earlier the adapter blocked here waiting for a
+            # first LowState to read it back; the macOS cyclonedds
+            # callback never fires reliably for that, and the value is
+            # static for this hardware variant — so we just set it.
             self._low_cmd = unitree_hg_msg_dds__LowCmd_()
             self._low_cmd.mode_pr = 0  # PR mode (Pitch/Roll)
+            self._mode_machine = 5
+            self._low_cmd.mode_machine = self._mode_machine
             for i in range(_NUM_MOTOR_SLOTS):
                 self._low_cmd.motor_cmd[i].mode = 0x01  # Enable
                 self._low_cmd.motor_cmd[i].q = POS_STOP
@@ -149,17 +159,6 @@ class UnitreeG1LowLevelAdapter:
             # 4. Release sport mode so low-level commands are accepted
             logger.info("Releasing sport mode...")
             self._release_sport_mode()
-
-            # 5. Wait for first LowState to get mode_machine
-            logger.info("Waiting for first LowState to capture mode_machine...")
-            deadline = time.time() + 10.0
-            while self._mode_machine is None and time.time() < deadline:
-                time.sleep(0.1)
-
-            if self._mode_machine is None:
-                logger.error("Timed out waiting for LowState — mode_machine not captured")
-                self._connected = False
-                return False
 
             self._connected = True
             logger.info(f"G1 low-level adapter connected (mode_machine={self._mode_machine})")
@@ -187,8 +186,26 @@ class UnitreeG1LowLevelAdapter:
     # State Reading
     # =========================================================================
 
+    def has_motor_states(self) -> bool:
+        """True once we've received at least one LowState frame."""
+        self._poll_low_state()
+        return self._low_state is not None
+
+    def _poll_low_state(self) -> None:
+        """Drain any pending LowState samples into ``self._low_state``.
+
+        Passive-subscriber pattern: ``Read()`` per tick.  None means no
+        fresh sample (treat as drop / keep last value).
+        """
+        if self._subscriber is None:
+            return
+        sample = self._subscriber.Read()
+        if sample is not None:
+            self._low_state = sample
+
     def read_motor_states(self) -> list[MotorState]:
         """Read motor states for all 29 joints."""
+        self._poll_low_state()
         with self._lock:
             if self._low_state is None:
                 return [MotorState()] * _NUM_MOTORS
@@ -203,6 +220,7 @@ class UnitreeG1LowLevelAdapter:
 
     def read_imu(self) -> IMUState:
         """Read IMU state."""
+        self._poll_low_state()
         with self._lock:
             if self._low_state is None:
                 return IMUState()
@@ -264,14 +282,6 @@ class UnitreeG1LowLevelAdapter:
     # Internal
     # =========================================================================
 
-    def _on_low_state(self, msg: object) -> None:
-        """DDS callback for rt/lowstate."""
-        with self._lock:
-            self._low_state = msg
-            # Capture mode_machine from first LowState
-            if self._mode_machine is None:
-                self._mode_machine = msg.mode_machine  # type: ignore[attr-defined]
-
     def _release_sport_mode(self) -> None:
         """Exit sport mode so that low-level commands are accepted.
 
@@ -286,7 +296,7 @@ class UnitreeG1LowLevelAdapter:
         msc.Init()
 
         _status, result = msc.CheckMode()
-        while result["name"]:
+        while result and result.get("name"):
             msc.ReleaseMode()
             _status, result = msc.CheckMode()
             time.sleep(1)
