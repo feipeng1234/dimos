@@ -10,7 +10,7 @@ The agentic operating system for generalist robotics. `Modules` communicate via 
 
 ```bash
 # Install
-uv sync --all-extras --no-extra dds
+uv sync --all-extras --no-extra dds --no-extra unitree-dds
 
 # List all runnable blueprints
 dimos list
