@@ -527,6 +527,7 @@ asyncio_default_fixture_loop_scope = "function"
 [tool.coverage.run]
 branch = true
 source = ["dimos"]
+concurrency = ["multiprocessing", "thread"]
 
 [tool.coverage.report]
 exclude_also = [
