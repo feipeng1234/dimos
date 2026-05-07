@@ -53,7 +53,9 @@ from dimos.web.websocket_vis.websocket_vis_module import WebsocketVisModule
 
 logger = setup_logger()
 
-_MJCF_PATH = "data/mujoco_sim/g1_gear_wbc.xml"
+# Resolve via get_data so the path works regardless of CWD and the
+# tarball is auto-extracted from LFS on first run.
+_MJCF_PATH = str(get_data("mujoco_sim") / "g1_gear_wbc.xml")
 
 _g1_engine = MujocoSimModule.blueprint(
     address=_MJCF_PATH,
