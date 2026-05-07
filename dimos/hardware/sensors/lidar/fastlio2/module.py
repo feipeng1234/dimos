@@ -71,8 +71,8 @@ class FastLio2Config(NativeModuleConfig):
     frequency: float = 10.0
 
     # Frame IDs for output messages
-    frame_id: str = "map"
-    child_frame_id: str = "body"
+    frame_id: str = "world"
+    child_frame_id: str = "base_link"
 
     # FAST-LIO internal processing rates
     msr_freq: float = 50.0
@@ -110,11 +110,16 @@ class FastLio2Config(NativeModuleConfig):
     host_imu_data_port: int = SDK_HOST_IMU_DATA_PORT
     host_log_data_port: int = SDK_HOST_LOG_DATA_PORT
 
-    # Resolved in __post_init__, passed as --config_path to the binary
+    # Resolved from `config` in model_post_init, passed as --config_path to the binary
     config_path: str | None = None
 
     # config is not a CLI arg (config_path is)
     cli_exclude: frozenset[str] = frozenset({"config"})
+
+    def model_post_init(self, __context: object) -> None:
+        super().model_post_init(__context)
+        cfg = self.config if self.config.is_absolute() else _CONFIG_DIR / self.config
+        self.config_path = str(cfg.resolve())
 
 
 class FastLio2(NativeModule, perception.Lidar, perception.Odometry, mapping.GlobalPointcloud):

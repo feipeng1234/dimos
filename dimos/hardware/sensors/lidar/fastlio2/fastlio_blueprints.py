@@ -12,10 +12,40 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from pathlib import Path
+
 from dimos.core.coordination.blueprints import autoconnect
+from dimos.core.core import rpc
+from dimos.core.stream import In
 from dimos.hardware.sensors.lidar.fastlio2.module import FastLio2
 from dimos.mapping.voxels import VoxelGridMapper
+from dimos.memory2.module import Recorder, RecorderConfig
+from dimos.msgs.geometry_msgs.Transform import Transform
+from dimos.msgs.nav_msgs.Odometry import Odometry
+from dimos.msgs.sensor_msgs.PointCloud2 import PointCloud2
 from dimos.visualization.rerun.bridge import RerunBridgeModule
+
+
+class FastlioMemoryConfig(RecorderConfig):
+    db_path: str | Path = "recording_fastlio.db"
+    default_frame_id: str = "base_link"
+
+
+class FastlioMemory(Recorder):
+    config: FastlioMemoryConfig
+    lidar: In[PointCloud2]
+    odometry: In[Odometry]
+
+    @rpc
+    def start(self) -> None:
+        super().start()
+
+        def _on_odom(msg: Odometry) -> None:
+            print(f"[FastlioMemory] odom: {msg.frame_id!r} -> {msg.child_frame_id!r} ts={msg.ts}")
+            self.tf.publish(Transform.from_odometry(msg))
+
+        self.odometry.subscribe(_on_odom)
+
 
 voxel_size = 0.05
 
@@ -23,6 +53,12 @@ mid360_fastlio = autoconnect(
     FastLio2.blueprint(voxel_size=voxel_size, map_voxel_size=voxel_size, map_freq=-1),
     RerunBridgeModule.blueprint(),
 ).global_config(n_workers=2, robot_model="mid360_fastlio2")
+
+mid360_fastlio_memory = autoconnect(
+    FastLio2.blueprint(voxel_size=voxel_size, map_voxel_size=voxel_size, map_freq=-1),
+    RerunBridgeModule.blueprint(),
+    FastlioMemory.blueprint(),
+).global_config(n_workers=3, robot_model="mid360_fastlio2_memory")
 
 mid360_fastlio_voxels = autoconnect(
     FastLio2.blueprint(),

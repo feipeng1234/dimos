@@ -91,11 +91,25 @@ class NativeModuleConfig(ModuleConfig):
     # Override in subclasses to exclude fields from CLI arg generation
     cli_exclude: frozenset[str] = frozenset()
 
+    def _native_ignore_fields(self) -> set[str]:
+        """Inherited NativeModuleConfig fields *not* redeclared in any subclass.
+
+        A subclass that redeclares an inherited field (e.g. ``frame_id``) is
+        signalling it wants that field exposed — usually as a CLI arg or
+        stdin config entry — so we don't filter it out.
+        """
+        ignore = set(NativeModuleConfig.model_fields)
+        for klass in self.__class__.__mro__:
+            if klass is NativeModuleConfig:
+                break
+            ignore -= set(getattr(klass, "__annotations__", {}))
+        return ignore
+
     def to_config_dict(self) -> dict[str, Any]:
         """
         Return module-specific config fields as a plain dict (for stdin JSON).
         """
-        ignore_fields = set(NativeModuleConfig.model_fields)
+        ignore_fields = self._native_ignore_fields()
         return {
             k: v for k, v in self.model_dump().items() if k not in ignore_fields and v is not None
         }
@@ -104,7 +118,7 @@ class NativeModuleConfig(ModuleConfig):
         """
         Auto-convert subclass config fields to CLI args.
         """
-        ignore_fields = {f for f in NativeModuleConfig.model_fields}
+        ignore_fields = self._native_ignore_fields()
         args: list[str] = []
         for f in self.__class__.model_fields:
             if f in ignore_fields:
