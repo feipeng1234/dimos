@@ -119,18 +119,21 @@ class TestStateMachine:
 
     def test_reset_not_during_execution(self):
         """Reset works in any state except EXECUTING."""
+        from dimos.agents.skill_result import CommonSkillError
+
         module = _make_module()
 
         module._state = ManipulationState.FAULT
         module._error_message = "Error"
         result = module.reset()
-        assert "IDLE" in result
+        assert result.is_success()
         assert module._state == ManipulationState.IDLE
         assert module._error_message == ""
 
         module._state = ManipulationState.EXECUTING
         result = module.reset()
-        assert "Error" in result
+        assert not result.is_success()
+        assert result.error_code is CommonSkillError.INVALID_STATE
 
     def test_fail_sets_fault_state(self):
         """_fail helper sets FAULT state and message."""

@@ -152,8 +152,11 @@ class TestPlaceBack:
     """Test place_back guard logic."""
 
     def test_place_back_no_pick_pose_errors(self, module):
+        from dimos.manipulation.skill_errors import ManipulationError
+
         module._last_pick_pose = None
 
         result = module.place_back()
-        assert "Error" in result
-        assert "pick" in result.lower()
+        assert not result.is_success()
+        assert result.error_code is ManipulationError.NO_PRIOR_POSE
+        assert "pick" in result.message.lower()
