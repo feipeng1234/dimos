@@ -93,8 +93,6 @@ jobs:
         run: >-  # `exit 1` makes sure that the job remains red with flaky runs
           uv run pytest --no-cov -vvvvv --lf  -m 'not (tool or self_hosted or mujoco)' && exit 1
         shell: bash
-      - name: Combine coverage from subprocesses
-        run: uv run python -m coverage combine
       - name: Turn coverage into xml
         run: uv run python -m coverage xml
       - name: Upload coverage
@@ -174,8 +172,6 @@ jobs:
         run: >-  # `exit 1` makes sure that the job remains red with flaky runs
           uv run pytest --no-cov -vvvvv --lf  -m '(${{ matrix.markers }}) and not (tool or mujoco)' && exit 1
         shell: bash
-      - name: Combine coverage from subprocesses
-        run: uv run python -m coverage combine
       - name: Turn coverage into xml
         run: uv run python -m coverage xml
       - name: Upload coverage
