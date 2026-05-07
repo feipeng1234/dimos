@@ -33,7 +33,6 @@ from dimos.memory2.stream import Stream
 from dimos.memory2.transform import QualityWindow
 from dimos.memory2.type.observation import EmbeddedObservation, Observation
 from dimos.models.embedding.base import EmbeddingModel
-from dimos.models.embedding.clip import CLIPModel
 from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
 from dimos.msgs.sensor_msgs.Image import Image
 from dimos.utils.logging_config import setup_logger
@@ -198,7 +197,7 @@ class MemoryModule(Module):
 
 
 class SemanticSearchConfig(MemoryModuleConfig):
-    embedding_model: type[EmbeddingModel] = CLIPModel
+    embedding_model: type[EmbeddingModel] | None = None
 
 
 class SemanticSearch(MemoryModule):
@@ -210,7 +209,13 @@ class SemanticSearch(MemoryModule):
     def start(self) -> None:
         super().start()
 
-        self.model = self.register_disposable(self.config.embedding_model())
+        embedding_cls = self.config.embedding_model
+        if embedding_cls is None:
+            from dimos.models.embedding.clip import CLIPModel
+
+            embedding_cls = CLIPModel
+
+        self.model = self.register_disposable(embedding_cls())
         self.model.start()
 
         self.embeddings = self.store.stream("color_image_embedded", Image)
