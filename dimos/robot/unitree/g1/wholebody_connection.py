@@ -173,6 +173,29 @@ class G1WholeBodyConnection(Module):
             self._publish_thread.join(timeout=DEFAULT_THREAD_JOIN_TIMEOUT)
             self._publish_thread = None
 
+        # Final safe-stop lowcmd: disable every motor (mode=0x00, kp=kd=0,
+        # tau=0).  Without this, the motors freeze stiffly at whatever
+        # the last commanded pose was and the next ``dimos run`` opens
+        # against a robot that's actively fighting its own controllers
+        # — observed as horrible mechanical noise during sport-mode
+        # release.  Best-effort: any failure is logged, not raised, so
+        # cleanup still drains the DDS endpoints.
+        if self._publisher is not None and self._low_cmd is not None and self._crc is not None:
+            try:
+                with self._lock:
+                    for i in range(_NUM_MOTOR_SLOTS):
+                        self._low_cmd.motor_cmd[i].mode = 0x00  # disable
+                        self._low_cmd.motor_cmd[i].q = POS_STOP
+                        self._low_cmd.motor_cmd[i].dq = VEL_STOP
+                        self._low_cmd.motor_cmd[i].kp = 0
+                        self._low_cmd.motor_cmd[i].kd = 0
+                        self._low_cmd.motor_cmd[i].tau = 0
+                    self._low_cmd.crc = self._crc.Crc(self._low_cmd)
+                    self._publisher.Write(self._low_cmd)
+                logger.info("Sent safe-stop lowcmd (motors disabled)")
+            except (OSError, RuntimeError, AttributeError) as e:
+                logger.warning(f"Safe-stop lowcmd failed: {e}")
+
         # Close DDS endpoints explicitly — GC-based cleanup races with in-flight
         # callbacks and segfaults on process exit (mirrors the Go2 adapter).
         if self._subscriber is not None:
@@ -305,7 +328,16 @@ class G1WholeBodyConnection(Module):
             self._publisher.Write(self._low_cmd)
 
     def _release_sport_mode(self) -> None:
-        """Loop ReleaseMode until MotionSwitcher reports no active controller."""
+        """Loop ReleaseMode until MotionSwitcher reports no active controller.
+
+        Bails early if the first CheckMode reports nothing active.  That
+        matters for back-to-back ``dimos run`` invocations: the first run
+        already released sport mode, so on a clean second start there's
+        nothing to release.  Calling ReleaseMode anyway opens a window
+        where motor controllers are mid-handoff while we're already
+        publishing rt/lowcmd, which has been observed to cause horrible
+        mechanical noise from the gearboxes.
+        """
         from unitree_sdk2py.comm.motion_switcher.motion_switcher_client import (
             MotionSwitcherClient,
         )
@@ -314,8 +346,14 @@ class G1WholeBodyConnection(Module):
         msc.SetTimeout(5.0)
         msc.Init()
 
-        # CheckMode returns (status, None) once nothing is active — null-tolerant.
+        # CheckMode returns (status, None) — or (status, {"name": ""}) on
+        # some firmwares — once nothing is active.  Treat both as "already
+        # released" and return without poking ReleaseMode.
         _status, result = msc.CheckMode()
+        if not result or not result.get("name"):
+            logger.info("Sport mode already released — skipping ReleaseMode")
+            return
+
         while result and result.get("name"):
             msc.ReleaseMode()
             _status, result = msc.CheckMode()
