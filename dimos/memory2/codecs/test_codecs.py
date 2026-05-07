@@ -128,21 +128,20 @@ def _jpeg_case() -> Case | None:
         from turbojpeg import TurboJPEG
 
         TurboJPEG()  # fail fast if native lib is missing
+
+        from dimos.memory2.store.sqlite import SqliteStore
+        from dimos.utils.data import get_data
+
+        db_path = get_data("go2_short.db")
     except (ImportError, RuntimeError):
         return None
 
-    import numpy as np
+    with SqliteStore(path=str(db_path)) as store:
+        video = store.stream("color_image", Image)
+        frames = [obs.data for obs in video.limit(3).to_list()]
 
-    h, w = 240, 320
-    ys = np.linspace(0, 255, h, dtype=np.float32)[:, None]
-    xs = np.linspace(0, 255, w, dtype=np.float32)[None, :]
-    frames: list[Image] = []
-    for i in range(3):
-        r = (ys * 0.5 + xs * 0.5 + i * 30).clip(0, 255)
-        g = (ys * 0.3 + xs * 0.7 + i * 20).clip(0, 255)
-        b = (ys * 0.7 + xs * 0.3 + i * 10).clip(0, 255)
-        data = np.stack([b, g, r], axis=-1).astype(np.uint8)
-        frames.append(Image(data=data, format=ImageFormat.BGR, frame_id="test", ts=float(i)))
+    if not frames:
+        return None
 
     return Case(
         name="jpeg",

@@ -58,15 +58,14 @@ you can assign different axes to different time series, label them etc
 from dimos.memory2.store.sqlite import SqliteStore
 from dimos.memory2.transform import smooth, speed, throttle
 from dimos.memory2.vis import color
-from dimos.memory2.vis.plot.elements import Series, Style
+from dimos.memory2.vis.plot.elements import Series
 from dimos.memory2.vis.plot.plot import Plot
 from dimos.utils.data import get_data
 
-store = SqliteStore(path=get_data("go2_hongkong_office.db"))
+store = SqliteStore(path=get_data("go2_bigoffice.db"))
 images = store.streams.color_image
 
 plot = Plot()
-
 plot.add(
     images.transform(speed()).transform(smooth(40)),
     label="speed (m/s)",
@@ -83,7 +82,6 @@ plot.add(
     images.transform(throttle(0.5)).scan_data(images.first().ts, lambda state, obs: [state, obs.ts - state]),
     label="time",
     axis="time",
-    style=Style.dashed,
     opacity=0.5
 )
 
@@ -103,10 +101,7 @@ from dimos.memory2.transform import normalize, smooth_time
 
 from dimos.models.embedding.clip import CLIPModel
 clip = CLIPModel()
-
-search_string = "plant"
-
-search_vector = clip.embed_text(search_string)
+search_vector = clip.embed_text("plant")
 
 # we will cache this into memory since it takes a second,
 # and use it to play with graphing
@@ -144,7 +139,7 @@ plot.to_svg("assets/plot_plantness.svg")
 ```
 Stream("color_image_embedded") | vector_search() | order_by(ts)
 Stream("materialize")
-Stream("materialize"): 1008 items, 2026-05-06 08:12:10 — 2026-05-06 08:21:27 (556.5s)
+Stream("materialize"): 267 items, 2025-12-26 11:09:12 — 2025-12-26 11:14:00 (288.4s)
 ```
 
 ![output](assets/plot_plantness.svg)
@@ -186,7 +181,7 @@ plot = Plot()
 
 plot.add(
     plantness_similarity \
-#      .transform(smooth_time(3.0)) \
+      .transform(smooth_time(5.0)) \
       .transform(normalize()), \
       label="plant-ness",
       color=color.green,
@@ -230,8 +225,8 @@ drawing.to_svg("assets/plot_plantness_autopeaks_map.svg")
 
 peakColor = ColorRange("turbo")
 for i, p in enumerate(semantic_peaks):
-#    print(f"t={p.ts - plantness_similarity.first().ts:6.1f}s score={p.similarity:.3f} prominence={p.tags['peak_prominence']:.3f}")
-    plot.add(VLine(p.ts, color=peakColor(p.similarity)))
+    print(f"t={p.ts - plantness_similarity.first().ts:6.1f}s score={p.similarity:.3f} prominence={p.tags['peak_prominence']:.3f}")
+    plot.add(VLine(p.ts, color=peakColor(i)))
 
 plot.to_svg("assets/plot_plantness_autopeaks.svg")
 
@@ -241,14 +236,29 @@ moondream.start()
 
 # peaks is still a stream of image observations (with prominence and semantic similarity metadata)
 # so we can just draw it directly via mosaic that takes image streams
-m = mosaic(semantic_peaks.map_data(lambda obs: moondream.query_detections(obs.data, search_string)))
+m = mosaic(semantic_peaks.map_data(lambda obs: moondream.query_detections(obs.data, "plant")))
 
 m.data.save("assets/plants_auto.png")
 ```
 
 <!--Result:-->
 ```
-13:10:02.321 [inf][dimos/mapping/voxels.py       ] VoxelGrid using device: CUDA:0
+14:59:33.042 [inf][dimos/mapping/voxels.py       ] VoxelGrid using device: CUDA:0
+t=  14.1s score=0.224 prominence=0.031
+t=  26.3s score=0.225 prominence=0.033
+t=  32.7s score=0.224 prominence=0.022
+t=  37.0s score=0.259 prominence=0.067
+t=  60.6s score=0.227 prominence=0.031
+t=  61.5s score=0.218 prominence=0.026
+t=  76.3s score=0.221 prominence=0.031
+t=  84.0s score=0.223 prominence=0.027
+t=  89.1s score=0.219 prominence=0.020
+t= 162.9s score=0.224 prominence=0.041
+t= 168.0s score=0.219 prominence=0.031
+t= 172.4s score=0.218 prominence=0.020
+t= 240.4s score=0.243 prominence=0.047
+t= 245.6s score=0.224 prominence=0.028
+t= 279.6s score=0.230 prominence=0.030
 ```
 
 
@@ -262,20 +272,20 @@ m.data.save("assets/plants_auto.png")
 
 We got 15 peaks back, we ran a detector on all of them so we can start projecting into 3D but let's say we want some sort of pre-filter of just globally significant peaks. we can see most peaks prominence sits around 0.02–0.03 and only a couple (0.067 at t=37s, 0.047 at t=240s) really stand out. We might want to auto detect those.
 
-`significant()` replaces that guesswork by thresholding on the distribution of prominences itself. The default ``"gap"`` method picks the largest ratio gap between consecutive sorted prominences — i.e. it cuts where the prominences visibly "step up" away from the noise floor.
+`significant()` replaces that guesswork by thresholding on the distribution of prominences itself. Default outlier detection uses MAD (median absolute deviation)
 
-Once we put the surviving peaks on the timeline we get the obvious plants.
+Once we put the surviving peaks on the timeline we get two very obvious plants.
 
 ```python session=robotdata
 from dimos.memory2.transform import significant
 
 plot = Plot()
 plot.add(
-    plantness_similarity.transform(normalize()),
+    plantness_similarity.transform(smooth_time(5.0)).transform(normalize()),
     label="plant-ness", color=color.green, gap_fill=0.0, connect=7.5,
 )
 
-meaningful_peaks = semantic_peaks.transform(significant())
+meaningful_peaks = semantic_peaks.transform(significant(method="mad"))
 
 for peak in meaningful_peaks:
     plot.add(VLine(peak.ts, color=color.red))
@@ -313,13 +323,13 @@ drawing = Space()
 meaningful_peak = meaningful_peaks.first()
 
 # load all images captured in the readius around the semantic peak
-near_images = images.near(meaningful_peak.pose_stamped, radius=3.5) \
+near_images = images.near(meaningful_peak.pose_stamped, radius=2.5) \
     .filter(lambda obs: obs.data.brightness > 0.1) \
     .transform(QualityWindow(lambda img: img.sharpness, window=0.5))
 
 # load all lidar frames captured in the readius around the semantic peak
 # feed them into a global mapper to get a single pointcloud around our area of interest
-global_map = store.streams.lidar.near(meaningful_peak.pose_stamped, radius=4) \
+global_map = store.streams.lidar.near(meaningful_peak.pose_stamped, radius=2.5) \
    .transform(VoxelMapTransformer()) \
    .last().data
 
@@ -329,35 +339,17 @@ drawing.add(meaningful_peak.pose_stamped, color=color.green)
 
 # run a detector, filter small weird detections
 detections = (near_images
-    .map_data(lambda obs: moondream.query_detections(obs.data, search_string))
-    .map_data(lambda obs: obs.data.filter(lambda det: det.bbox_2d_volume() > 15000))
+    .map_data(lambda obs: moondream.query_detections(obs.data, "plant"))
+    .map_data(lambda obs: obs.data.filter(lambda det: det.bbox_2d_volume() > 3000))
     .filter(lambda obs: len(obs.data) > 0)
     .materialize())
     # materialize this stream since we'll want to re-use it later
-
-for imagedetections in detections:
-    for detection in imagedetections.data:
-       print(detection.bbox_2d_volume())
 
 drawing.add(detections)
 drawing.to_svg("assets/peak_space.svg")
 
 m = mosaic(detections)
 m.data.save("assets/plants_peak_detections.png")
-```
-
-<!--Result:-->
-```
-313809.28602764546
-307494.9311187061
-320253.3267173585
-285409.9658367837
-315942.76869479765
-139171.88038184104
-168246.00232151916
-192662.44564284134
-291270.8485502135
-36631.58247878539
 ```
 
 ![output](assets/peak_space.svg)
