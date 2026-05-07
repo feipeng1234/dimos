@@ -528,6 +528,7 @@ asyncio_default_fixture_loop_scope = "function"
 branch = true
 source = ["dimos"]
 parallel = true
+sigterm = true
 concurrency = ["multiprocessing", "thread"]
 
 [tool.coverage.report]
