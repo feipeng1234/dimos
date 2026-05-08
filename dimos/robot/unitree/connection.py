@@ -41,7 +41,11 @@ from dimos.msgs.geometry_msgs.Transform import Transform
 from dimos.msgs.geometry_msgs.Twist import Twist
 from dimos.msgs.sensor_msgs.Image import Image, ImageFormat
 from dimos.msgs.sensor_msgs.PointCloud2 import PointCloud2
-from dimos.robot.unitree.type.lidar import RawLidarMsg, pointcloud2_from_webrtc_lidar
+from dimos.robot.unitree.type.lidar import (
+    RawLidarMsg,
+    pointcloud2_from_webrtc_lidar,
+    repair_stale_ts,
+)
 from dimos.robot.unitree.type.lowstate import LowStateMsg
 from dimos.robot.unitree.type.odometry import Odometry
 from dimos.utils.decorators.decorators import simple_mcache
@@ -79,6 +83,8 @@ class SerializableVideoFrame:
 
 
 class UnitreeWebRTCConnection(Resource):
+    _SPORT_API_ID_RAGEMODE: int = 2059
+
     def __init__(self, ip: str, mode: str = "ai") -> None:
         self.ip = ip
         self.mode = mode
@@ -246,7 +252,12 @@ class UnitreeWebRTCConnection(Resource):
 
     @simple_mcache
     def lidar_stream(self) -> Observable[PointCloud2]:
-        return backpressure(self.raw_lidar_stream().pipe(ops.map(pointcloud2_from_webrtc_lidar)))
+        return backpressure(
+            self.raw_lidar_stream().pipe(
+                ops.map(pointcloud2_from_webrtc_lidar),
+                repair_stale_ts(),
+            )
+        )
 
     @simple_mcache
     def tf_stream(self) -> Observable[Transform]:
@@ -295,6 +306,29 @@ class UnitreeWebRTCConnection(Resource):
     def free_walk(self) -> bool:
         """Activate FreeWalk locomotion mode — enables walking and velocity commands."""
         return bool(self.publish_request(RTC_TOPIC["SPORT_MOD"], {"api_id": SPORT_CMD["FreeWalk"]}))
+
+    def enable_rage_mode(self) -> bool:
+        """Enable Rage Mode on the Go2 via WebRTC.
+        Assumes the robot is already in BalanceStand.
+        """
+        rage_ok = bool(
+            self.publish_request(
+                RTC_TOPIC["SPORT_MOD"],
+                {"api_id": self._SPORT_API_ID_RAGEMODE, "parameter": {"data": True}},
+            )
+        )
+        time.sleep(2.0)
+
+        joystick_ok = bool(
+            self.publish_request(
+                RTC_TOPIC["SPORT_MOD"],
+                {
+                    "api_id": SPORT_CMD["SwitchJoystick"],
+                    "parameter": {"data": True},
+                },
+            )
+        )
+        return rage_ok and joystick_ok
 
     def liedown(self) -> bool:
         return bool(

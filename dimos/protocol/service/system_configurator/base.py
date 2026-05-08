@@ -15,13 +15,13 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-import logging
 import os
 import subprocess
 
 from dimos.utils import prompt
+from dimos.utils.logging_config import setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 
 def _read_sysctl_int(name: str) -> int | None:
@@ -45,7 +45,7 @@ def _read_sysctl_int(name: str) -> int | None:
 
 
 def _write_sysctl_int(name: str, value: int) -> None:
-    prompt.sudo_run("sysctl", "-w", f"{name}={value}", check=True, text=True, capture_output=False)
+    prompt.sudo_run("sysctl", "-w", f"{name}={value}", check=True, text=True, capture_output=True)
 
 
 # base class for system config checks/requirements
