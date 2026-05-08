@@ -21,23 +21,26 @@ FastAPI WebSocket server.  Transforms from WebXR to robot frame, computes
 deltas, and publishes PoseStamped commands.
 """
 
+import asyncio
 from dataclasses import dataclass
 from enum import IntEnum
 from pathlib import Path
 import threading
 import time
-from typing import Any, TypeVar
+from typing import Any, AsyncIterator, TypeVar
 
+import cv2
 from dimos_lcm.geometry_msgs import PoseStamped as LCMPoseStamped
 from dimos_lcm.sensor_msgs import Joy as LCMJoy
 from fastapi import WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from dimos.core.core import rpc
 from dimos.core.module import Module, ModuleConfig
-from dimos.core.stream import Out
+from dimos.core.stream import In, Out
 from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
+from dimos.msgs.sensor_msgs.Image import Image
 from dimos.msgs.sensor_msgs.Joy import Joy
 from dimos.teleop.quest.quest_types import Buttons, QuestControllerState
 from dimos.teleop.utils.teleop_transforms import webxr_to_robot
@@ -73,6 +76,8 @@ class QuestTeleopConfig(ModuleConfig):
 
     control_loop_hz: float = 50.0
     server_port: int = 8443
+    video_fps: float = 30.0
+    video_jpeg_quality: int = 70
 
 
 _Config = TypeVar("_Config", bound=QuestTeleopConfig)
@@ -97,6 +102,10 @@ class QuestTeleopModule(Module):
     left_controller_output: Out[PoseStamped]
     right_controller_output: Out[PoseStamped]
     buttons: Out[Buttons]
+
+    # Optional image input — if connected (e.g. by a sim or RealSense module),
+    # frames are JPEG-encoded and served at /video for the Quest browser.
+    color_image: In[Image]
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -124,6 +133,10 @@ class QuestTeleopModule(Module):
             LCMPoseStamped._get_packed_fingerprint(): self._on_pose_bytes,
             LCMJoy._get_packed_fingerprint(): self._on_joy_bytes,
         }
+
+        # Latest JPEG-encoded camera frame, served by /video.
+        self._latest_jpeg: bytes | None = None
+        self._image_lock = threading.Lock()
 
         self._setup_routes()
 
@@ -158,11 +171,61 @@ class QuestTeleopModule(Module):
             except Exception:
                 logger.exception("WebSocket error")
 
+        @self._web_server.app.get("/video")
+        async def video_feed() -> StreamingResponse:
+            return StreamingResponse(
+                self._mjpeg_stream(),
+                media_type="multipart/x-mixed-replace; boundary=frame",
+            )
+
+        @self._web_server.app.get("/snapshot")
+        async def snapshot() -> Response:
+            with self._image_lock:
+                jpeg = self._latest_jpeg
+            if jpeg is None:
+                return Response(status_code=204)
+            return Response(content=jpeg, media_type="image/jpeg")
+
+    async def _mjpeg_stream(self) -> AsyncIterator[bytes]:
+        """Yield multipart MJPEG frames at video_fps from the latest JPEG cache."""
+        period = 1.0 / max(1.0, self.config.video_fps)
+        while True:
+            with self._image_lock:
+                jpeg = self._latest_jpeg
+            if jpeg is not None:
+                yield (
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpeg\r\n"
+                    b"Content-Length: " + str(len(jpeg)).encode() + b"\r\n\r\n"
+                    + jpeg + b"\r\n"
+                )
+            await asyncio.sleep(period)
+
+    def _on_image(self, msg: Image) -> None:
+        """Encode incoming Image to JPEG and cache for /video."""
+        try:
+            bgr = msg.to_opencv()
+            ok, buf = cv2.imencode(
+                ".jpg", bgr, [int(cv2.IMWRITE_JPEG_QUALITY), self.config.video_jpeg_quality]
+            )
+            if not ok:
+                return
+            with self._image_lock:
+                self._latest_jpeg = buf.tobytes()
+        except Exception:
+            logger.exception("Failed to encode camera frame")
+
     @rpc
     def start(self) -> None:
         super().start()
         self._start_server()
         self._start_control_loop()
+        # Optional: subscribe to camera feed if connected by the blueprint.
+        try:
+            self.color_image.subscribe(self._on_image)
+            logger.info("Quest teleop: camera feed subscribed → /video")
+        except Exception:
+            logger.info("Quest teleop: no camera connected, /video will be empty")
         logger.info("Quest Teleoperation Module started")
 
     @rpc

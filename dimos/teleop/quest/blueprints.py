@@ -27,6 +27,7 @@ from dimos.control.blueprints.teleop import (
 from dimos.core.coordination.blueprints import autoconnect
 from dimos.core.transport import LCMTransport
 from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
+from dimos.msgs.sensor_msgs.Image import Image
 from dimos.teleop.quest.quest_extensions import ArmTeleopModule
 from dimos.teleop.quest.quest_types import Buttons
 from dimos.visualization.rerun.bridge import RerunBridgeModule
@@ -68,6 +69,7 @@ teleop_quest_xarm7_sim = autoconnect(
             "/coordinator/cartesian_command", PoseStamped
         ),
         ("buttons", Buttons): LCMTransport("/teleop/buttons", Buttons),
+        ("color_image", Image): LCMTransport("/teleop/color_image", Image),
     }
 )
 
