@@ -48,7 +48,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from dimos.hardware.whole_body.spec import WholeBodyAdapter
-    from dimos.msgs.geometry_msgs import Twist
+    from dimos.msgs.geometry_msgs.Twist import Twist
 
 logger = setup_logger()
 

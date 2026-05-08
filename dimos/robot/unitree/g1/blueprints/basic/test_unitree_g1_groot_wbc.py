@@ -31,6 +31,8 @@ verify that the blueprint composes correctly:
 
 from __future__ import annotations
 
+from typing import Any
+
 from dimos.robot.unitree.g1.blueprints.basic.unitree_g1_groot_wbc import (
     unitree_g1_groot_wbc,
 )
@@ -40,7 +42,7 @@ def _module_names() -> set[str]:
     return {atom.module.__name__ for atom in unitree_g1_groot_wbc.blueprints}
 
 
-def _coordinator_kwargs() -> dict:
+def _coordinator_kwargs() -> dict[str, Any]:
     for atom in unitree_g1_groot_wbc.blueprints:
         if atom.module.__name__ == "ControlCoordinator":
             return atom.kwargs

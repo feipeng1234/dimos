@@ -444,12 +444,20 @@ class ControlCoordinator(Module):
                 )
             if cfg.hardware_id is None:
                 raise ValueError(f"GrootWBCTask '{cfg.name}' requires hardware_id in TaskConfig")
+            from dimos.control.hardware_interface import ConnectedWholeBody
+
             hw = self._hardware.get(cfg.hardware_id)
             if hw is None:
                 raise ValueError(
                     f"GrootWBCTask '{cfg.name}' references unknown hardware "
                     f"'{cfg.hardware_id}'. List the hardware before the task "
                     f"in the blueprint config."
+                )
+            if not isinstance(hw, ConnectedWholeBody):
+                raise TypeError(
+                    f"GrootWBCTask '{cfg.name}' requires a WHOLE_BODY hardware "
+                    f"component for '{cfg.hardware_id}', got "
+                    f"{type(hw).__name__}.  Set hardware_type=HardwareType.WHOLE_BODY."
                 )
 
             model_dir = Path(cfg.model_path)

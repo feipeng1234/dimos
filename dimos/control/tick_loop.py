@@ -48,7 +48,7 @@ if TYPE_CHECKING:
     from dimos.control.components import HardwareId, JointName, TaskName
     from dimos.control.hardware_interface import ConnectedHardware
     from dimos.hardware.manipulators.spec import ControlMode
-    from dimos.msgs.geometry_msgs import PoseStamped
+    from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
 
 logger = setup_logger()
 
