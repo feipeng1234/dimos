@@ -31,12 +31,37 @@ shares the same installed Python packages without `uv sync`-ing N times.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+import fcntl
 import os
 from pathlib import Path
 import subprocess
 import sys
 
 WORKTREES_DIR = Path(".harness/worktrees")
+WORKTREE_ADD_LOCK = Path(".harness/locks/worktree-add.lock")
+
+
+@contextmanager
+def _serialize_worktree_add() -> Iterator[None]:
+    """Serialize `git worktree add` calls across concurrent harness invocations.
+
+    `git worktree add` writes to the shared `.git/config` to register the new
+    worktree. If two `git worktree add` calls run concurrently they race on the
+    config lock and one fails with `不能锁定配置文件 .git/config / cannot lock
+    config file .git/config`. We serialize via an `fcntl.flock` on a sentinel
+    file under `.harness/locks/`. The lock is held only for the duration of
+    the `git worktree add` (or the corresponding checkout in `reset_worktree`),
+    not for the LFS smudge or any other work.
+    """
+    WORKTREE_ADD_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    with WORKTREE_ADD_LOCK.open("a") as fp:
+        fcntl.flock(fp.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fp.fileno(), fcntl.LOCK_UN)
 
 
 def _main_repo_root() -> Path:
@@ -63,6 +88,20 @@ def _venv_symlink(worktree: Path) -> None:
     os.symlink(main_venv, link)
 
 
+def _no_lfs_env() -> dict[str, str]:
+    """Env that skips LFS smudge so worktree creation doesn't pull GB of media.
+
+    LFS files materialize as pointer text in the worktree. None of the
+    optimization / refactor tasks in this harness touch LFS-tracked data
+    (datasets, ROS bags, model weights). If a task ever needs a real LFS
+    blob, the implementer can run `git lfs pull -I <path>` inside the
+    worktree on demand.
+    """
+    env = os.environ.copy()
+    env["GIT_LFS_SKIP_SMUDGE"] = "1"
+    return env
+
+
 def ensure_worktree(task_id: str, branch: str, base_ref: str = "origin/dev") -> Path:
     """Create the worktree if missing; reuse if it already exists.
 
@@ -74,11 +113,13 @@ def ensure_worktree(task_id: str, branch: str, base_ref: str = "origin/dev") -> 
         _venv_symlink(wt)
         return wt
     wt.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        ["git", "worktree", "add", "-B", branch, str(wt), base_ref],
-        cwd=main_root,
-        check=True,
-    )
+    with _serialize_worktree_add():
+        subprocess.run(
+            ["git", "worktree", "add", "-B", branch, str(wt), base_ref],
+            cwd=main_root,
+            check=True,
+            env=_no_lfs_env(),
+        )
     _venv_symlink(wt)
     return wt
 
@@ -93,8 +134,9 @@ def reset_worktree(task_id: str, branch: str, base_ref: str = "origin/dev") -> P
     wt = main_root / WORKTREES_DIR / task_id
     if not wt.exists():
         return ensure_worktree(task_id, branch, base_ref)
-    subprocess.run(["git", "fetch", "origin"], cwd=wt, check=False)
-    subprocess.run(["git", "checkout", "-B", branch, base_ref], cwd=wt, check=True)
+    no_lfs = _no_lfs_env()
+    subprocess.run(["git", "fetch", "origin"], cwd=wt, check=False, env=no_lfs)
+    subprocess.run(["git", "checkout", "-B", branch, base_ref], cwd=wt, check=True, env=no_lfs)
     subprocess.run(["git", "clean", "-fdx", "-e", ".venv"], cwd=wt, check=False)
     _venv_symlink(wt)
     return wt
