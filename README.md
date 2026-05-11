@@ -189,9 +189,10 @@ dimos run unitree-go2
 To control the robot with natural-language commands (e.g. ask it to dance, walk, or follow you) and expose its skills over MCP, run the **agentic** variant — it loads the same Go2 stack plus an LLM agent, MCP server, and the skill container:
 
 ```bash
-# Real robot with natural-language control + MCP skills
+# Real robot with natural-language control + MCP skills.
+# `--robot-ip` is a global flag and MUST come before `run`.
 export ROBOT_IP=<YOUR_ROBOT_IP>
-dimos run unitree-go2-agentic --robot-ip $ROBOT_IP
+dimos --robot-ip $ROBOT_IP run unitree-go2-agentic --daemon
 
 # In another shell:
 dimos agent-send "do a dance"

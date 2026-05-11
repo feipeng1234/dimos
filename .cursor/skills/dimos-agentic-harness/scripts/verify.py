@@ -141,6 +141,21 @@ def _files_to_test_files(files: list[str]) -> list[str]:
     return out
 
 
+def _subprocess_env() -> dict[str, str]:
+    """Env for ruff/mypy/pytest subprocesses that protects the main `.venv`.
+
+    If the verifier directly invokes the wrapper scripts (e.g. `.venv/bin/ruff`),
+    setting these vars is paranoia; but if anything in the toolchain re-enters
+    `uv` (some pre-commit hooks shell out to `uv run`), the vars block
+    auto-sync from rewriting the editable `.pth` and console-script shebangs.
+    See `scripts/worktree.py:harness_env_vars`.
+    """
+    env = os.environ.copy()
+    wt_mod = _load_worktree()
+    env.update(wt_mod.harness_env_vars())
+    return env
+
+
 def _run_step(
     name: str,
     cmd: list[str],
@@ -149,7 +164,7 @@ def _run_step(
 ) -> StepResult:
     log_fp.write(f"\n$ ({name}) {' '.join(cmd)}\n")
     log_fp.flush()
-    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(cwd))
+    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(cwd), env=_subprocess_env())
     log_fp.write(proc.stdout)
     if proc.stderr:
         log_fp.write(f"\n--- stderr ---\n{proc.stderr}\n")
