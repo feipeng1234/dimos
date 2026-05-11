@@ -305,7 +305,7 @@ def cmd_plan_init(needs: str) -> int:
                     "needs": needs,
                     "needs_path": str(NEEDS_PATH),
                     "subagent_type": "generalPurpose",
-                    "readonly": True,
+                    "readonly": False,
                 }
             }
         )
@@ -500,18 +500,24 @@ def _emit_dispatch_actions(board: dict) -> list[dict]:
 
 
 def _run_verifier_inline(board: dict) -> list[dict]:
-    """Synchronously verify any IMPLEMENTING / VERIFYING-quick-done tasks.
+    """Synchronously verify tasks that need quick or full verification.
+
+    State machine: implementers transition `IMPLEMENTING → VERIFYING`
+    (no verify_stage) on successful push. The dispatcher below picks
+    these up for the quick pass, then on the next tick picks up
+    `VERIFYING + stage="quick"` for the full pass. `IMPLEMENTING` is
+    the in-progress state — the verifier never runs against it; if the
+    impl dies, `_resume_dead_workers` reverts `IMPLEMENTING → PLANNED`.
 
     Returns a list of `{"kind": "verified", ...}` events for the heartbeat /
-    parent-agent log. Verification is not an action the parent agent has to
-    dispatch; it runs inside `tick` itself so the state machine is closed.
+    parent-agent log.
     """
     events: list[dict] = []
     verify = _load_verify()
     for t in list(board["tasks"]):
         status = t["status"]
         stage = t.get("verify_stage")
-        if status == "IMPLEMENTING":
+        if status == "VERIFYING" and stage is None:
             mode = "quick"
         elif status == "VERIFYING" and stage == "quick":
             mode = "full"

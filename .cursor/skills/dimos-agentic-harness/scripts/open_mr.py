@@ -144,18 +144,20 @@ def _open_one_pr(task: dict, base: str, body: str) -> dict:
         _now_iso(),
     )
 
-    print(f"[mr] PR #{pr_number} created; checking mergeable state (up to 30s)", file=sys.stderr)
+    retries = _gh.MERGEABLE_STATE_RETRIES
+    interval = _gh.MERGEABLE_STATE_INTERVAL_SEC
+    print(
+        f"[mr] PR #{pr_number} created; checking mergeable state "
+        f"(up to {int(retries * interval)}s)",
+        file=sys.stderr,
+    )
     stable = _gh.pr_view_with_mergeable_retry(pr_number)
     review_decision = stable.get("reviewDecision") or ""
     mergeable = stable.get("mergeable") or "UNKNOWN"
+    rollup = stable.get("statusCheckRollup") or []
 
-    can_auto_merge = review_decision in ("", "APPROVED") and mergeable in (
-        "MERGEABLE",
-        "CONFLICTING",
-        "UNKNOWN",
-    )
-
-    if not can_auto_merge:
+    review_ok = review_decision in ("", "APPROVED")
+    if not review_ok or mergeable not in ("MERGEABLE", "CONFLICTING"):
         reason = f"reviewDecision={review_decision} mergeable={mergeable}"
         print(f"[mr] cannot enable auto-merge: {reason}", file=sys.stderr)
         _board(
@@ -168,19 +170,42 @@ def _open_one_pr(task: dict, base: str, body: str) -> dict:
         return _task_info(task_id)
 
     enabled = _gh.pr_enable_auto_merge(pr_number, method="squash")
-    if not enabled:
-        print(f"[mr] gh pr merge --auto rejected for #{pr_number}", file=sys.stderr)
-        _board(
-            "set-status",
-            task_id,
-            "READY_FOR_MAINTAINER",
-            "--ready-for-maintainer-reason",
-            "gh pr merge --auto rejected",
-        )
+    if enabled:
+        _board("set-status", task_id, "BABYSITTING")
+        print(f"[mr] {task_id} → BABYSITTING (auto-merge armed)", file=sys.stderr)
         return _task_info(task_id)
 
-    _board("set-status", task_id, "BABYSITTING")
-    print(f"[mr] {task_id} → BABYSITTING (auto-merge armed)", file=sys.stderr)
+    # Auto-merge rejected. On a fork sandbox without branch protection / required
+    # checks, `--auto` returns "Protected branch rules not configured for this
+    # branch (enablePullRequestAutoMerge)". If the PR is otherwise mergeable
+    # (review_ok, mergeable=MERGEABLE) AND has no pending checks to wait for,
+    # auto-merge has nothing to do — fall back to a direct squash-merge.
+    has_pending_checks = any(
+        (entry.get("conclusion") or entry.get("state") or "").upper()
+        in ("PENDING", "QUEUED", "IN_PROGRESS", "WAITING")
+        for entry in rollup
+    )
+    if mergeable == "MERGEABLE" and not has_pending_checks:
+        print(
+            f"[mr] auto-merge rejected and no pending checks — direct merging #{pr_number}",
+            file=sys.stderr,
+        )
+        if _gh.pr_merge_now(pr_number, method="squash"):
+            _board("set-status", task_id, "BABYSITTING")
+            print(f"[mr] {task_id} → BABYSITTING (direct-merged)", file=sys.stderr)
+            return _task_info(task_id)
+        reason = "direct merge fallback failed"
+    else:
+        reason = f"gh pr merge --auto rejected; mergeable={mergeable} pending={has_pending_checks}"
+
+    print(f"[mr] {reason} for #{pr_number}", file=sys.stderr)
+    _board(
+        "set-status",
+        task_id,
+        "READY_FOR_MAINTAINER",
+        "--ready-for-maintainer-reason",
+        reason,
+    )
     return _task_info(task_id)
 
 

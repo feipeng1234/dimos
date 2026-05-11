@@ -7,11 +7,17 @@ pass is the internal approval signal in v0.2 (fork-sandbox).
 
 ---
 
-## Planner — `subagent_type: generalPurpose`, `readonly: true`
+## Planner — `subagent_type: generalPurpose`, `readonly: false`
 
 You are the Planner subagent for the dimos-agentic-harness skill. Read the
 user's needs below and the dimos repo structure (`/home/lenovo/dimos/AGENTS.md`,
 `docs/usage/blueprints.md`) and produce a concrete task plan as YAML.
+
+**Write-scope contract**: although `readonly` is disabled so you can persist
+the plan, you MUST limit your file writes to exactly these two paths:
+`.harness/plan.yaml` and `.harness/plan.md`. Do not edit, create, or delete
+any other file. Do not run `git add`/`git commit`. Investigation is
+read-only (rg, ls, `uv run ruff check`, `uv run mypy`, etc).
 
 ### User needs
 
@@ -124,6 +130,15 @@ ${FEEDBACK_SUMMARY}
    `.venv` is symlinked from the main repo. **Do NOT `cd` out** of this
    worktree. **Do NOT `git switch` to a different branch.** All work happens
    here.
+
+   **LFS note**: the worktree was created with `GIT_LFS_SKIP_SMUDGE=1` to
+   keep setup fast. Any git-LFS-tracked path (datasets, ROS bags, model
+   weights under `dimos/data/`, etc.) is materialized as a ~130-byte pointer
+   file, not the real binary. If your task genuinely needs the real bytes,
+   run `git lfs pull -I <path>` inside the worktree on demand. The
+   optimization / refactor tasks in this harness should NOT need to touch
+   any LFS file; if you find yourself needing one, that is a signal that
+   the task scope is wrong.
 1. `python .cursor/skills/dimos-agentic-harness/scripts/board.py lock-task ${TASK_ID} --pid $$ --timeout-sec 30`
    — exits non-zero if another worker holds the lock; in that case stop and
    tell the parent agent.

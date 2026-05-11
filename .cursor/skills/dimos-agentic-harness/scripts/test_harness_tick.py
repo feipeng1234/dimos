@@ -22,6 +22,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+from types import SimpleNamespace
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location("harness_mod", SCRIPTS_DIR / "harness.py")
@@ -138,6 +139,96 @@ def test_tick_no_loop_emits_implementer_for_planned(tmp_path: Path, monkeypatch)
     assert actions[0]["task_id"] == "t1"
     assert "cwd" in actions[0]
     assert ".harness/worktrees/t1" in actions[0]["cwd"]
+
+
+def _set_verify_stage(task_id: str, stage: str) -> None:
+    subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPTS_DIR / "board.py"),
+            "set-status",
+            task_id,
+            "VERIFYING",
+            "--verify-stage",
+            stage,
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+
+def _stub_verify_module(calls: list[tuple[str, str]]) -> SimpleNamespace:
+    """Build a stub of verify.py that records calls but does no real work."""
+
+    def stub_verify(task_id: str, mode: str) -> SimpleNamespace:
+        calls.append((task_id, mode))
+        return SimpleNamespace(
+            task_id=task_id,
+            mode=mode,
+            passed=True,
+            next_status="VERIFYING",
+            summary="stub",
+        )
+
+    return SimpleNamespace(verify_task=stub_verify)
+
+
+def test_run_verifier_inline_picks_up_verifying_no_stage(tmp_path: Path, monkeypatch) -> None:
+    """Regression: VERIFYING with verify_stage=None must trigger quick mode.
+
+    The implementer transitions IMPLEMENTING → VERIFYING (no stage) as its
+    done-signal. The previous dispatcher only matched IMPLEMENTING (which is
+    the in-progress state and is never verified), so all impl-finished tasks
+    were silently skipped and the harness spin-waited.
+    """
+    monkeypatch.chdir(tmp_path)
+    _init_board(tmp_path)
+    _add_task("tv", "VERIFYING")
+
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(harness, "_load_verify", lambda: _stub_verify_module(calls))
+
+    board = harness._read_board_json()
+    events = harness._run_verifier_inline(board)
+    assert len(events) == 1
+    assert events[0]["task_id"] == "tv"
+    assert events[0]["mode"] == "quick"
+    assert calls == [("tv", "quick")]
+
+
+def test_run_verifier_inline_picks_up_verifying_stage_quick(tmp_path: Path, monkeypatch) -> None:
+    """VERIFYING with verify_stage=quick must trigger full mode."""
+    monkeypatch.chdir(tmp_path)
+    _init_board(tmp_path)
+    _add_task("tv", "VERIFYING")
+    _set_verify_stage("tv", "quick")
+
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(harness, "_load_verify", lambda: _stub_verify_module(calls))
+
+    board = harness._read_board_json()
+    events = harness._run_verifier_inline(board)
+    assert calls == [("tv", "full")]
+    assert events[0]["mode"] == "full"
+
+
+def test_run_verifier_inline_skips_implementing(tmp_path: Path, monkeypatch) -> None:
+    """Tasks in IMPLEMENTING (in-progress) must NOT be verified.
+
+    If the implementer crashes mid-flight, `_resume_dead_workers` reverts the
+    status to PLANNED for re-dispatch — the verifier never touches IMPLEMENTING.
+    """
+    monkeypatch.chdir(tmp_path)
+    _init_board(tmp_path)
+    _add_task("ti", "IMPLEMENTING")
+
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(harness, "_load_verify", lambda: _stub_verify_module(calls))
+
+    board = harness._read_board_json()
+    events = harness._run_verifier_inline(board)
+    assert events == []
+    assert calls == []
 
 
 def test_tick_loop_sleeps_then_returns_when_terminal(tmp_path: Path, monkeypatch) -> None:

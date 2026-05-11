@@ -36,7 +36,7 @@ DIMOS_FORK = "feipeng1234/dimos"
 DIMOS_BASE = "dev"
 EXPECTED_GH_USER = "feipeng1234"
 
-MERGEABLE_STATE_RETRIES = 6
+MERGEABLE_STATE_RETRIES = 24
 MERGEABLE_STATE_INTERVAL_SEC = 5.0
 
 _VALID_BRANCH_PREFIXES = (
@@ -182,9 +182,31 @@ def pr_view_with_mergeable_retry(num: int) -> dict[str, Any]:
 
 
 def pr_enable_auto_merge(num: int, method: str = "squash") -> bool:
-    """Enable GitHub native auto-merge. Returns True on success, False if unsupported."""
+    """Enable GitHub native auto-merge. Returns True on success, False if unsupported.
+
+    Auto-merge requires either branch protection rules or required status checks
+    on the base branch. On a bare fork sandbox with neither, GitHub rejects with
+    `Protected branch rules not configured for this branch
+    (enablePullRequestAutoMerge)`. Callers should treat the False return as
+    "try a direct merge instead" rather than as a hard failure.
+    """
     method_flag = {"squash": "--squash", "merge": "--merge", "rebase": "--rebase"}[method]
     proc = _run(["pr", "merge", method_flag, "--auto", str(num)], check=False)
+    return proc.returncode == 0
+
+
+def pr_merge_now(num: int, method: str = "squash", delete_branch: bool = True) -> bool:
+    """Direct (non-auto) merge of a PR. Returns True on success.
+
+    Use when `pr_enable_auto_merge` is rejected because the base branch has no
+    protection rules and no required checks — in that case auto-merge has no
+    pending gates to wait for and an immediate merge is equivalent.
+    """
+    method_flag = {"squash": "--squash", "merge": "--merge", "rebase": "--rebase"}[method]
+    args = ["pr", "merge", method_flag, str(num)]
+    if delete_branch:
+        args.append("--delete-branch")
+    proc = _run(args, check=False)
     return proc.returncode == 0
 
 
@@ -251,6 +273,12 @@ def _cli(argv: list[str]) -> int:
             method = rest[1] if len(rest) > 1 else "squash"
             ok = pr_enable_auto_merge(num, method)
             print("ok" if ok else "unsupported")
+            return 0 if ok else 1
+        if cmd == "pr-merge-now":
+            num = int(rest[0])
+            method = rest[1] if len(rest) > 1 else "squash"
+            ok = pr_merge_now(num, method)
+            print("ok" if ok else "failed")
             return 0 if ok else 1
         if cmd == "push":
             branch = rest[0]
