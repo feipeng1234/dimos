@@ -164,7 +164,7 @@ class WorkerManagerPython:
                 assignments,
                 lambda item: RPCClient(item[0].deploy_module(item[1], item[2], item[3]), item[1]),
             )
-        except:
+        except BaseException:
             self.stop()
             raise
 

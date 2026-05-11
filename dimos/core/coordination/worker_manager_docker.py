@@ -67,7 +67,7 @@ class WorkerManagerDocker:
 
         try:
             return safe_thread_map(specs, _deploy)
-        except:
+        except BaseException:
             self.stop()
             raise
 
