@@ -217,11 +217,16 @@ def _decide_next(
     mode: str,
     attempts: int,
 ) -> tuple[str, list[str]]:
-    """Returns (next_status, extra_board_args)."""
+    """Returns (next_status, extra_board_args).
+
+    On full-mode pass we hand off to the LLM Reviewer (REVIEWING) instead of
+    going straight to READY. The reviewer is the only path that can produce
+    READY from this point on.
+    """
     if passed:
         if mode == "quick":
             return "VERIFYING", ["--verify-stage", "quick"]
-        return "READY", ["--verify-stage", "full"]
+        return "REVIEWING", ["--verify-stage", "full"]
     if attempts + 1 >= MAX_VERIFIER_ATTEMPTS:
         return "BLOCKED", [
             "--blocked-reason",

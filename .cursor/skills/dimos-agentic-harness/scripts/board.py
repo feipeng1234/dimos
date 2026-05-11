@@ -55,6 +55,7 @@ VALID_STATUSES = {
     "IMPLEMENTING",
     "VERIFYING",
     "REVISING",
+    "REVIEWING",
     "READY",
     "GROUP_WAIT",
     "GROUP_GATE",
@@ -123,6 +124,7 @@ def _empty_task(task_id: str, **overrides: Any) -> dict[str, Any]:
         "opened_at": None,
         "babysit_attempts": 0,
         "consecutive_rebase_fails": 0,
+        "review_attempts": 0,
         "blocked_reason": None,
         "ready_for_maintainer_reason": None,
     }
@@ -334,6 +336,7 @@ def set_status(
     bump_babysit_attempts: bool = typer.Option(False, "--bump-babysit-attempts"),
     bump_rebase_fails: bool = typer.Option(False, "--bump-rebase-fails"),
     reset_rebase_fails: bool = typer.Option(False, "--reset-rebase-fails"),
+    bump_review_attempts: bool = typer.Option(False, "--bump-review-attempts"),
 ) -> None:
     """Mutate a task's status and metadata. All fields optional."""
     if status not in VALID_STATUSES:
@@ -370,6 +373,8 @@ def set_status(
             t["consecutive_rebase_fails"] += 1
         if reset_rebase_fails:
             t["consecutive_rebase_fails"] = 0
+        if bump_review_attempts:
+            t["review_attempts"] = int(t.get("review_attempts", 0)) + 1
         _write_board_locked(board)
     typer.echo(f"{task_id} -> {status}")
 

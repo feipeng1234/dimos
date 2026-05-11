@@ -154,9 +154,9 @@ This is the main loop. Repeat until `tick` returns `{"kind": "done"}`:
 The output is `{"resume_events": [...], "verifier_events": [...], "actions":
 [{"kind": ..., ...}, ...]}`. **`tick` blocks internally on `wait`** — it
 sleeps and re-evaluates until there is real work or all tasks are terminal.
-You will only ever see actionable kinds (`spawn-implementer`, `open-mr`,
-`gate-group`, `spawn-babysitter`, `merged`, `watch-error`) or the final
-`done`.
+You will only ever see actionable kinds (`spawn-implementer`, `spawn-reviewer`,
+`open-mr`, `gate-group`, `spawn-babysitter`, `merged`, `watch-error`) or the
+final `done`.
 
 For each action, dispatch to the matching handler (see the **Action handlers**
 section below). Some actions you execute synchronously via `Shell`; others
@@ -217,6 +217,32 @@ Verification is no longer dispatched as an action. `tick` calls
 (mode=full). The state machine is closed in code; the parent agent does
 not have to remember "what stage was last". Results appear in the
 `verifier_events` field of the tick JSON.
+
+**Verifier full-pass goes to `REVIEWING`, not `READY`** — the LLM Reviewer
+gate (next handler) is the only path to `READY`.
+
+### `spawn-reviewer`
+Substitute the action fields into `ROLES.md/Reviewer` and spawn:
+`Task(subagent_type="generalPurpose", readonly=false, model="gpt-5.5-medium",
+prompt=<filled prompt>)`. The model name comes from the action payload
+(`action.model`); always use it verbatim. Pass `${WORKTREE_PATH}` =
+`action.cwd` and `${REVIEW_ATTEMPTS}` = `action.review_attempts`.
+
+The reviewer is **read-only on source code** — it only inspects the diff,
+reads files, and writes the board + a feedback log. It produces one of:
+
+- **APPROVED** → reviewer calls `board.py set-status ${TASK_ID} READY
+  --bump-review-attempts`. Next tick emits `open-mr`.
+- **CHANGES_REQUESTED** → reviewer writes feedback to
+  `.harness/feedback/${TASK_ID}-review-r<n>.log`, calls `board.py set-status
+  ${TASK_ID} REVISING --feedback-summary "..." --feedback-log <path>
+  --bump-review-attempts`. Next tick emits `spawn-implementer` again with the
+  feedback in the prompt.
+
+The harness gates this with `MAX_REVIEW_ITERATIONS = 2`. When `tick` sees a
+task in `REVIEWING` with `review_attempts >= 2`, it sets `BLOCKED` itself
+(reason: `"reviewer rejected after 2 iterations"`) instead of emitting
+`spawn-reviewer`. The cap is independent from the verifier's 5-attempt cap.
 
 ### `open-mr`
 Run synchronously:
@@ -303,14 +329,16 @@ the chat session.
   "opened_at": null,
   "babysit_attempts": 0,
   "consecutive_rebase_fails": 0,
+  "review_attempts": 0,
   "blocked_reason": null,
   "ready_for_maintainer_reason": null
 }
 ```
 
-Statuses: `PLANNED`, `IMPLEMENTING`, `VERIFYING`, `REVISING`, `READY`,
-`GROUP_WAIT`, `GROUP_GATE`, `GROUP_RESPLIT`, `PR_OPEN`, `STACKED_PR_OPEN`,
-`AUTOMERGE_CHECK`, `BABYSITTING`, `MERGED`, `BLOCKED`, `READY_FOR_MAINTAINER`.
+Statuses: `PLANNED`, `IMPLEMENTING`, `VERIFYING`, `REVISING`, `REVIEWING`,
+`READY`, `GROUP_WAIT`, `GROUP_GATE`, `GROUP_RESPLIT`, `PR_OPEN`,
+`STACKED_PR_OPEN`, `AUTOMERGE_CHECK`, `BABYSITTING`, `MERGED`, `BLOCKED`,
+`READY_FOR_MAINTAINER`.
 
 Terminal: `MERGED`, `BLOCKED`, `READY_FOR_MAINTAINER`.
 

@@ -58,6 +58,9 @@ MAX_BABYSIT_ATTEMPTS = 10
 MAX_PR_AGE_HOURS = 24
 MAX_VERIFIER_ATTEMPTS = 5
 MAX_REBASE_FAILS = 2
+MAX_REVIEW_ITERATIONS = 2
+
+REVIEWER_MODEL = "gpt-5.5-medium"
 
 TERMINAL = {"MERGED", "BLOCKED", "READY_FOR_MAINTAINER"}
 
@@ -350,6 +353,14 @@ def _resume_dead_workers(board: dict) -> list[dict]:
         elif old == "VERIFYING":
             new = "VERIFYING"
             extra = []
+        elif old == "REVIEWING":
+            # Reviewer is read-only on source code; just clear the dead pid
+            # and leave the status as REVIEWING so the next tick respawns it.
+            # Note: review_attempts is bumped by the reviewer's terminal
+            # set-status call, so a crash mid-review does NOT consume an
+            # iteration — we get a free retry, which is the desired behavior.
+            new = "REVIEWING"
+            extra = []
         elif old in ("BABYSITTING",):
             new = "BABYSITTING"
             extra = []
@@ -537,6 +548,49 @@ def _run_verifier_inline(board: dict) -> list[dict]:
     return events
 
 
+def _emit_review_actions(board: dict) -> list[dict]:
+    """Emit a `spawn-reviewer` action for each task in REVIEWING.
+
+    The reviewer is gated by `MAX_REVIEW_ITERATIONS` (2). When a task enters
+    its (MAX+1)-th review attempt we set BLOCKED instead of spawning. Bumps
+    of `review_attempts` happen inside the reviewer subagent's terminal
+    `board.py set-status` call (atomic with the READY/REVISING transition);
+    here we only read the counter to decide whether to spawn.
+    """
+    actions: list[dict] = []
+    wt_mod = _load_worktree()
+    for t in board["tasks"]:
+        if t["status"] != "REVIEWING":
+            continue
+        review_attempts = int(t.get("review_attempts", 0))
+        if review_attempts >= MAX_REVIEW_ITERATIONS:
+            _board(
+                "set-status",
+                t["id"],
+                "BLOCKED",
+                "--blocked-reason",
+                f"reviewer rejected after {MAX_REVIEW_ITERATIONS} iterations",
+            )
+            continue
+        wt_path = wt_mod.ensure_worktree(t["id"], t["branch"])
+        actions.append(
+            {
+                "kind": "spawn-reviewer",
+                "task_id": t["id"],
+                "title": t["title"],
+                "branch": t["branch"],
+                "cwd": str(wt_path),
+                "review_attempts": review_attempts,
+                "files_touched": t.get("files_touched", []),
+                "feedback_log_path": t.get("feedback_log_path", ""),
+                "model": REVIEWER_MODEL,
+                "subagent_type": "generalPurpose",
+                "readonly": False,
+            }
+        )
+    return actions
+
+
 def _emit_pr_open_actions(board: dict) -> list[dict]:
     actions: list[dict] = []
     tasks_by_id = {t["id"]: t for t in board["tasks"]}
@@ -607,6 +661,7 @@ def _tick_once(verbose_resume: bool) -> tuple[list[dict], list[dict], list[dict]
     if verifier_events:
         board = _read_board_json()
 
+    actions.extend(_emit_review_actions(board))
     actions.extend(_emit_pr_open_actions(board))
     actions.extend(_emit_group_gate_actions(board))
     actions.extend(_emit_dispatch_actions(board))
