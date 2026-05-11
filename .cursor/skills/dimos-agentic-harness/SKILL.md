@@ -124,7 +124,12 @@ This is the main loop. Repeat until `tick` returns `{"kind": "done"}`:
 .venv/bin/python .cursor/skills/dimos-agentic-harness/scripts/harness.py tick
 ```
 
-The output is `{"resume_events": [...], "actions": [{"kind": ..., ...}, ...]}`.
+The output is `{"resume_events": [...], "verifier_events": [...], "actions":
+[{"kind": ..., ...}, ...]}`. **`tick` blocks internally on `wait`** — it
+sleeps and re-evaluates until there is real work or all tasks are terminal.
+You will only ever see actionable kinds (`spawn-implementer`, `open-mr`,
+`gate-group`, `spawn-babysitter`, `merged`, `watch-error`) or the final
+`done`.
 
 For each action, dispatch to the matching handler (see the **Action handlers**
 section below). Some actions you execute synchronously via `Shell`; others
@@ -232,8 +237,11 @@ Transient `gh` failure. Log it; do nothing this tick; re-tick after a short
 sleep (e.g., 10s).
 
 ### `wait`
-No work this tick but tasks still in flight. Sleep `action.seconds` (default
-300s, override via `HARNESS_POLL_INTERVAL_SEC` env var). Then re-tick.
+You should never see this in normal use. `harness.py tick` now sleeps and
+re-ticks internally when the only outcome is `wait`, so it only ever returns
+to you with actionable items or `done`. If you do see `wait`, it means
+`tick` was invoked with `--no-loop` (testing mode). In that case sleep
+`action.seconds` and re-tick.
 
 ### `done`
 All tasks terminal. Run `harness.py report`, print the path to the user, end

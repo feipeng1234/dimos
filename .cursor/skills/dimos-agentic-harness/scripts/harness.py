@@ -43,6 +43,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 from typing import Any
 
 SCRIPTS = Path(__file__).resolve().parent
@@ -71,10 +72,13 @@ def _load_gh():
 
 
 def _load_verify() -> Any:
+    if "verify" in sys.modules:
+        return sys.modules["verify"]
     spec = importlib.util.spec_from_file_location("verify", SCRIPTS / "verify.py")
     if spec is None or spec.loader is None:
         raise RuntimeError("could not load verify.py")
     mod = importlib.util.module_from_spec(spec)
+    sys.modules["verify"] = mod  # required for dataclasses to resolve __module__
     spec.loader.exec_module(mod)
     return mod
 
@@ -528,7 +532,12 @@ def _all_terminal(board: dict) -> bool:
     return all(t["status"] in TERMINAL for t in board["tasks"])
 
 
-def cmd_tick(verbose_resume: bool = False) -> int:
+def _tick_once(verbose_resume: bool) -> tuple[list[dict], list[dict], list[dict]]:
+    """Single non-blocking pass. Returns (resume_events, verifier_events, actions).
+
+    `actions` may include `{"kind": "wait", ...}` or `{"kind": "done"}` when
+    nothing else fires. Higher-level loop strips wait and re-calls.
+    """
     HARNESS_DIR.mkdir(exist_ok=True)
     board = _read_board_json()
 
@@ -536,6 +545,7 @@ def cmd_tick(verbose_resume: bool = False) -> int:
     if verbose_resume and resume_events:
         for ev in resume_events:
             print(f"[resume] {ev}", file=sys.stderr)
+    if resume_events:
         board = _read_board_json()
 
     gh = _load_gh()
@@ -570,19 +580,39 @@ def cmd_tick(verbose_resume: bool = False) -> int:
                 }
             ]
 
-    _heartbeat(
-        "tick",
-        {"resume_events": resume_events, "verifier_events": verifier_events, "actions": actions},
-    )
-    print(
-        json.dumps(
-            {
-                "resume_events": resume_events,
-                "verifier_events": verifier_events,
-                "actions": actions,
-            }
-        )
-    )
+    return resume_events, verifier_events, actions
+
+
+def cmd_tick(verbose_resume: bool = False, loop: bool = True) -> int:
+    """Observe + advance state. Default: loop until non-wait actions or done.
+
+    With loop=True (default), if the only action is `wait`, sleep and re-tick
+    so the parent agent never has to handle a wait action itself. Aggregated
+    resume_events / verifier_events from all inner iterations are emitted.
+
+    With loop=False, behaves like the v0.2 single-pass tick (used by tests).
+    """
+    all_resume: list[dict] = []
+    all_verify: list[dict] = []
+    while True:
+        resume_events, verifier_events, actions = _tick_once(verbose_resume)
+        all_resume.extend(resume_events)
+        all_verify.extend(verifier_events)
+
+        only_wait = len(actions) == 1 and actions[0].get("kind") == "wait"
+        if loop and only_wait:
+            wait_sec = int(actions[0].get("seconds") or POLL_INTERVAL_SEC_DEFAULT)
+            time.sleep(wait_sec)
+            continue
+        break
+
+    payload = {
+        "resume_events": all_resume,
+        "verifier_events": all_verify,
+        "actions": actions,
+    }
+    _heartbeat("tick", payload)
+    print(json.dumps(payload))
     return 0
 
 
@@ -664,9 +694,11 @@ def main(argv: list[str]) -> int:
             return 2
         return cmd_plan_init(rest[0])
     if cmd == "tick":
-        return cmd_tick()
+        loop = "--no-loop" not in rest
+        return cmd_tick(loop=loop)
     if cmd == "resume":
-        return cmd_resume()
+        loop = "--no-loop" not in rest
+        return cmd_tick(verbose_resume=True, loop=loop)
     if cmd == "report":
         return cmd_report()
     if cmd == "status":
