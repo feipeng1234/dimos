@@ -166,6 +166,12 @@ Spawn `generalPurpose` subagent with `ROLES.md/Planner` prompt; substitute
 ### `spawn-implementer`
 Substitute the action fields into `ROLES.md/Implementer` and spawn:
 `Task(subagent_type="generalPurpose", readonly=false, prompt=<filled prompt>)`.
+The action carries a `cwd` field — that is the per-task git worktree under
+`.harness/worktrees/${TASK_ID}/`. **Pass it into the prompt as
+`${WORKTREE_PATH}`** so the implementer knows where to work; `tick` has
+already created the worktree and checked out the branch with `.venv`
+symlinked.
+
 Before spawning, set `IMPLEMENTING`:
 
 ```bash
@@ -304,6 +310,9 @@ To customize, edit that file.
 - `scripts/board.py` — JSON state CRUD with fcntl locking.
 - `scripts/verify.py` — programmatic verifier (ruff + mypy + pytest, junit-XML
   parsed for failure summaries). Called inline by `harness.py tick`.
-- `scripts/group_gate.py` — group integration test runner.
+- `scripts/worktree.py` — per-task git worktree management. Each implementer
+  / verifier runs in `.harness/worktrees/<task_id>/`; `.venv` is symlinked.
+- `scripts/group_gate.py` — group integration test runner (uses a
+  `gate-<gid>` worktree to avoid touching the main working tree).
 - `scripts/open_mr.py` — PR creation + auto-merge enable.
 - `scripts/harness.py` — preflight, plan-init, tick, resume, report.

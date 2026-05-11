@@ -31,6 +31,34 @@ sys.modules["harness_mod"] = harness
 spec.loader.exec_module(harness)
 
 
+def _init_git(tmp_path: Path) -> None:
+    """Bootstrap a tiny repo so worktree.ensure_worktree works."""
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True)
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    subprocess.run(["git", "checkout", "-b", "dev"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "t@t"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "t"], cwd=tmp_path, check=True, capture_output=True
+    )
+    (tmp_path / "README.md").write_text("init\n")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin", str(remote)],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(["git", "push", "origin", "dev"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "fetch", "origin"], cwd=tmp_path, check=True, capture_output=True)
+
+
 def _init_board(tmp_path: Path) -> None:
     subprocess.run(
         [
@@ -97,8 +125,9 @@ def test_tick_no_loop_returns_done_when_all_terminal(tmp_path: Path, monkeypatch
 
 def test_tick_no_loop_emits_implementer_for_planned(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
+    _init_git(tmp_path)  # ensure_worktree needs a real repo
     _init_board(tmp_path)
-    _add_task("t1", "PLANNED")
+    _add_task("t1", "PLANNED", branch="feat/foo")
 
     rc = harness.cmd_tick(loop=False)
     assert rc == 0
@@ -107,6 +136,8 @@ def test_tick_no_loop_emits_implementer_for_planned(tmp_path: Path, monkeypatch)
     assert len(actions) == 1
     assert actions[0]["kind"] == "spawn-implementer"
     assert actions[0]["task_id"] == "t1"
+    assert "cwd" in actions[0]
+    assert ".harness/worktrees/t1" in actions[0]["cwd"]
 
 
 def test_tick_loop_sleeps_then_returns_when_terminal(tmp_path: Path, monkeypatch) -> None:

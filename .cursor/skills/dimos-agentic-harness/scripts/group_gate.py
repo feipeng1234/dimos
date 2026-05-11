@@ -30,11 +30,13 @@ Exit codes:
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 from pathlib import Path
 import subprocess
 import sys
+from typing import Any
 
 SCRIPTS = Path(__file__).resolve().parent
 BOARD = SCRIPTS / "board.py"
@@ -46,11 +48,27 @@ VERIFY_FULL_DEFAULT = (
 )
 
 
-def _run(cmd: list[str], log_path: Path | None = None) -> tuple[int, str, str]:
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+def _load_worktree() -> Any:
+    if "worktree" in sys.modules:
+        return sys.modules["worktree"]
+    spec = importlib.util.spec_from_file_location("worktree", SCRIPTS / "worktree.py")
+    if spec is None or spec.loader is None:
+        raise RuntimeError("could not load worktree.py")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["worktree"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _run(
+    cmd: list[str],
+    log_path: Path | None = None,
+    cwd: Path | None = None,
+) -> tuple[int, str, str]:
+    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(cwd) if cwd else None)
     if log_path is not None:
         with log_path.open("a") as f:
-            f.write(f"\n$ {' '.join(cmd)}\n")
+            f.write(f"\n$ (cwd={cwd or '.'}) {' '.join(cmd)}\n")
             f.write(proc.stdout)
             if proc.stderr:
                 f.write(f"\n--- stderr ---\n{proc.stderr}\n")
@@ -89,36 +107,35 @@ def main(argv: list[str]) -> int:
     topo_ids = info["topo_order"]
     members_by_id = {m["id"]: m for m in info["members"]}
 
-    rc, _, err = _run(["git", "fetch", "origin"], log_path)
-    if rc != 0:
-        print(f"[gate] git fetch failed: {err}", file=sys.stderr)
+    wt_mod = _load_worktree()
+    gate_id = f"gate-{gid}"
+    try:
+        gate_wt = wt_mod.reset_worktree(gate_id, integration_branch)
+    except subprocess.CalledProcessError as exc:
+        print(f"[gate] could not prepare integration worktree: {exc}", file=sys.stderr)
         _board("set-gate-status", gid, "FAILED")
         return 2
-
-    rc, _, err = _run(
-        ["git", "switch", "-C", integration_branch, "origin/dev"],
-        log_path,
-    )
-    if rc != 0:
-        print(f"[gate] git switch -C {integration_branch} failed: {err}", file=sys.stderr)
-        _board("set-gate-status", gid, "FAILED")
-        return 2
+    print(f"[gate] using worktree {gate_wt}", file=sys.stderr)
 
     verify_full = os.environ.get("HARNESS_VERIFY_FULL_CMD", VERIFY_FULL_DEFAULT)
 
     for tid in topo_ids:
         member = members_by_id[tid]
         branch = member["branch"]
-        print(f"[gate] merging {tid} ({branch})", file=sys.stderr)
+        print(f"[gate] merging {tid} ({branch}) into {integration_branch}", file=sys.stderr)
 
-        rc, _, err = _run(["git", "merge", "--no-ff", "--no-edit", branch], log_path)
+        rc, _, err = _run(
+            ["git", "merge", "--no-ff", "--no-edit", branch],
+            log_path,
+            cwd=gate_wt,
+        )
         if rc != 0:
-            _run(["git", "merge", "--abort"], log_path)
+            _run(["git", "merge", "--abort"], log_path, cwd=gate_wt)
             _unstack(gid, tid, f"merge conflict on top of {integration_branch}")
             return 1
 
         print(f"[gate] verify-full after {tid}", file=sys.stderr)
-        rc, _, err = _run(["bash", "-lc", verify_full], log_path)
+        rc, _, err = _run(["bash", "-lc", verify_full], log_path, cwd=gate_wt)
         if rc != 0:
             _unstack(gid, tid, "verify-full failed after merge")
             return 1

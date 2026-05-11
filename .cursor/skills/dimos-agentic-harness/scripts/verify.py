@@ -29,6 +29,7 @@ Exit codes are aggregated: pass iff all three return 0.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -52,6 +53,18 @@ MAX_SUMMARY_CHARS = 200
 
 SCRIPTS = Path(__file__).resolve().parent
 BOARD_PY = SCRIPTS / "board.py"
+
+
+def _load_worktree() -> Any:
+    if "worktree" in sys.modules:
+        return sys.modules["worktree"]
+    spec = importlib.util.spec_from_file_location("worktree", SCRIPTS / "worktree.py")
+    if spec is None or spec.loader is None:
+        raise RuntimeError("could not load worktree.py")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["worktree"] = mod
+    spec.loader.exec_module(mod)
+    return mod
 
 
 @dataclass
@@ -228,15 +241,18 @@ def verify_task(
 ) -> VerifyResult:
     """Run the verification pipeline for one task. Updates board.json. Returns result.
 
-    cwd: working directory to run commands in. Defaults to the harness invocation
-    cwd (i.e. the main repo). Stage 3 (worktree) will pass the per-task worktree.
+    cwd: working directory to run commands in. If None, defaults to the per-task
+    git worktree (created on demand if missing). Tests can pass an explicit cwd
+    to bypass worktree management.
     """
     task = _read_task(task_id)
     attempts = int(task.get("attempts", 0))
     files = list(task.get("files_touched", []))
     modules = _files_to_modules(files)
     test_files = _files_to_test_files(files)
-    cwd = cwd or Path.cwd()
+    if cwd is None:
+        wt_mod = _load_worktree()
+        cwd = wt_mod.ensure_worktree(task_id, task.get("branch") or f"feat/{task_id}")
 
     FEEDBACK_DIR.mkdir(parents=True, exist_ok=True)
     JUNIT_DIR.mkdir(parents=True, exist_ok=True)

@@ -119,12 +119,17 @@ ${FEEDBACK_SUMMARY}
 
 ### Workflow
 
+0. **You are already inside an isolated git worktree** at `${WORKTREE_PATH}`
+   (passed in `action.cwd`). The branch `${TASK_BRANCH}` is checked out and
+   `.venv` is symlinked from the main repo. **Do NOT `cd` out** of this
+   worktree. **Do NOT `git switch` to a different branch.** All work happens
+   here.
 1. `python .cursor/skills/dimos-agentic-harness/scripts/board.py lock-task ${TASK_ID} --pid $$ --timeout-sec 30`
    — exits non-zero if another worker holds the lock; in that case stop and
    tell the parent agent.
-2. `git fetch origin && git switch -C ${TASK_BRANCH} origin/dev` (fresh branch
-   off latest fork:dev). If the branch already exists with prior work, instead
-   `git switch ${TASK_BRANCH} && git rebase origin/dev`.
+2. (Worktree is already on `${TASK_BRANCH}`. If you need to update it on top
+   of latest dev, run `git fetch origin && git rebase origin/dev` from inside
+   the worktree.)
 3. Edit only files in `files_touched` plus tests/docs that those changes
    logically require. If you must touch additional files to make tests pass,
    add them to a "scope creep" note in the commit body.

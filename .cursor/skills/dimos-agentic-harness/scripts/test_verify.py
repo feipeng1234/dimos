@@ -224,7 +224,8 @@ def test_verify_task_pass_no_files(tmp_path: Path, monkeypatch) -> None:
         check=True,
     )
 
-    result = verify.verify_task("tsmoke", "quick")
+    # explicit cwd to bypass worktree management (no git repo in this fixture)
+    result = verify.verify_task("tsmoke", "quick", cwd=tmp_path)
     assert result.passed is True
     assert result.next_status == "VERIFYING"
 

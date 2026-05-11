@@ -83,6 +83,18 @@ def _load_verify() -> Any:
     return mod
 
 
+def _load_worktree() -> Any:
+    if "worktree" in sys.modules:
+        return sys.modules["worktree"]
+    spec = importlib.util.spec_from_file_location("worktree", SCRIPTS / "worktree.py")
+    if spec is None or spec.loader is None:
+        raise RuntimeError("could not load worktree.py")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["worktree"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def _board(*args: str) -> tuple[int, str, str]:
     proc = subprocess.run(
         [sys.executable, str(BOARD), *args],
@@ -378,6 +390,10 @@ def _watch_one_pr(t: dict, gh) -> dict | None:
 
     if view.get("mergedAt"):
         _board("set-status", task_id, "MERGED")
+        try:
+            _load_worktree().cleanup_worktree(task_id)
+        except Exception as exc:
+            print(f"[warn] cleanup_worktree({task_id}) failed: {exc}", file=sys.stderr)
         return {"kind": "merged", "task_id": task_id, "pr_number": pr_number}
 
     state = view.get("mergeStateStatus") or ""
@@ -438,20 +454,26 @@ def _emit_dispatch_actions(board: dict) -> list[dict]:
     A task is eligible if status in {PLANNED, REVISING} AND all `deps` are
     MERGED. Grouped tasks are eligible (each member needs an implementer
     before the gate can run); their group only matters at PR time.
+
+    Side effect: ensures the per-task git worktree exists before emitting
+    the action so the implementer subagent can `cd` into it directly.
     """
     actions: list[dict] = []
     merged_ids = {t["id"] for t in board["tasks"] if t["status"] == "MERGED"}
+    wt_mod = _load_worktree()
     for t in board["tasks"]:
         if t["status"] not in ("PLANNED", "REVISING"):
             continue
         if not all(dep in merged_ids for dep in t.get("deps", [])):
             continue
+        wt_path = wt_mod.ensure_worktree(t["id"], t["branch"])
         actions.append(
             {
                 "kind": "spawn-implementer",
                 "task_id": t["id"],
                 "title": t["title"],
                 "branch": t["branch"],
+                "cwd": str(wt_path),
                 "files_touched": t.get("files_touched", []),
                 "feedback_summary": t.get("feedback_summary", ""),
                 "feedback_log_path": t.get("feedback_log_path", ""),
