@@ -152,67 +152,20 @@ and stop. The parent agent will surface this to the user.
 
 ---
 
-## Verifier — `subagent_type: shell`
+## Verifier — *(no subagent; runs inline in `harness.py tick`)*
 
-You are the Verifier subagent for task `${TASK_ID}`. Run the verification
-command, parse the output, and write a structured feedback file.
+Verification is implemented as a synchronous Python function
+(`scripts/verify.py:verify_task`) called directly from `tick`. There is no
+Verifier subagent prompt anymore. The pipeline is fixed:
 
-### Inputs
+1. `ruff check ${files_touched}`
+2. `mypy ${derived modules}`
+3. `pytest --junit-xml ${derived test_files}` (or `dimos/` for full mode)
 
-- task: `${TASK_ID}`
-- branch: `${TASK_BRANCH}` (already pushed)
-- mode: `${VERIFY_MODE}` — either `quick` or `full`
-- attempts so far: `${ATTEMPTS}` (out of 5 max)
-
-### Commands
-
-- quick (run ONLY when `${VERIFY_MODE}=quick`):
-  ```
-  ${HARNESS_VERIFY_QUICK_CMD:-uv run ruff check {files} && uv run mypy {modules} && uv run pytest {test_files}}
-  ```
-  Substitute `{files}` = `${TASK_FILES_TOUCHED}`, `{modules}` = `${TASK_MODULES}`,
-  `{test_files}` = `${TASK_TEST_FILES}`.
-
-- full (run ONLY when `${VERIFY_MODE}=full`):
-  ```
-  ${HARNESS_VERIFY_FULL_CMD:-./bin/pytest-fast && uv run ruff check . && uv run mypy dimos/ && uv run pre-commit run --files {files}}
-  ```
-  If `${TASK_TOUCHES_BLUEPRINTS}=true`, append:
-  ```
-  && uv run pytest dimos/robot/test_all_blueprints_generation.py
-  ```
-
-### Workflow
-
-1. `git fetch origin && git switch ${TASK_BRANCH}` (or `git checkout` if
-   detached works fine).
-2. Run the appropriate command, **capture full stdout + stderr to**
-   `${FEEDBACK_LOG_PATH}` (default `.harness/feedback/${TASK_ID}-r${ATTEMPTS}.log`).
-3. Parse the result:
-   - exit code 0 + no "ERROR" / "FAIL" / "fail" lines → status `pass`
-   - else → status `fail`. Extract the top 3 most informative failing items
-     (test name, file:line, error class). Compose a `feedback_summary` of
-     ≤ 200 characters: "{n_failures} failures: <top item> | <2nd> | <3rd>".
-4. Write the feedback to the board:
-   ```
-   python .cursor/skills/dimos-agentic-harness/scripts/board.py \
-     set-status ${TASK_ID} ${NEXT_STATUS} \
-     --feedback-summary "<≤200 chars>" \
-     --feedback-log ${FEEDBACK_LOG_PATH}
-   ```
-   - on pass + mode=quick → `${NEXT_STATUS}=VERIFYING` (parent will then
-     re-spawn you with mode=full)
-   - on pass + mode=full → `${NEXT_STATUS}=READY`
-   - on fail + attempts < 5 → `${NEXT_STATUS}=REVISING` and `--bump-attempts`
-   - on fail + attempts == 5 → `${NEXT_STATUS}=BLOCKED`
-     and `--blocked-reason "verifier exhausted at attempt 5"`
-5. Terminate with one final message of the form:
-   "verifier ${TASK_ID} ${VERIFY_MODE} ${STATUS} (attempts=${ATTEMPTS})".
-
-You are NOT allowed to edit code or commit. You only run, parse, and write
-the feedback. If the command itself errors out (env broken, venv missing),
-write `feedback_summary="env error: <last stderr line>"` and set status to
-`BLOCKED` with `--blocked-reason "verifier env error"`.
+Pytest failures are extracted from junit XML (top 3). The verifier writes
+`feedback_summary` (≤200 chars) and the next status (`VERIFYING` /
+`READY` / `REVISING` / `BLOCKED`) to the board automatically. See
+`scripts/verify.py` for the decision table.
 
 ---
 

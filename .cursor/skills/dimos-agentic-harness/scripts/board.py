@@ -114,6 +114,7 @@ def _empty_task(task_id: str, **overrides: Any) -> dict[str, Any]:
         "group": None,
         "files_touched": [],
         "status": "PLANNED",
+        "verify_stage": None,
         "attempts": 0,
         "feedback_summary": "",
         "feedback_log_path": str(FEEDBACK_DIR / f"{task_id}.log"),
@@ -326,6 +327,9 @@ def set_status(
     pr_url: str = typer.Option("", "--pr-url"),
     pr_number: int = typer.Option(0, "--pr-number"),
     opened_at: str = typer.Option("", "--opened-at"),
+    verify_stage: str = typer.Option(
+        "", "--verify-stage", help="One of '', 'quick', 'full'. Empty leaves the field unchanged."
+    ),
     bump_attempts: bool = typer.Option(False, "--bump-attempts"),
     bump_babysit_attempts: bool = typer.Option(False, "--bump-babysit-attempts"),
     bump_rebase_fails: bool = typer.Option(False, "--bump-rebase-fails"),
@@ -334,6 +338,10 @@ def set_status(
     """Mutate a task's status and metadata. All fields optional."""
     if status not in VALID_STATUSES:
         raise typer.BadParameter(f"invalid status {status}. valid: {sorted(VALID_STATUSES)}")
+    if verify_stage not in ("", "quick", "full"):
+        raise typer.BadParameter(
+            f"invalid verify_stage {verify_stage!r}. expected '', 'quick', 'full'"
+        )
     with _board_lock():
         board = _read_board_locked()
         t = _find_task(board, task_id)
@@ -352,6 +360,8 @@ def set_status(
             t["pr_number"] = pr_number
         if opened_at:
             t["opened_at"] = opened_at
+        if verify_stage:
+            t["verify_stage"] = verify_stage
         if bump_attempts:
             t["attempts"] += 1
         if bump_babysit_attempts:

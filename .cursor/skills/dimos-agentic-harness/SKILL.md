@@ -1,6 +1,6 @@
 ---
 name: dimos-agentic-harness
-description: Dimos-specific fire-and-forget multi-agent harness for the feipeng1234/dimos fork sandbox. Plans tasks, dispatches Implementer/Verifier subagents in a feedback loop, gates PRs via independent or group-integration paths (PR base=feipeng1234/dimos:dev), then babysits PRs to merge with bot-comment auto-resolve. Use when working in the dimos repo and the user wants to drop a multi-task request and walk away (Cursor must stay open). Trigger words: harness, fire-and-forget, multi-task, stacked PR, 无人值守, 多任务编排, 自动合并, 一句话需求.
+description: Dimos-specific fire-and-forget multi-agent harness for the feipeng1234/dimos fork sandbox. Plans tasks, dispatches Implementer subagents in a feedback loop with an inline verifier (ruff/mypy/pytest), gates PRs via independent or group-integration paths (PR base=feipeng1234/dimos:dev), then babysits PRs to merge with bot-comment auto-resolve. Use when working in the dimos repo and the user wants to drop a multi-task request and walk away (Cursor must stay open). Trigger words: harness, fire-and-forget, multi-task, stacked PR, 无人值守, 多任务编排, 自动合并, 一句话需求.
 ---
 
 # dimos-agentic-harness
@@ -172,22 +172,13 @@ The implementer is responsible for `lock-task`/`unlock-task` and `pid-set`/
 `VERIFYING`. If the subagent crashed mid-edit, the next `tick` will detect
 the dead pid and downgrade `IMPLEMENTING → PLANNED`.
 
-### `spawn-verifier`
-Substitute into `ROLES.md/Verifier` with `mode={action.mode}` (quick or full).
-Spawn `Task(subagent_type="shell", prompt=<filled>)`. The verifier sets the
-next status itself (`VERIFYING` for quick-pass, `READY` for full-pass,
-`REVISING` for fail with retries left, `BLOCKED` for fail at attempt 5).
-
-If `mode=quick` returns pass, you must immediately re-tick — the next tick
-will emit `spawn-verifier` with `mode=full` (because task is still in
-`VERIFYING`). Wait, that's wrong: the verifier transitions to a state that
-makes tick emit the next stage. Currently the harness emits
-`spawn-verifier:quick` when status is `IMPLEMENTING`. After quick passes the
-verifier sets the task to `VERIFYING` (still). The next tick should emit
-`spawn-verifier:full`. **TODO for v0.3**: distinguish IMPLEMENTING-done-quick
-vs IMPLEMENTING-done-full via a substate flag. For v0.2: when a verifier
-returns, manually re-spawn the verifier with `mode=full` if the previous mode
-was `quick` and it passed.
+### Verification *(no action — runs inline)*
+Verification is no longer dispatched as an action. `tick` calls
+`scripts/verify.py:verify_task` synchronously for any task in
+`IMPLEMENTING` (mode=quick) or `VERIFYING` with `verify_stage="quick"`
+(mode=full). The state machine is closed in code; the parent agent does
+not have to remember "what stage was last". Results appear in the
+`verifier_events` field of the tick JSON.
 
 ### `open-mr`
 Run synchronously:
@@ -287,10 +278,13 @@ Terminal: `MERGED`, `BLOCKED`, `READY_FOR_MAINTAINER`.
 ## Environment variables
 
 - `HARNESS_POLL_INTERVAL_SEC` (default `300`) — sleep between watcher polls.
-- `HARNESS_VERIFY_QUICK_CMD` (default in ROLES.md) — quick verify command
-  template. `{files}` / `{modules}` / `{test_files}` are substituted.
-- `HARNESS_VERIFY_FULL_CMD` (default in ROLES.md) — full verify command
-  template.
+- `HARNESS_VERIFY_FULL_CMD` (group_gate.py) — full verify command for the
+  integration gate. Default: `./bin/pytest-fast && uv run ruff check . &&
+  uv run mypy dimos/ && uv run pre-commit run --all-files`.
+
+The per-task quick/full verifier is hard-coded in `scripts/verify.py`
+(`ruff check {files}` → `mypy {modules}` → `pytest --junit-xml {tests}`).
+To customize, edit that file.
 
 ---
 
@@ -300,6 +294,8 @@ Terminal: `MERGED`, `BLOCKED`, `READY_FOR_MAINTAINER`.
 - `ROLES.md` — subagent prompt templates.
 - `scripts/_gh.py` — single point of contact for `gh` CLI.
 - `scripts/board.py` — JSON state CRUD with fcntl locking.
+- `scripts/verify.py` — programmatic verifier (ruff + mypy + pytest, junit-XML
+  parsed for failure summaries). Called inline by `harness.py tick`.
 - `scripts/group_gate.py` — group integration test runner.
 - `scripts/open_mr.py` — PR creation + auto-merge enable.
 - `scripts/harness.py` — preflight, plan-init, tick, resume, report.

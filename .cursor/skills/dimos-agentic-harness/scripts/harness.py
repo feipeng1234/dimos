@@ -70,6 +70,15 @@ def _load_gh():
     return mod
 
 
+def _load_verify() -> Any:
+    spec = importlib.util.spec_from_file_location("verify", SCRIPTS / "verify.py")
+    if spec is None or spec.loader is None:
+        raise RuntimeError("could not load verify.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def _board(*args: str) -> tuple[int, str, str]:
     proc = subprocess.run(
         [sys.executable, str(BOARD), *args],
@@ -448,22 +457,36 @@ def _emit_dispatch_actions(board: dict) -> list[dict]:
     return actions
 
 
-def _emit_verifier_actions(board: dict) -> list[dict]:
-    actions: list[dict] = []
-    for t in board["tasks"]:
-        if t["status"] != "IMPLEMENTING":
+def _run_verifier_inline(board: dict) -> list[dict]:
+    """Synchronously verify any IMPLEMENTING / VERIFYING-quick-done tasks.
+
+    Returns a list of `{"kind": "verified", ...}` events for the heartbeat /
+    parent-agent log. Verification is not an action the parent agent has to
+    dispatch; it runs inside `tick` itself so the state machine is closed.
+    """
+    events: list[dict] = []
+    verify = _load_verify()
+    for t in list(board["tasks"]):
+        status = t["status"]
+        stage = t.get("verify_stage")
+        if status == "IMPLEMENTING":
+            mode = "quick"
+        elif status == "VERIFYING" and stage == "quick":
+            mode = "full"
+        else:
             continue
-        actions.append(
+        result = verify.verify_task(t["id"], mode)
+        events.append(
             {
-                "kind": "spawn-verifier",
-                "task_id": t["id"],
-                "branch": t["branch"],
-                "mode": "quick",
-                "attempts": t.get("attempts", 0),
-                "files_touched": t.get("files_touched", []),
+                "kind": "verified",
+                "task_id": result.task_id,
+                "mode": result.mode,
+                "passed": result.passed,
+                "next_status": result.next_status,
+                "summary": result.summary,
             }
         )
-    return actions
+    return events
 
 
 def _emit_pr_open_actions(board: dict) -> list[dict]:
@@ -526,9 +549,12 @@ def cmd_tick(verbose_resume: bool = False) -> int:
             actions.append(action)
     board = _read_board_json()
 
+    verifier_events = _run_verifier_inline(board)
+    if verifier_events:
+        board = _read_board_json()
+
     actions.extend(_emit_pr_open_actions(board))
     actions.extend(_emit_group_gate_actions(board))
-    actions.extend(_emit_verifier_actions(board))
     actions.extend(_emit_dispatch_actions(board))
 
     if not actions:
@@ -544,8 +570,19 @@ def cmd_tick(verbose_resume: bool = False) -> int:
                 }
             ]
 
-    _heartbeat("tick", {"resume_events": resume_events, "actions": actions})
-    print(json.dumps({"resume_events": resume_events, "actions": actions}))
+    _heartbeat(
+        "tick",
+        {"resume_events": resume_events, "verifier_events": verifier_events, "actions": actions},
+    )
+    print(
+        json.dumps(
+            {
+                "resume_events": resume_events,
+                "verifier_events": verifier_events,
+                "actions": actions,
+            }
+        )
+    )
     return 0
 
 
