@@ -422,7 +422,7 @@ class UnitreeWebRTCConnection(Resource):
             async def async_disconnect() -> None:
                 try:
                     await self.conn.disconnect()
-                except:
+                except Exception:
                     pass
 
             if hasattr(self, "loop") and self.loop.is_running():
