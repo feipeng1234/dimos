@@ -39,9 +39,44 @@ EXPECTED_GH_USER = "feipeng1234"
 MERGEABLE_STATE_RETRIES = 6
 MERGEABLE_STATE_INTERVAL_SEC = 5.0
 
+_VALID_BRANCH_PREFIXES = (
+    "feat/",
+    "fix/",
+    "refactor/",
+    "docs/",
+    "test/",
+    "chore/",
+    "perf/",
+)
+
 
 class GhError(RuntimeError):
     """Wraps non-zero gh exits with stderr surfaced."""
+
+
+def _assert_branch_name(branch: str) -> None:
+    if not any(branch.startswith(p) for p in _VALID_BRANCH_PREFIXES):
+        raise GhError(
+            f"branch name {branch!r} does not match required prefix "
+            f"({'|'.join(_VALID_BRANCH_PREFIXES)})"
+        )
+
+
+def _assert_origin_is_fork(cwd: str | None = None) -> None:
+    proc = subprocess.run(
+        ["git", "remote", "get-url", "origin"],
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise GhError(f"`git remote get-url origin` failed: {proc.stderr.strip()}")
+    url = proc.stdout.strip()
+    if DIMOS_FORK not in url:
+        raise GhError(
+            f"refusing to push: origin remote is {url!r}, expected to contain {DIMOS_FORK!r}"
+        )
 
 
 def _run(
@@ -72,12 +107,21 @@ def assert_active_account() -> None:
         )
 
 
-def push_branch(branch: str, force: bool = True) -> None:
-    """git push the local branch to the fork's remote."""
+def push_branch(branch: str, force: bool = True, cwd: str | None = None) -> None:
+    """git push the local branch to the fork's remote.
+
+    Invariants enforced before invoking git:
+    - branch name must start with feat/|fix/|refactor/|docs/|test/|chore/|perf/
+    - the cwd's `origin` remote must point to the feipeng1234/dimos fork
+
+    `cwd` selects the working tree (i.e. a worktree) to push from.
+    """
+    _assert_branch_name(branch)
+    _assert_origin_is_fork(cwd)
     args = ["push", "origin", branch]
     if force:
         args.append("--force-with-lease")
-    proc = subprocess.run(["git", *args], capture_output=True, text=True, check=False)
+    proc = subprocess.run(["git", *args], capture_output=True, text=True, check=False, cwd=cwd)
     if proc.returncode != 0:
         raise GhError(f"git push failed: {proc.stderr}")
 
@@ -211,7 +255,11 @@ def _cli(argv: list[str]) -> int:
         if cmd == "push":
             branch = rest[0]
             force = "--no-force" not in rest
-            push_branch(branch, force=force)
+            cwd: str | None = None
+            for i, a in enumerate(rest):
+                if a == "--cwd" and i + 1 < len(rest):
+                    cwd = rest[i + 1]
+            push_branch(branch, force=force, cwd=cwd)
             return 0
         print(f"unknown subcommand: {cmd}", file=sys.stderr)
         return 2

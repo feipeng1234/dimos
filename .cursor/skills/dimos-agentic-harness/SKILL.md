@@ -60,34 +60,61 @@ the rest of the tasks.
 
 ---
 
-## Hard rules (violating any of these breaks fire-and-forget)
+## Hard rules
 
-1. **No `AskQuestion` calls.** The user is not in front of the screen.
-2. **No `gh` calls outside of `scripts/_gh.py`.** Direct `gh pr create ...`
-   is forbidden — the wrapper enforces `--repo feipeng1234/dimos`.
-3. **No manual board.json edits.** Always use `scripts/board.py <subcommand>`.
-4. **PR base is always `dev`** (which means `feipeng1234/dimos:dev` because
-   `_gh.py` forces `--repo feipeng1234/dimos`). Stacked PRs may set a member
-   branch as base of another member's PR — `open_mr.py --stacked` handles this.
-5. **Conflict resolution is `rebase-and-regenerate`.** `git rebase dev` then
-   re-implement conflicting hunks based on the original task intent. **Never**
-   blindly take base; never blindly take ours. After 2 consecutive failures
-   (`consecutive_rebase_fails == 2`), set the task to `BLOCKED`.
-6. **Never dismiss `CHANGES_REQUESTED` reviews via `gh api .../dismissals`.**
-   Bot reviews (codecov, bugbot, coderabbit, etc.) are auto-resolved by the
-   babysitter subagent. Human reviews escalate back to the implementer
-   subagent, which addresses them and replies on the PR.
-7. **Verifier limits**: max 5 attempts (`attempts == 5` → `BLOCKED`).
-8. **Babysit limits**: max 10 attempts (`babysit_attempts == 10` → `BLOCKED`)
-   OR 24h PR age (whichever first).
-9. **All branch writes go through a per-task lock**: `board.py lock-task <id>`
-   before editing/rebasing/pushing; `board.py unlock-task <id>` after.
-10. **All worker subagents record their pid**: `board.py pid-set <id> <pid>`
-    on entry, `board.py pid-clear <id>` on exit. This enables crash-safe
-    `harness.py resume`.
-11. **Group BLOCKED auto-unstacks**: the harness already does this — when a
-    grouped task transitions to `BLOCKED`, `board.py unstack <gid> --blame
-    <tid>` is called automatically by the gate logic.
+These split into two groups: **mechanically enforced** (the harness will refuse
+or block on violation) and **honor system** (relies on parent / subagent
+discipline; the harness cannot prevent it).
+
+### Mechanically enforced
+
+These are guaranteed by code: a hook, an `_gh.py` invariant, or harness logic.
+
+- **M1. Push only to `feipeng1234/dimos`, branch must be prefixed.** The
+  installed `pre-push` git hook (`harness.py preflight` installs it
+  automatically) blocks any push to a remote that is not the fork or to a
+  branch that does not start with `feat/|fix/|refactor/|docs/|test/|chore/|
+  perf/`. Pushes to `dev` / `main` are blocked outright. `_gh.push_branch`
+  performs the same checks before invoking git, so violations fail fast with
+  a clear error.
+- **M2. PR base is always `dev` on the fork.** All `_gh.py` PR commands force
+  `--repo feipeng1234/dimos --base dev`. The base cannot be overridden by a
+  subagent.
+- **M3. Verifier 5-attempt cap, babysit 10-attempt cap, PR 24h cap, rebase
+  2-fail cap.** The harness transitions to `BLOCKED` automatically when any
+  cap is hit; subagents cannot bypass this by retrying.
+- **M4. Per-task git worktree isolation.** Every implementer / verifier runs
+  in `.harness/worktrees/<task_id>/`; concurrent tasks cannot touch each
+  other's working tree or the main repo's `git switch` state.
+- **M5. Group BLOCKED auto-unstacks.** When a grouped task transitions to
+  `BLOCKED`, `board.py unstack <gid> --blame <tid>` runs automatically.
+
+### Honor system
+
+These the harness cannot enforce — they depend on parent agent / subagent
+discipline. Violations will not be caught at runtime, so they are written
+loudly here and at the top of each subagent's prompt.
+
+- **H1. No `AskQuestion` calls from the parent agent.** The user is not in
+  front of the screen.
+- **H2. No `gh` invocations outside of `scripts/_gh.py`.** Direct `gh pr
+  create ...` from a subagent bypasses M1/M2's invariants. Always go through
+  the wrapper.
+- **H3. No manual `board.json` edits.** Always use
+  `scripts/board.py <subcommand>`. (chmod-protecting the file does not
+  actually stop a subagent from changing the mode and writing — relying on
+  this is would be security theater.)
+- **H4. Conflict resolution is `rebase-and-regenerate`.** `git rebase dev`
+  then re-implement conflicting hunks based on the original task intent.
+  **Never** blindly take base; never blindly take ours.
+- **H5. Never dismiss `CHANGES_REQUESTED` reviews via
+  `gh api .../dismissals`.** Bot reviews (codecov, bugbot, coderabbit, etc.)
+  are auto-resolved by the babysitter subagent. Human reviews escalate back
+  to the implementer.
+- **H6. Per-task lock + pid-set/pid-clear for resume.** `board.py lock-task
+  <id>` before editing/pushing; `board.py unlock-task <id>` after.
+  `board.py pid-set <id> <pid>` on entry, `board.py pid-clear <id>` on exit
+  — this enables crash-safe `harness.py resume`.
 
 ---
 
@@ -315,4 +342,10 @@ To customize, edit that file.
 - `scripts/group_gate.py` — group integration test runner (uses a
   `gate-<gid>` worktree to avoid touching the main working tree).
 - `scripts/open_mr.py` — PR creation + auto-merge enable.
-- `scripts/harness.py` — preflight, plan-init, tick, resume, report.
+- `scripts/install_hooks.py` — installs `.cursor/skills/.../hooks/pre-push`
+  into `.git/hooks/` so push invariants are enforced even if a subagent
+  bypasses `_gh.py`.
+- `hooks/pre-push` — git hook: blocks push to non-fork remotes / dev / main /
+  bad branch prefixes.
+- `scripts/harness.py` — preflight, plan-init, tick, resume, report. Preflight
+  installs the pre-push hook automatically when all 6 checks pass.

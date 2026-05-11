@@ -268,6 +268,22 @@ def cmd_preflight() -> int:
         print(f"  [{marker}] {name.ljust(width)}  {'' if ok else hint}")
         if not ok:
             all_ok = False
+
+    if all_ok:
+        print("")
+        print("installing git hooks (pre-push fork-only enforcement):")
+        try:
+            ih_spec = importlib.util.spec_from_file_location(
+                "install_hooks", SCRIPTS / "install_hooks.py"
+            )
+            assert ih_spec and ih_spec.loader
+            ih = importlib.util.module_from_spec(ih_spec)
+            ih_spec.loader.exec_module(ih)
+            for line in ih.install():
+                print(line)
+        except Exception as exc:
+            print(f"  [WARN] hook install failed: {exc}")
+
     return 0 if all_ok else 1
 
 
