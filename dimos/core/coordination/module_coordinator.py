@@ -163,7 +163,7 @@ class ModuleCoordinator(Resource):
 
         try:
             safe_thread_map(list(specs_by_deployment.keys()), _deploy_group)
-        except:
+        except BaseException:
             self.stop()
             raise
 
@@ -190,7 +190,7 @@ class ModuleCoordinator(Resource):
 
         try:
             safe_thread_map(modules, lambda m: m.build())
-        except:
+        except BaseException:
             self.stop()
             raise
 
