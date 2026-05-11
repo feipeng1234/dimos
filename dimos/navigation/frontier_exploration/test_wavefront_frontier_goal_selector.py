@@ -36,7 +36,7 @@ def explorer():
     # Cleanup after test
     try:
         explorer.stop()
-    except:
+    except Exception:
         pass
 
 
@@ -159,8 +159,6 @@ def test_frontier_detection_with_office_lidar(explorer, quick_costmap) -> None:
     else:
         print("No frontiers detected - map may be fully explored or parameters too restrictive")
 
-    explorer.stop()  # TODO: this should be a in try-finally
-
 
 def test_exploration_goal_selection(explorer) -> None:
     """Test the complete exploration goal selection pipeline."""
@@ -193,8 +191,6 @@ def test_exploration_goal_selection(explorer) -> None:
     else:
         print("No exploration goal selected - map may be fully explored")
 
-    explorer.stop()  # TODO: this should be a in try-finally
-
 
 def test_exploration_session_reset(explorer) -> None:
     """Test exploration session reset functionality."""
@@ -224,7 +220,6 @@ def test_exploration_session_reset(explorer) -> None:
     assert explorer.no_gain_counter == 0, "No-gain counter should be reset"
 
     print("Exploration session reset successfully")
-    explorer.stop()  # TODO: this should be a in try-finally
 
 
 def test_frontier_ranking(explorer) -> None:
@@ -269,8 +264,6 @@ def test_frontier_ranking(explorer) -> None:
         print(f"Total frontiers detected: {len(frontiers1)}")
     else:
         print("No frontiers found for ranking test")
-
-    explorer.stop()  # TODO: this should be a in try-finally
 
 
 def test_exploration_with_no_gain_detection() -> None:
