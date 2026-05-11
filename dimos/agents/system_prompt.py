@@ -41,6 +41,9 @@ For outdoor/GPS-based navigation:
 - `where_am_i` gives your current street/area and nearby landmarks
 - `map_query` finds places on the OSM map by description and returns coordinates
 
+## Dance / Celebration
+- For dance / 跳舞 / celebration requests, call `dance` directly — do not chain multiple `execute_sport_command` calls.
+
 # BEHAVIOR
 
 ## Be Proactive
