@@ -26,6 +26,7 @@ Subcommands:
     plan-init "<needs>"            — bootstrap `.harness/` and stash the needs string
     tick                           — observe + advance state; emit JSON action list
     resume                         — same as tick but logs dead-worker downgrades
+    replan-load <plan.yaml>        — ingest a re-planner output (calls board append-plan)
     report                         — write `.harness/report.md`
     status                         — pass-through to `board.py status`
 
@@ -61,8 +62,12 @@ MAX_REBASE_FAILS = 2
 MAX_REVIEW_ITERATIONS = 2
 
 REVIEWER_MODEL = "gpt-5.5-medium"
+REPLANNER_MODEL = "gpt-5.5-medium"
 
 TERMINAL = {"MERGED", "BLOCKED", "READY_FOR_MAINTAINER"}
+
+REPLAN_OUTPUT_RELATIVE = ".harness/replan.yaml"
+NO_PROGRESS_HALT = 2
 
 
 def _load_gh():
@@ -630,6 +635,38 @@ def _all_terminal(board: dict) -> bool:
     return all(t["status"] in TERMINAL for t in board["tasks"])
 
 
+def _decide_terminal_action(board: dict[str, Any]) -> dict[str, Any]:
+    """Pick the right action when every task is terminal.
+
+    Multi-round flow: terminal does NOT immediately mean done. We may still
+    have rounds left in the budget, so we ask the Re-planner. The Re-planner
+    decides goal-achieved / more-work / no-progress; only when meta says
+    we're truly out of options do we emit `done`.
+    """
+    meta = board.get("meta") or {}
+    if meta.get("goal_achieved"):
+        return {"kind": "done", "reason": "goal-achieved"}
+    round_num = int(meta.get("round", 1))
+    max_rounds = int(meta.get("max_rounds", 10))
+    if round_num >= max_rounds:
+        return {"kind": "done", "reason": f"max_rounds={max_rounds} reached"}
+    no_progress = int(meta.get("no_progress_rounds", 0))
+    if no_progress >= NO_PROGRESS_HALT:
+        return {"kind": "done", "reason": f"no_progress_rounds={no_progress} reached halt"}
+    return {
+        "kind": "spawn-replanner",
+        "round": round_num,
+        "max_rounds": max_rounds,
+        "per_round_cap": int(meta.get("per_round_cap", 3)),
+        "no_progress_rounds": no_progress,
+        "needs_path": str(NEEDS_PATH),
+        "replan_output_path": REPLAN_OUTPUT_RELATIVE,
+        "subagent_type": "generalPurpose",
+        "readonly": False,
+        "model": REPLANNER_MODEL,
+    }
+
+
 def _tick_once(verbose_resume: bool) -> tuple[list[dict], list[dict], list[dict]]:
     """Single non-blocking pass. Returns (resume_events, verifier_events, actions).
 
@@ -668,7 +705,7 @@ def _tick_once(verbose_resume: bool) -> tuple[list[dict], list[dict], list[dict]
 
     if not actions:
         if _all_terminal(board):
-            actions = [{"kind": "done"}]
+            actions = [_decide_terminal_action(board)]
         else:
             actions = [
                 {
@@ -719,6 +756,35 @@ def cmd_resume() -> int:
     return cmd_tick(verbose_resume=True)
 
 
+# --- replan-load ----------------------------------------------------------
+
+
+def cmd_replan_load(plan_yaml: str) -> int:
+    """Ingest the Re-planner subagent's output and advance round state.
+
+    Thin wrapper around `board.py append-plan`. We expose this through the
+    harness so the parent agent only has to learn one entry-point and the
+    heartbeat / status log records the transition.
+    """
+    p = Path(plan_yaml)
+    if not p.exists():
+        print(f"replan plan file not found: {plan_yaml}", file=sys.stderr)
+        return 2
+    rc, out, err = _board("append-plan", str(p))
+    if out:
+        sys.stdout.write(out)
+    if err:
+        sys.stderr.write(err)
+    if rc != 0:
+        return rc
+    _heartbeat("replan-load", {"plan_yaml": str(p), "stdout": out.strip()})
+    try:
+        p.unlink()
+    except OSError:
+        pass
+    return 0
+
+
 # --- report ---------------------------------------------------------------
 
 
@@ -735,6 +801,28 @@ def cmd_report() -> int:
     lines.append("")
     lines.append(f"Generated: {_now_iso()}")
     lines.append("")
+    meta = board.get("meta") or {}
+    if meta:
+        lines.append("## Multi-round progress")
+        lines.append("")
+        lines.append(f"- rounds executed: {meta.get('round', 1)} / {meta.get('max_rounds', '?')}")
+        lines.append(f"- goal_achieved: {meta.get('goal_achieved', False)}")
+        lines.append(f"- consecutive no-progress rounds: {meta.get('no_progress_rounds', 0)}")
+        lines.append("")
+        history = meta.get("history") or []
+        if history:
+            lines.append("### Round-by-round")
+            lines.append("")
+            for entry in history:
+                verdict = entry.get("replanner_verdict", "—")
+                merged = len(entry.get("tasks_merged", []))
+                blocked = len(entry.get("tasks_blocked", []))
+                planned = len(entry.get("tasks_in_round", []))
+                lines.append(
+                    f"- round {entry.get('round')}: planned={planned} merged={merged} "
+                    f"blocked={blocked} verdict={verdict}"
+                )
+            lines.append("")
     lines.append("## Summary")
     lines.append("")
     counts = {s: len(ts) for s, ts in by_status.items()}
@@ -798,6 +886,11 @@ def main(argv: list[str]) -> int:
     if cmd == "resume":
         loop = "--no-loop" not in rest
         return cmd_tick(verbose_resume=True, loop=loop)
+    if cmd == "replan-load":
+        if len(rest) != 1:
+            print("usage: harness.py replan-load <plan.yaml>", file=sys.stderr)
+            return 2
+        return cmd_replan_load(rest[0])
     if cmd == "report":
         return cmd_report()
     if cmd == "status":

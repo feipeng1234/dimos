@@ -81,8 +81,12 @@ These are guaranteed by code: a hook, an `_gh.py` invariant, or harness logic.
   `--repo feipeng1234/dimos --base dev`. The base cannot be overridden by a
   subagent.
 - **M3. Verifier 5-attempt cap, babysit 10-attempt cap, PR 24h cap, rebase
-  2-fail cap.** The harness transitions to `BLOCKED` automatically when any
-  cap is hit; subagents cannot bypass this by retrying.
+  2-fail cap, multi-round caps (`max_rounds=10`, `per_round_cap=3`,
+  `no_progress_rounds≥2 ⇒ halt`).** The harness transitions to `BLOCKED`
+  automatically when any per-task cap is hit; multi-round caps are checked
+  inside `_decide_terminal_action` and produce `{"kind": "done", "reason":
+  "..."}` so the loop can never grow unbounded. Subagents cannot bypass
+  any of these by retrying.
 - **M4. Per-task git worktree isolation.** Every implementer / verifier runs
   in `.harness/worktrees/<task_id>/`; concurrent tasks cannot touch each
   other's working tree or the main repo's `git switch` state.
@@ -120,7 +124,37 @@ loudly here and at the top of each subagent's prompt.
 
 ## Playbook
 
-### Phase 1 — Plan (one-shot)
+The pipeline is a **multi-round loop**: round 1 is planned by the round-1
+Planner; round N>1 is planned by the Re-planner. Within each round we run
+up to `per_round_cap` (default 3) tasks concurrently. The loop terminates
+when the Re-planner says `goal_achieved`, or when one of the safety caps
+fires (`max_rounds`, `no_progress_rounds`). Concretely:
+
+```
+preflight → plan-init → spawn-planner → load plan.yaml
+                                              ↓
+   ┌──────────────────── tick loop ──────────────────┐
+   │                                                  │
+   │   (per-task) Implementer → Verifier → Reviewer → │
+   │              open-mr → Babysitter → MERGED       │
+   │                                                  │
+   └─── all tasks terminal? ─── no ──────────────────┘
+                  │ yes
+                  ↓
+       _decide_terminal_action:
+         goal_achieved? → done
+         round ≥ max?    → done
+         strikes ≥ 2?    → done
+         else            → spawn-replanner
+                  │
+                  ↓ (replanner returns)
+       harness.py replan-load .harness/replan.yaml
+                  │
+                  ↓
+       back to tick loop (with new PLANNED tasks if any)
+```
+
+### Phase 1 — Round-1 plan (one-shot)
 
 ```bash
 cd /home/lenovo/dimos
@@ -128,24 +162,25 @@ cd /home/lenovo/dimos
 .venv/bin/python .cursor/skills/dimos-agentic-harness/scripts/harness.py plan-init "${USER_NEEDS}"
 ```
 
-`plan-init` writes `.harness/needs.txt` and emits one action:
+`plan-init` writes `.harness/needs.txt` (the durable **final goal** that the
+Re-planner re-reads every round) and emits one action:
 `{"kind": "spawn-planner", "needs": "...", ...}`.
 
 **Spawn the Planner subagent**:
 - `Task(subagent_type="generalPurpose", readonly=true, prompt=<ROLES.md/Planner with USER_NEEDS substituted>)`
-- The Planner writes `.harness/plan.yaml` and `.harness/plan.md`.
+- The Planner writes `.harness/plan.yaml` (≤3 tasks) and `.harness/plan.md`.
 - When it returns, you load the plan into the board:
 
 ```bash
 .venv/bin/python .cursor/skills/dimos-agentic-harness/scripts/board.py load .harness/plan.yaml
 ```
 
-If the Planner failed to produce `plan.yaml`, set every existing task (none
-yet — just abort) and report the failure to the user.
+If the Planner failed to produce `plan.yaml`, abort and report the failure
+to the user.
 
 ### Phase 2 — Tick loop
 
-This is the main loop. Repeat until `tick` returns `{"kind": "done"}`:
+Main loop. Repeat until `tick` returns `{"kind": "done"}`:
 
 ```bash
 .venv/bin/python .cursor/skills/dimos-agentic-harness/scripts/harness.py tick
@@ -155,18 +190,34 @@ The output is `{"resume_events": [...], "verifier_events": [...], "actions":
 [{"kind": ..., ...}, ...]}`. **`tick` blocks internally on `wait`** — it
 sleeps and re-evaluates until there is real work or all tasks are terminal.
 You will only ever see actionable kinds (`spawn-implementer`, `spawn-reviewer`,
-`open-mr`, `gate-group`, `spawn-babysitter`, `merged`, `watch-error`) or the
-final `done`.
+`open-mr`, `gate-group`, `spawn-babysitter`, `spawn-replanner`, `merged`,
+`watch-error`) or the final `done`.
 
-For each action, dispatch to the matching handler (see the **Action handlers**
-section below). Some actions you execute synchronously via `Shell`; others
-spawn `Task` subagents and you wait for them to return before re-ticking.
+For each action, dispatch to the matching handler (see **Action handlers**
+below). Some actions you execute synchronously via `Shell`; others spawn
+`Task` subagents and you wait for them to return before re-ticking.
 
 **After every action completes**, immediately call `tick` again — do not
 batch up changes. The board is the source of truth; ticking re-evaluates from
 scratch.
 
-### Phase 3 — Report
+### Phase 3 — Re-plan (between rounds)
+
+When `tick` emits `{"kind": "spawn-replanner", ...}` it means every task is
+terminal but the harness still has rounds left and the goal is not flagged
+achieved. Spawn the Re-planner subagent (`ROLES.md/Re-planner` with the
+action's fields substituted), then ingest its output:
+
+```bash
+.venv/bin/python .cursor/skills/dimos-agentic-harness/scripts/harness.py replan-load .harness/replan.yaml
+```
+
+`replan-load` calls `board.py append-plan`, which either flips
+`meta.goal_achieved`, appends ≤3 new tasks and bumps `meta.round`, or bumps
+`meta.no_progress_rounds`. Then re-tick — new PLANNED tasks (if any) drive
+the next round; otherwise the next `tick` will emit `done`.
+
+### Phase 4 — Report
 
 When `tick` returns `done`:
 
@@ -174,8 +225,9 @@ When `tick` returns `done`:
 .venv/bin/python .cursor/skills/dimos-agentic-harness/scripts/harness.py report
 ```
 
-This writes `.harness/report.md`. Print its path to the user as your final
-chat message. Do not print the entire report inline; the user will open it.
+This writes `.harness/report.md` including a per-round summary. Print its
+path to the user as your final chat message. Do not print the entire report
+inline; the user will open it.
 
 ---
 
@@ -287,6 +339,38 @@ block from `ROLES.md/Babysitter`. Spawn with:
   `.harness/feedback/${TASK_ID}-review-r<n>.log`, set status to `REVISING`,
   terminate so you re-spawn the implementer.
 
+### `spawn-replanner`
+Emitted when all tasks are terminal, `meta.goal_achieved` is false, and we
+still have budget (`round < max_rounds` and `no_progress_rounds < 2`).
+
+Substitute the action fields into `ROLES.md/Re-planner` and spawn:
+`Task(subagent_type="generalPurpose", readonly=false, model="gpt-5.5-medium",
+prompt=<filled prompt>)`. The action carries `${ROUND}`, `${MAX_ROUNDS}`,
+`${PER_ROUND_CAP}`, `${NO_PROGRESS_ROUNDS}`, `${NEEDS_PATH}`,
+`${REPLAN_OUTPUT_PATH}` — pass them all to the prompt verbatim.
+
+The Re-planner writes exactly one file (`${REPLAN_OUTPUT_PATH}`, default
+`.harness/replan.yaml`) with one of three shapes:
+
+- `goal_achieved: true` → after ingest, `meta.goal_achieved=true` and the
+  next tick emits `done`.
+- `goal_achieved: false, tasks: [<≤3 entries>]` → after ingest, those tasks
+  are appended as PLANNED, `meta.round` bumps, `no_progress_rounds` resets
+  to 0.
+- `goal_achieved: false, tasks: []` → no-progress strike. `no_progress_rounds`
+  bumps; 2 strikes ⇒ next tick emits `done` with reason
+  `"no_progress_rounds=2 reached halt"`.
+
+After the subagent returns, ingest:
+
+```bash
+.venv/bin/python .cursor/skills/dimos-agentic-harness/scripts/harness.py replan-load .harness/replan.yaml
+```
+
+Then re-tick. Do **not** spawn the Re-planner again without calling
+`replan-load` first — re-emission of `spawn-replanner` on consecutive ticks
+without a load in between means you're stuck in a loop.
+
 ### `merged`
 Informational only — `tick` already transitioned the task to `MERGED`.
 Continue to next action.
@@ -331,7 +415,27 @@ the chat session.
   "consecutive_rebase_fails": 0,
   "review_attempts": 0,
   "blocked_reason": null,
-  "ready_for_maintainer_reason": null
+  "ready_for_maintainer_reason": null,
+  "added_in_round": 1
+}
+```
+
+`board.py meta-info` returns the multi-round meta block:
+
+```json
+{
+  "round": 1,
+  "max_rounds": 10,
+  "per_round_cap": 3,
+  "goal_achieved": false,
+  "no_progress_rounds": 0,
+  "history": [
+    {"round": 1, "ended_at": "...", "tasks_in_round": ["t1", "t2", "t3"],
+     "tasks_merged": ["t1", "t2"], "tasks_blocked": ["t3"],
+     "tasks_ready_for_maintainer": [],
+     "replanner_verdict": "more-work",
+     "new_tasks": ["t4", "t5"]}
+  ]
 }
 ```
 
@@ -375,5 +479,6 @@ To customize, edit that file.
   bypasses `_gh.py`.
 - `hooks/pre-push` — git hook: blocks push to non-fork remotes / dev / main /
   bad branch prefixes.
-- `scripts/harness.py` — preflight, plan-init, tick, resume, report. Preflight
-  installs the pre-push hook automatically when all 6 checks pass.
+- `scripts/harness.py` — preflight, plan-init, tick, resume, replan-load,
+  report. Preflight installs the pre-push hook automatically when all 6
+  checks pass. Multi-round loop logic lives in `_decide_terminal_action`.

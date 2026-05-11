@@ -90,14 +90,49 @@ def _board_lock() -> Iterator[None]:
             os.close(fd)
 
 
+DEFAULT_MAX_ROUNDS = 10
+DEFAULT_PER_ROUND_CAP = 3
+NO_PROGRESS_HALT = 2  # halt after this many consecutive 0-new-task rounds
+
+
+def _default_meta() -> dict[str, Any]:
+    return {
+        "round": 1,
+        "max_rounds": DEFAULT_MAX_ROUNDS,
+        "per_round_cap": DEFAULT_PER_ROUND_CAP,
+        "goal_achieved": False,
+        "no_progress_rounds": 0,
+        "history": [],
+    }
+
+
+def _migrate_board(board: dict[str, Any]) -> dict[str, Any]:
+    """Upgrade older board schemas in-memory.
+
+    v2 (no `meta`, no `version` or version<3) → v3: add a default `meta` block
+    and backfill `added_in_round=1` on tasks missing that field.
+    Always returns the same dict reference (mutated in place).
+    """
+    if "meta" not in board or not isinstance(board.get("meta"), dict):
+        board["meta"] = _default_meta()
+    else:
+        for k, v in _default_meta().items():
+            board["meta"].setdefault(k, v)
+    for t in board.get("tasks", []):
+        t.setdefault("added_in_round", 1)
+    board["version"] = 3
+    return board
+
+
 def _read_board_locked() -> dict[str, Any]:
     if not BOARD_PATH.exists():
         raise typer.Exit(code=2)
     with BOARD_PATH.open("r") as f:
-        return json.load(f)
+        return _migrate_board(json.load(f))
 
 
 def _write_board_locked(board: dict[str, Any]) -> None:
+    _migrate_board(board)
     tmp = BOARD_PATH.with_suffix(".json.tmp")
     with tmp.open("w") as f:
         json.dump(board, f, indent=2, sort_keys=False)
@@ -127,6 +162,7 @@ def _empty_task(task_id: str, **overrides: Any) -> dict[str, Any]:
         "review_attempts": 0,
         "blocked_reason": None,
         "ready_for_maintainer_reason": None,
+        "added_in_round": 1,
     }
     base.update(overrides)
     return base
@@ -143,7 +179,8 @@ def _empty_group(group_id: str, members: list[str]) -> dict[str, Any]:
 
 def _empty_board() -> dict[str, Any]:
     return {
-        "version": 2,
+        "version": 3,
+        "meta": _default_meta(),
         "tasks": [],
         "groups": [],
         "locks_dir": str(LOCKS_DIR),
@@ -631,6 +668,166 @@ def pid_clear(task_id: str) -> None:
     if p.exists():
         p.unlink()
     typer.echo(f"{task_id} pid cleared")
+
+
+# --- Multi-round / meta commands -----------------------------------------
+
+
+@app.command("meta-info")
+def meta_info() -> None:
+    """Print the meta block (round counters, goal flag, history) as JSON."""
+    with _board_lock():
+        board = _read_board_locked()
+    typer.echo(json.dumps(board["meta"]))
+
+
+@app.command("set-meta")
+def set_meta(
+    max_rounds: int = typer.Option(0, "--max-rounds", help="0 = leave unchanged."),
+    per_round_cap: int = typer.Option(0, "--per-round-cap", help="0 = leave unchanged."),
+) -> None:
+    """Tweak meta caps (use once after init, before round 2 starts)."""
+    with _board_lock():
+        board = _read_board_locked()
+        if max_rounds > 0:
+            board["meta"]["max_rounds"] = max_rounds
+        if per_round_cap > 0:
+            board["meta"]["per_round_cap"] = per_round_cap
+        _write_board_locked(board)
+    typer.echo(json.dumps(board["meta"]))
+
+
+def _round_snapshot(board: dict[str, Any], round_num: int) -> dict[str, Any]:
+    """Summarize tasks added in `round_num`, by terminal status."""
+    in_round = [t for t in board["tasks"] if t.get("added_in_round", 1) == round_num]
+    return {
+        "round": round_num,
+        "ended_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "tasks_in_round": [t["id"] for t in in_round],
+        "tasks_merged": [t["id"] for t in in_round if t["status"] == "MERGED"],
+        "tasks_blocked": [t["id"] for t in in_round if t["status"] == "BLOCKED"],
+        "tasks_ready_for_maintainer": [
+            t["id"] for t in in_round if t["status"] == "READY_FOR_MAINTAINER"
+        ],
+    }
+
+
+@app.command("append-plan")
+def append_plan(plan_yaml: Path) -> None:
+    """Ingest a Re-planner output and advance round state atomically.
+
+    Expected YAML schema (all keys optional with sensible defaults):
+
+        goal_achieved: false        # if true: set meta.goal_achieved, ignore tasks
+        tasks: []                   # NEW tasks only; their ids must not conflict
+                                    # with existing tasks
+        groups: []                  # optional, same shape as plan-init
+
+    Outcomes:
+      - goal_achieved=true             → meta.goal_achieved=true; history entry; no task changes
+      - tasks empty, goal_achieved=false → no_progress_rounds += 1; history entry
+      - tasks non-empty                → append tasks tagged with the new round
+                                          number; meta.round += 1; no_progress_rounds=0;
+                                          history entry summarizing the round that ended
+
+    Enforces meta.per_round_cap on the size of the new tasks list.
+    """
+    if not plan_yaml.exists():
+        raise typer.BadParameter(f"plan file not found: {plan_yaml}")
+    with plan_yaml.open("r") as f:
+        plan = yaml.safe_load(f) or {}
+
+    goal_achieved = bool(plan.get("goal_achieved", False))
+    raw_tasks = plan.get("tasks") or []
+    raw_groups = plan.get("groups") or []
+
+    with _board_lock():
+        board = _read_board_locked()
+        meta = board["meta"]
+
+        if meta.get("goal_achieved"):
+            raise typer.BadParameter("meta.goal_achieved already set; nothing more to append")
+
+        current_round = int(meta["round"])
+        snapshot = _round_snapshot(board, current_round)
+
+        if goal_achieved:
+            meta["goal_achieved"] = True
+            snapshot["replanner_verdict"] = "goal-achieved"
+            meta["history"].append(snapshot)
+            _write_board_locked(board)
+            typer.echo(json.dumps({"action": "goal-achieved", "round": current_round}))
+            return
+
+        if not raw_tasks:
+            meta["no_progress_rounds"] = int(meta.get("no_progress_rounds", 0)) + 1
+            snapshot["replanner_verdict"] = "no-progress"
+            meta["history"].append(snapshot)
+            _write_board_locked(board)
+            typer.echo(
+                json.dumps(
+                    {
+                        "action": "no-progress",
+                        "round": current_round,
+                        "no_progress_rounds": meta["no_progress_rounds"],
+                    }
+                )
+            )
+            return
+
+        cap = int(meta.get("per_round_cap", DEFAULT_PER_ROUND_CAP))
+        if len(raw_tasks) > cap:
+            raise typer.BadParameter(
+                f"re-planner produced {len(raw_tasks)} tasks but per_round_cap={cap}"
+            )
+
+        existing_ids = {t["id"] for t in board["tasks"]}
+        new_round = current_round + 1
+        appended: list[dict[str, Any]] = []
+        for raw in raw_tasks:
+            if "id" not in raw:
+                raise typer.BadParameter(f"task missing id: {raw}")
+            if raw["id"] in existing_ids:
+                raise typer.BadParameter(
+                    f"task id {raw['id']!r} already exists; re-planner must use fresh ids"
+                )
+            existing_ids.add(raw["id"])
+            t = _empty_task(
+                raw["id"],
+                **{k: v for k, v in raw.items() if k != "id"},
+                added_in_round=new_round,
+            )
+            appended.append(t)
+        board["tasks"].extend(appended)
+
+        for raw in raw_groups:
+            if "id" not in raw or "members" not in raw:
+                raise typer.BadParameter(f"group missing id/members: {raw}")
+            if any(g["id"] == raw["id"] for g in board["groups"]):
+                raise typer.BadParameter(f"group id {raw['id']!r} already exists")
+            board["groups"].append(_empty_group(raw["id"], raw["members"]))
+            for mid in raw["members"]:
+                for t in board["tasks"]:
+                    if t["id"] == mid:
+                        t["group"] = raw["id"]
+
+        snapshot["replanner_verdict"] = "more-work"
+        snapshot["new_tasks"] = [t["id"] for t in appended]
+        meta["history"].append(snapshot)
+        meta["round"] = new_round
+        meta["no_progress_rounds"] = 0
+        _write_board_locked(board)
+
+    typer.echo(
+        json.dumps(
+            {
+                "action": "appended",
+                "from_round": current_round,
+                "to_round": new_round,
+                "new_tasks": [t["id"] for t in appended],
+            }
+        )
+    )
 
 
 if __name__ == "__main__":

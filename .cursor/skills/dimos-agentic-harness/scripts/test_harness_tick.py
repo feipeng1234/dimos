@@ -112,7 +112,15 @@ def test_tick_no_loop_returns_wait_when_idle(tmp_path: Path, monkeypatch) -> Non
     assert payload["actions"][0]["kind"] == "wait"
 
 
-def test_tick_no_loop_returns_done_when_all_terminal(tmp_path: Path, monkeypatch) -> None:
+def test_tick_no_loop_emits_replanner_when_all_terminal_with_budget(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """All tasks terminal + budget left → spawn-replanner (not done).
+
+    This is the core multi-round behavior: never exit just because the
+    current round is done. The Re-planner gets a chance to either declare
+    goal-achieved, propose more work, or admit no-progress.
+    """
     monkeypatch.chdir(tmp_path)
     _init_board(tmp_path)
     _add_task("t1", "MERGED")
@@ -121,7 +129,75 @@ def test_tick_no_loop_returns_done_when_all_terminal(tmp_path: Path, monkeypatch
     rc = harness.cmd_tick(loop=False)
     assert rc == 0
     payload = json.loads((tmp_path / ".harness/heartbeat").read_text())["payload"]
-    assert payload["actions"] == [{"kind": "done"}]
+    assert len(payload["actions"]) == 1
+    action = payload["actions"][0]
+    assert action["kind"] == "spawn-replanner"
+    assert action["round"] == 1
+    assert action["max_rounds"] == 10
+    assert action["per_round_cap"] == 3
+    assert action["no_progress_rounds"] == 0
+
+
+def test_tick_no_loop_returns_done_when_goal_achieved(tmp_path: Path, monkeypatch) -> None:
+    """meta.goal_achieved=true → done with reason."""
+    monkeypatch.chdir(tmp_path)
+    _init_board(tmp_path)
+    _add_task("t1", "MERGED")
+    # Append a replan that flips goal_achieved=true.
+    (tmp_path / "replan.yaml").write_text("goal_achieved: true\ntasks: []\n")
+    subprocess.run(
+        [sys.executable, str(SCRIPTS_DIR / "board.py"), "append-plan", "replan.yaml"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+
+    rc = harness.cmd_tick(loop=False)
+    assert rc == 0
+    payload = json.loads((tmp_path / ".harness/heartbeat").read_text())["payload"]
+    assert payload["actions"] == [{"kind": "done", "reason": "goal-achieved"}]
+
+
+def test_tick_no_loop_returns_done_when_max_rounds_reached(tmp_path: Path, monkeypatch) -> None:
+    """meta.round >= meta.max_rounds → done with reason (no spawn-replanner)."""
+    monkeypatch.chdir(tmp_path)
+    _init_board(tmp_path)
+    _add_task("t1", "MERGED")
+    subprocess.run(
+        [sys.executable, str(SCRIPTS_DIR / "board.py"), "set-meta", "--max-rounds", "1"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+
+    rc = harness.cmd_tick(loop=False)
+    assert rc == 0
+    payload = json.loads((tmp_path / ".harness/heartbeat").read_text())["payload"]
+    assert len(payload["actions"]) == 1
+    assert payload["actions"][0]["kind"] == "done"
+    assert "max_rounds" in (payload["actions"][0].get("reason") or "")
+
+
+def test_tick_no_loop_returns_done_after_no_progress_halt(tmp_path: Path, monkeypatch) -> None:
+    """Two consecutive no-progress rounds → done with reason."""
+    monkeypatch.chdir(tmp_path)
+    _init_board(tmp_path)
+    _add_task("t1", "MERGED")
+    # Two no-progress appends (empty tasks list).
+    (tmp_path / "replan.yaml").write_text("goal_achieved: false\ntasks: []\n")
+    for _ in range(2):
+        subprocess.run(
+            [sys.executable, str(SCRIPTS_DIR / "board.py"), "append-plan", "replan.yaml"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+        )
+
+    rc = harness.cmd_tick(loop=False)
+    assert rc == 0
+    payload = json.loads((tmp_path / ".harness/heartbeat").read_text())["payload"]
+    assert payload["actions"][0]["kind"] == "done"
+    assert "no_progress_rounds" in (payload["actions"][0].get("reason") or "")
 
 
 def test_tick_no_loop_emits_implementer_for_planned(tmp_path: Path, monkeypatch) -> None:
@@ -286,8 +362,9 @@ def test_emit_review_actions_blocks_at_cap(tmp_path: Path, monkeypatch) -> None:
 
 def test_tick_loop_sleeps_then_returns_when_terminal(tmp_path: Path, monkeypatch) -> None:
     """loop=True with HARNESS_POLL_INTERVAL_SEC=0 should not sleep but also
-    must NOT spin forever — it should converge to the same wait result on the
-    next iteration. We force terminal mid-loop by mutating the board.
+    must NOT spin forever — it should converge to a non-wait action on the
+    next iteration. We force terminal+goal-achieved mid-loop by mutating
+    the board so the inner tick emits `done` (not `spawn-replanner`).
     """
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HARNESS_POLL_INTERVAL_SEC", "0")
@@ -300,7 +377,6 @@ def test_tick_loop_sleeps_then_returns_when_terminal(tmp_path: Path, monkeypatch
     def fake_sleep(s: float) -> None:
         call_count["n"] += 1
         if call_count["n"] == 1:
-            # mutate board: flip task to MERGED so next inner tick → done
             subprocess.run(
                 [
                     sys.executable,
@@ -308,6 +384,17 @@ def test_tick_loop_sleeps_then_returns_when_terminal(tmp_path: Path, monkeypatch
                     "set-status",
                     "t1",
                     "MERGED",
+                ],
+                check=True,
+                capture_output=True,
+            )
+            (tmp_path / "replan.yaml").write_text("goal_achieved: true\ntasks: []\n")
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "board.py"),
+                    "append-plan",
+                    "replan.yaml",
                 ],
                 check=True,
                 capture_output=True,
@@ -321,5 +408,5 @@ def test_tick_loop_sleeps_then_returns_when_terminal(tmp_path: Path, monkeypatch
     rc = harness.cmd_tick(loop=True)
     assert rc == 0
     payload = json.loads((tmp_path / ".harness/heartbeat").read_text())["payload"]
-    assert payload["actions"] == [{"kind": "done"}]
+    assert payload["actions"] == [{"kind": "done", "reason": "goal-achieved"}]
     assert call_count["n"] == 1
