@@ -205,7 +205,7 @@ def robot_to_optical_frame(pose: Pose) -> Pose:
     )
 
 
-def yaw_towards_point(position: Vector3, target_point: Vector3 = None) -> float:  # type: ignore[assignment]
+def yaw_towards_point(position: Vector3, target_point: Vector3 | None = None) -> float:
     """
     Calculate yaw angle from target point to position (away from target).
     This is commonly used for object orientation in grasping applications.
