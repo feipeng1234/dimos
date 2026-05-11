@@ -95,7 +95,7 @@ def test_decide_pass_quick() -> None:
 
 def test_decide_pass_full() -> None:
     s, args = verify._decide_next(passed=True, mode="full", attempts=2)
-    assert s == "READY"
+    assert s == "REVIEWING"
     assert "--verify-stage" in args and "full" in args
 
 

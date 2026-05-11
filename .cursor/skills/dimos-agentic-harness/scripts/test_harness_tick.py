@@ -231,6 +231,59 @@ def test_run_verifier_inline_skips_implementing(tmp_path: Path, monkeypatch) -> 
     assert calls == []
 
 
+def test_emit_review_actions_emits_for_reviewing(tmp_path: Path, monkeypatch) -> None:
+    """REVIEWING + review_attempts < MAX → one spawn-reviewer action."""
+    monkeypatch.chdir(tmp_path)
+    _init_git(tmp_path)  # ensure_worktree needs a real repo
+    _init_board(tmp_path)
+    _add_task("tr", "REVIEWING", branch="feat/review-me")
+
+    board = harness._read_board_json()
+    actions = harness._emit_review_actions(board)
+    assert len(actions) == 1
+    a = actions[0]
+    assert a["kind"] == "spawn-reviewer"
+    assert a["task_id"] == "tr"
+    assert a["model"] == harness.REVIEWER_MODEL == "gpt-5.5-medium"
+    assert a["review_attempts"] == 0
+    assert ".harness/worktrees/tr" in a["cwd"]
+
+
+def test_emit_review_actions_blocks_at_cap(tmp_path: Path, monkeypatch) -> None:
+    """REVIEWING + review_attempts >= MAX → no action, status set to BLOCKED."""
+    monkeypatch.chdir(tmp_path)
+    _init_board(tmp_path)
+    _add_task("tr", "REVIEWING", branch="feat/review-me")
+    # bump review_attempts up to the cap
+    for _ in range(harness.MAX_REVIEW_ITERATIONS):
+        subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS_DIR / "board.py"),
+                "set-status",
+                "tr",
+                "REVIEWING",
+                "--bump-review-attempts",
+            ],
+            check=True,
+            capture_output=True,
+        )
+
+    board = harness._read_board_json()
+    actions = harness._emit_review_actions(board)
+    assert actions == []
+
+    info_proc = subprocess.run(
+        [sys.executable, str(SCRIPTS_DIR / "board.py"), "task-info", "tr"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    info = json.loads(info_proc.stdout)
+    assert info["status"] == "BLOCKED"
+    assert "reviewer rejected" in (info["blocked_reason"] or "")
+
+
 def test_tick_loop_sleeps_then_returns_when_terminal(tmp_path: Path, monkeypatch) -> None:
     """loop=True with HARNESS_POLL_INTERVAL_SEC=0 should not sleep but also
     must NOT spin forever — it should converge to the same wait result on the
