@@ -88,7 +88,7 @@ def _setup_ament_index(package_paths: dict[str, Path]) -> None:
 @contextlib.contextmanager
 def _patch_xacro_find(package_paths: dict[str, Path]) -> Iterator[None]:
     """Fallback: temporarily patch xacro's _find when ament is unavailable."""
-    from xacro import substitution_args  # type: ignore[import-untyped]
+    from xacro import substitution_args  # type: ignore[import-untyped, import-not-found]
 
     original_find = substitution_args._find
 
