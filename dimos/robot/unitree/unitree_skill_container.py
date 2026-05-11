@@ -300,6 +300,45 @@ class UnitreeSkillContainer(Module):
             logger.error(f"Failed to execute {command_name}: {e}")
             return "Failed to execute the command."
 
+    @skill
+    def dance(self) -> str:
+        """Perform a short dance routine: stand up, wave hello, wiggle hips,
+        run Dance1, make a finger heart, stretch, and recover to a normal stance.
+        Takes about 30 seconds to complete and leaves the robot ready for new commands.
+        """
+        choreography: list[tuple[str, float]] = [
+            ("StandUp", 4.0),
+            ("Hello", 4.0),
+            ("WiggleHips", 5.0),
+            ("Dance1", 8.0),
+            ("FingerHeart", 4.0),
+            ("Stretch", 6.0),
+            ("RecoveryStand", 0.0),
+        ]
+
+        successes = 0
+        skips = 0
+        for name, hold_seconds in choreography:
+            entry = _UNITREE_COMMANDS.get(name)
+            if entry is None:
+                logger.warning(f"dance: skipping unknown sport primitive '{name}'")
+                skips += 1
+                continue
+
+            id_, _ = entry
+            try:
+                self._connection.publish_request(RTC_TOPIC["SPORT_MOD"], {"api_id": id_})
+                successes += 1
+            except Exception as e:
+                logger.error(f"dance: failed to publish '{name}': {e}")
+                skips += 1
+                continue
+
+            if hold_seconds > 0.0:
+                time.sleep(hold_seconds)
+
+        return f"Dance completed: {successes} moves performed, {skips} skipped."
+
 
 _commands = "\n".join(
     [f'- "{name}": {description}' for name, (_, description) in _UNITREE_COMMANDS.items()]
