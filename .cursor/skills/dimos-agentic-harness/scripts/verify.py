@@ -224,9 +224,7 @@ def _decide_next(
     READY from this point on.
     """
     if passed:
-        if mode == "quick":
-            return "VERIFYING", ["--verify-stage", "quick"]
-        return "REVIEWING", ["--verify-stage", "full"]
+        return "REVIEWING", ["--verify-stage", mode]
     if attempts + 1 >= MAX_VERIFIER_ATTEMPTS:
         return "BLOCKED", [
             "--blocked-reason",
@@ -274,11 +272,12 @@ def verify_task(
             log_fp.write(f"# test_files={test_files}\n")
             log_fp.write(f"# cwd={cwd}\n")
 
-            if files:
-                ruff = _run_step("ruff", [RUFF, "check", *files], log_fp, cwd)
+            py_files = [f for f in files if f.endswith(".py")]
+            if py_files:
+                ruff = _run_step("ruff", [RUFF, "check", *py_files], log_fp, cwd)
             else:
-                ruff = StepResult(name="ruff", rc=0, stdout="(no files)", stderr="")
-                log_fp.write("\n$ (ruff) skipped: no files\n")
+                ruff = StepResult(name="ruff", rc=0, stdout="(no python files)", stderr="")
+                log_fp.write("\n$ (ruff) skipped: no python files in files_touched\n")
 
             if modules:
                 mypy = _run_step("mypy", [MYPY, *modules], log_fp, cwd)
