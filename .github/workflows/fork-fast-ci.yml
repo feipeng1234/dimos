@@ -38,8 +38,8 @@ jobs:
         with:
           enable-cache: true
 
-      - name: uv sync (no dds, no unitree-dds)
-        run: uv sync --no-extra dds --no-extra unitree-dds --frozen
+      - name: uv sync (dev extras only — pytest, ruff)
+        run: uv sync --extra dev --frozen
 
       - name: Run minimal fast tests (no-ROS, no-LCM)
         run: |
