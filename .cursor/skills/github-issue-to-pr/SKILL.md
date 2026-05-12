@@ -60,8 +60,13 @@ push, do not open a PR.
 The worker treats these as load-bearing. Break them and your work gets thrown
 away.
 
-- **No git.** The worker owns branch / commit / push / PR. If you run any
-  `git` command you risk losing your own changes when the worker resets.
+- **No git.** The worker owns branch / commit / push / PR. **Do not run `git
+  add`, `git commit`, `git push`, `git checkout`, `git reset`, or anything
+  else that mutates git state.** If you have a "test plan" or "verification"
+  step that involves git: skip it. Just edit files and exit. cursor-agent
+  in particular has been observed running `git commit` against this rule —
+  the worker now silently accepts that commit and pushes it as-is, but
+  every such commit makes the audit trail lie about who did the work.
 - **Edits stay inside the working directory.** Do not write outside it, do
   not modify other repos, do not modify the user's home dir.
 - **Forbidden files.** Do not create, modify, or delete:

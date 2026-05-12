@@ -63,7 +63,10 @@ DEFAULT_AGENT_TEMPLATES: dict[str, str] = {
     # claude code: -p 模式非交互运行, prompt 通过 argv 传。
     # 注意: 真实使用很可能要加 --dangerously-skip-permissions, 通过 WORKER_AGENT_CMD 覆盖。
     "claude": "claude -p {prompt}",
-    "cursor-agent": "cursor-agent -p {prompt} --output-format text",
+    # cursor-agent --print mode: --force --trust let it write files without
+    # interactive permission prompts. Without these the subprocess hangs
+    # forever waiting for a TTY-only confirmation it cannot get.
+    "cursor-agent": "cursor-agent -p {prompt} --output-format text --force --trust",
     "codex": "codex exec {prompt}",
     # dry: 端到端冒烟用。不调任何 AI, 只在工作区写一行, 让后续 commit/push/PR 链路能跑通。
     # `_ {prompt}` 把 prompt 喂给 bash 当 $1, 脚本里不引用所以无副作用; 必须有 {prompt}
@@ -91,6 +94,7 @@ class Config:
     agent_cmd_template: str
     agent_timeout: int
     skill_path: str
+    git_ssh_host_alias: str  # e.g. "github-feipeng1234" if user has SSH config aliases
     labels: Labels
     once: bool = False
     target_issue: int | None = None
@@ -133,6 +137,7 @@ def load_config(args: argparse.Namespace) -> Config:
         agent_cmd_template=agent_cmd,
         agent_timeout=int(os.getenv("WORKER_AGENT_TIMEOUT", "1800")),
         skill_path=os.getenv("WORKER_SKILL_PATH", "").strip(),
+        git_ssh_host_alias=os.getenv("WORKER_GIT_SSH_HOST_ALIAS", "").strip(),
         labels=Labels(
             todo=os.getenv("WORKER_LABEL_TODO", "agent-todo").strip(),
             running=os.getenv("WORKER_LABEL_RUNNING", "agent-running").strip(),
@@ -284,12 +289,37 @@ def ensure_repo_clone(cfg: Config) -> Path:
     cfg.workspace.mkdir(parents=True, exist_ok=True)
     repo_dir = cfg.repo_dir
     if (repo_dir / ".git").exists():
+        _maybe_align_remote_to_ssh_alias(cfg, repo_dir)
         return repo_dir
     if repo_dir.exists():
         sys.exit(f"错误: {repo_dir} 已存在但不是 git 仓库, 请清理后重试")
     log.info("clone %s -> %s", cfg.repo, repo_dir)
     run(["gh", "repo", "clone", cfg.repo, str(repo_dir)])
+    _maybe_align_remote_to_ssh_alias(cfg, repo_dir)
     return repo_dir
+
+
+def _maybe_align_remote_to_ssh_alias(cfg: Config, repo_dir: Path) -> None:
+    """If WORKER_GIT_SSH_HOST_ALIAS is set, rewrite origin to use it.
+
+    `gh repo clone` always uses `git@github.com:owner/repo.git`. On hosts where
+    the user has multiple GitHub accounts and routes them via per-account SSH
+    aliases in ~/.ssh/config (Host github-foo HostName github.com IdentityFile
+    ~/.ssh/foo_ed25519), the default Host github.com SSH key may belong to the
+    wrong account, causing `git push` to be rejected with a confusing 'denied
+    to <other-account>' error. Setting WORKER_GIT_SSH_HOST_ALIAS=github-foo
+    lets the worker route push through the correct key.
+    """
+    alias = cfg.git_ssh_host_alias
+    if not alias:
+        return
+    desired = f"git@{alias}:{cfg.repo}.git"
+    proc = run(["git", "remote", "get-url", "origin"], cwd=repo_dir, check=False)
+    current = (proc.stdout or "").strip()
+    if current == desired:
+        return
+    log.info("rewriting origin %s -> %s (per WORKER_GIT_SSH_HOST_ALIAS)", current, desired)
+    run(["git", "remote", "set-url", "origin", desired], cwd=repo_dir)
 
 
 def reset_to_base(cfg: Config, repo_dir: Path) -> None:
@@ -315,6 +345,24 @@ def diffstat_last_commit(repo_dir: Path) -> str:
     proc = run(["git", "diff", "--stat", "HEAD~1..HEAD"], cwd=repo_dir, check=False)
     out = (proc.stdout or "").strip()
     return out or "(no diffstat available)"
+
+
+def commits_ahead_of_base(repo_dir: Path, base_branch: str) -> int:
+    """Number of commits the current branch is ahead of origin/<base_branch>.
+
+    Used to detect the case where the agent disregarded its no-git instruction
+    and committed work itself: working tree is clean (`has_changes` False) but
+    the branch is ahead of base. We accept the agent's commit and push it
+    rather than throwing the work away."""
+    proc = run(
+        ["git", "rev-list", "--count", f"origin/{base_branch}..HEAD"],
+        cwd=repo_dir,
+        check=False,
+    )
+    try:
+        return int((proc.stdout or "0").strip())
+    except ValueError:
+        return 0
 
 
 def commit_all(repo_dir: Path, message: str) -> None:
@@ -397,23 +445,70 @@ def build_agent_argv(cfg: Config, prompt: str) -> list[str]:
     return out
 
 
-def invoke_agent(cfg: Config, repo_dir: Path, prompt: str) -> None:
-    argv = build_agent_argv(cfg, prompt)
-    log.info("invoking agent (%s) in %s, timeout=%ss", cfg.agent, repo_dir, cfg.agent_timeout)
-    log.info("agent argv[0..2]: %s", argv[:3])
+class AgentTimeoutError(RuntimeError):
+    """Agent ran out the wall clock. Worker should still inspect the worktree
+    for changes — cursor-agent in particular often writes files then refuses to
+    exit, so a timeout is not the same as 'agent did nothing'."""
+
+
+def _kill_pgroup(pid: int, sig: int) -> None:
     try:
-        subprocess.run(
-            argv,
-            cwd=str(repo_dir),
-            check=True,
-            timeout=cfg.agent_timeout,
-        )
-    except subprocess.TimeoutExpired:
-        raise RuntimeError(f"agent timed out after {cfg.agent_timeout}s")
+        os.killpg(os.getpgid(pid), sig)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def invoke_agent(cfg: Config, repo_dir: Path, prompt: str) -> None:
+    """Run the AI backend in a fresh process group; capture output to a file
+    (not a pipe), so orphan grandchildren that inherit fds can't hold the
+    parent hostage. Always kill the whole pgroup on exit to reap orphans
+    (cursor-agent leaves a `worker-server` node behind every run)."""
+    argv = build_agent_argv(cfg, prompt)
+    agent_log = repo_dir.parent / f"{repo_dir.name}.agent.log"
+    log.info(
+        "invoking agent (%s) in %s, timeout=%ss, agent stdout/err -> %s",
+        cfg.agent,
+        repo_dir,
+        cfg.agent_timeout,
+        agent_log,
+    )
+    log.info("agent argv[0..2]: %s", argv[:3])
+
+    proc: subprocess.Popen[bytes] | None = None
+    try:
+        with open(agent_log, "ab") as logf:
+            logf.write(
+                f"\n\n=== {time.strftime('%F %T')} agent run, argv[0..2]={argv[:3]} ===\n".encode()
+            )
+            logf.flush()
+            proc = subprocess.Popen(
+                argv,
+                cwd=str(repo_dir),
+                stdin=subprocess.DEVNULL,
+                stdout=logf,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+        try:
+            rc = proc.wait(timeout=cfg.agent_timeout)
+        except subprocess.TimeoutExpired:
+            log.warning("agent did not exit in %ss; killing pgroup", cfg.agent_timeout)
+            _kill_pgroup(proc.pid, signal.SIGTERM)
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                _kill_pgroup(proc.pid, signal.SIGKILL)
+                proc.wait(timeout=5)
+            raise AgentTimeoutError(f"agent timed out after {cfg.agent_timeout}s")
+        if rc != 0:
+            raise RuntimeError(f"agent exited non-zero: rc={rc}")
     except FileNotFoundError as e:
         raise RuntimeError(f"agent binary not found: {e}")
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"agent exited non-zero: rc={e.returncode}")
+    finally:
+        if proc is not None:
+            _kill_pgroup(proc.pid, signal.SIGTERM)
+            time.sleep(0.5)
+            _kill_pgroup(proc.pid, signal.SIGKILL)
 
 
 # ---------------------------------------------------------------------------
@@ -476,7 +571,20 @@ def process_issue(cfg: Config, issue: dict[str, Any]) -> None:
         make_branch(repo_dir, branch)
 
         prompt = render_prompt(cfg, issue, repo_dir, branch)
-        invoke_agent(cfg, repo_dir, prompt)
+        try:
+            invoke_agent(cfg, repo_dir, prompt)
+        except AgentTimeoutError as e:
+            # cursor-agent often writes files then refuses to exit. Don't bail
+            # — fall through and let the diff check below decide. If the agent
+            # actually wrote nothing, the no-changes branch will mark
+            # agent-needs-human anyway.
+            log.warning("%s; checking worktree for any salvageable diff", e)
+            comment_on_issue(
+                cfg,
+                n,
+                f"Agent process timed out after {cfg.agent_timeout}s and was killed. "
+                f"Worker is salvaging any files the agent wrote before exit.",
+            )
 
         if (repo_dir / "AGENT_NEEDS_HUMAN.md").exists():
             note = (repo_dir / "AGENT_NEEDS_HUMAN.md").read_text()
@@ -488,14 +596,22 @@ def process_issue(cfg: Config, issue: dict[str, Any]) -> None:
             transition_label(cfg, n, remove=cfg.labels.running, add=cfg.labels.human)
             return
 
-        if not has_changes(repo_dir):
+        ahead = commits_ahead_of_base(repo_dir, cfg.base_branch)
+        worktree_dirty = has_changes(repo_dir)
+        if not worktree_dirty and ahead == 0:
             comment_on_issue(
                 cfg, n, "Worker ran the agent but no files changed. Marking for human review."
             )
             transition_label(cfg, n, remove=cfg.labels.running, add=cfg.labels.human)
             return
 
-        commit_all(repo_dir, f"agent: implement issue #{n}\n\n{title}")
+        if worktree_dirty:
+            commit_all(repo_dir, f"agent: implement issue #{n}\n\n{title}")
+        else:
+            log.warning(
+                "agent committed %d commit(s) itself (violates skill no-git rule); accepting and pushing",
+                ahead,
+            )
         ds = diffstat_last_commit(repo_dir)
         checks_text = run_checks(repo_dir)
 
