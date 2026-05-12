@@ -12,6 +12,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Blueprint runtime orchestration: workers, transports, and cross-module RPC wiring.
+
+``Blueprint.build()`` flows through :meth:`ModuleCoordinator.build`, which:
+
+1. Applies ``GlobalConfig`` overrides and runs configurators / requirement checks.
+2. Deploys each module class into a worker (Python forkserver or Docker) via
+   :meth:`deploy_parallel`, keyed by :attr:`~dimos.core.module.ModuleBase.deployment`.
+3. Calls :meth:`ModuleCoordinator._connect_streams` so every ``In``/``Out`` that shares the
+   same *logical* stream name and message type uses one shared
+   :class:`~dimos.core.transport.PubSubTransport` (LCM or pickled LCM by default).
+4. Runs :func:`_connect_module_refs` to satisfy ``Spec``-typed attributes—each consumer gets a
+   proxy to exactly one provider module (see ``docs/usage/blueprints.md`` and AGENTS.md).
+5. Invokes ``build()`` then ``start()`` on each proxy, then :meth:`_send_on_system_modules`.
+
+Python-deployed modules also support :meth:`restart_module` (reload + rewiring) and
+:meth:`unload_module`; those paths must keep the transport and ref maps consistent.
+"""
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -44,6 +62,19 @@ logger = setup_logger()
 
 
 class ModuleCoordinator(Resource):
+    """Coordinates worker pools, deployed module proxies, stream transports, and spec injection.
+
+    Useful fields when debugging deploy or reconnect issues:
+
+    - ``_deployed_modules``: module class object -> RPC proxy to the live worker instance.
+    - ``_transport_registry``: ``(remapped name, message type)`` -> shared pub/sub transport.
+    - ``_module_transports``: per-module map of stream field name -> transport (used when
+      restarting so new proxies re-attach to existing topics).
+    - ``_resolved_module_refs``: ``(consumer class, attribute name)`` -> provider class (type
+      object), for rewiring after hot-reload.
+    - ``_class_aliases``: after ``importlib.reload``, old class -> new class so lookups match.
+    """
+
     _managers: dict[str, WorkerManager]
     _global_config: GlobalConfig
     _deployed_modules: dict[type[ModuleBase], ModuleProxyProtocol]
@@ -195,6 +226,7 @@ class ModuleCoordinator(Resource):
             raise
 
     def start_all_modules(self) -> None:
+        """Start every deployed proxy; then notify modules of the full peer list."""
         modules = list(self._deployed_modules.values())
         if not modules:
             raise ValueError("No modules deployed. Call deploy() before start_all_modules().")
@@ -216,6 +248,8 @@ class ModuleCoordinator(Resource):
                 module.on_system_modules(modules)
 
     def _connect_streams(self, blueprint: Blueprint) -> None:
+        # Group endpoints by (remapped_name, type): many modules may publish/subscribe the same
+        # logical topic; they must share one transport instance so LCM topics stay consistent.
         streams: dict[tuple[str, type], list[tuple[type, str]]] = defaultdict(list)
 
         for bp in blueprint.active_blueprints:
@@ -251,6 +285,7 @@ class ModuleCoordinator(Resource):
         blueprint: Blueprint,
         blueprint_args: MutableMapping[str, Any] | None = None,
     ) -> ModuleCoordinator:
+        """Full blueprint bring-up: deploy, wire streams/refs, build, start."""
         logger.info("Building the blueprint")
         global_config.update(**dict(blueprint.global_config_overrides))
         blueprint_args = blueprint_args or {}
