@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   ci-complete:
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    if: github.repository != 'feipeng1234/dimos' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     timeout-minutes: 60
     runs-on: [self-hosted, Linux]
     container:

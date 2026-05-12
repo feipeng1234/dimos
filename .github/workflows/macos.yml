@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   check-changes:
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    if: github.repository != 'feipeng1234/dimos' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     outputs:
       should-run: ${{ steps.filter.outputs.python }}
