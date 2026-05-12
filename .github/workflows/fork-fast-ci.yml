@@ -1,0 +1,50 @@
+name: fork-fast-ci
+on:
+  pull_request:
+    branches: [dev, main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [dev]
+
+permissions:
+  contents: read
+
+jobs:
+  ruff:
+    if: github.repository == 'feipeng1234/dimos' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/ruff-action@v3
+        with:
+          args: "format --check"
+      - uses: astral-sh/ruff-action@v3
+        with:
+          args: "check"
+
+  pytest-fast:
+    if: github.repository == 'feipeng1234/dimos' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libturbojpeg0-dev
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: uv sync (dev extras only — pytest, ruff)
+        run: uv sync --extra dev --frozen
+
+      - name: Run minimal fast tests (no-ROS, no-LCM)
+        run: |
+          uv run pytest \
+            dimos/utils/test_trigonometry.py \
+            dimos/utils/test_generic.py \
+            dimos/utils/test_transform_utils.py \
+            -q --no-header
