@@ -102,8 +102,6 @@ Use the helper script:
 
 Images are built by [`.github/workflows/docker-build.yml`](/.github/workflows/docker-build.yml#L4) on merges to `main`/`dev` (when Docker files change) and weekly for base image security patches.
 
-Tests and type checking run in [`.github/workflows/ci.yml`](/.github/workflows/ci.yml) using pre-built images.
-
 ### Build Trigger Paths
 
 | Image    | Triggers on changes to                               |
