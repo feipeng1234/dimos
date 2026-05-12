@@ -386,6 +386,7 @@ CI asserts the file is current — if it's stale, CI fails.
 - Visualization: `docs/usage/visualization.md`
 - Configuration: `docs/usage/configuration.md`
 - Testing: `docs/development/testing.md`
+- Future optimizations backlog: `docs/development/future-optimizations.md`
 - CLI / dimos run: `docs/development/dimos_run.md`
 - LFS data: `docs/development/large_file_management.md`
 - Agent system: `docs/agents/`
