@@ -390,3 +390,4 @@ CI asserts the file is current — if it's stale, CI fails.
 - CLI / dimos run: `docs/development/dimos_run.md`
 - LFS data: `docs/development/large_file_management.md`
 - Agent system: `docs/agents/`
+<!-- Last touched by issue-agent-worker phase-2 smoke test -->
