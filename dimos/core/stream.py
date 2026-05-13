@@ -12,6 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""类型化数据流：`In[T]`/`Out[T]` 与底层 `Transport` 的粘合层。
+
+Coordinator 在同名且同类型的输出与输入之间共享同一 Transport，从而在
+进程间/LCM 等通道上建立发布-订阅关系；本文件侧重 Observable 侧的背压与生命周期。"""
+
 from __future__ import annotations
 
 import enum

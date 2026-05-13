@@ -11,6 +11,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+"""HTTP JSON-RPC MCP 服务端：枚举各 Module 上的 `@skill` 并转发调用；工具描述取自英文 docstring 生成的 schema。"""
+
 from __future__ import annotations
 
 import asyncio

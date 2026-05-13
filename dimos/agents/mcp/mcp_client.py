@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""MCP 客户端模块：拉起 LangChain agent，HTTP 拉取工具列表并把 LLM tool-call 发往本机 MCP 服务端口。"""
+
 from collections.abc import Callable
 from queue import Empty, Queue
 from threading import Event, RLock, Thread
@@ -49,6 +51,8 @@ class McpClientConfig(ModuleConfig):
 
 
 class McpClient(Module):
+    """与运行中的 `McpServer` 配对：远端技能通过 HTTP 与本进程其他模块 RPC 接通。"""
+
     config: McpClientConfig
     agent: Out[BaseMessage]
     human_input: In[str]

@@ -12,6 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Blueprint 编排：`autoconnect` 合并多个子蓝图并把流、`Spec` 引用与全局配置收口。
+
+构建阶段由 `ModuleCoordinator.build` 完成：解析各模块的类型注解得到 `BlueprintAtom`，
+按「流名 + 消息类型」匹配并注入共享 Transport，`Spec`/具体 `Module` 类型则解析为模块间 RPC 注入目标。"""
+
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from functools import cached_property, reduce
@@ -204,6 +209,7 @@ class Blueprint:
 
 
 def autoconnect(*blueprints: Blueprint) -> Blueprint:
+    # 合并子蓝图的去重副本、传输映射、全局配置覆盖与 remapping；同名模块类型后者覆盖前者。
     all_blueprints = tuple(_eliminate_duplicates([bp for bs in blueprints for bp in bs.blueprints]))
     all_transports = dict(  # type: ignore[var-annotated]
         reduce(operator.iadd, [list(x.transport_map.items()) for x in blueprints], [])

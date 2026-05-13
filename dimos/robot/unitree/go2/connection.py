@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Go2 硬件/回放链路：封装 WebRTC 或回放源，并向感知与规划模块发布传感器流（与下游通过 `In`/`Out` 对接）。"""
+
 from enum import Enum
 import sys
 from threading import Thread

@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""按 Blueprint 部署模块：选择 Python/Docker Worker、布线 Transport、注入 `Spec` 依赖并拉起生命周期。"""
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -44,6 +46,8 @@ logger = setup_logger()
 
 
 class ModuleCoordinator(Resource):
+    """编排入口：worker 进程里跑模块实例，主进程通过 Proxy 与之对话。"""
+
     _managers: dict[str, WorkerManager]
     _global_config: GlobalConfig
     _deployed_modules: dict[type[ModuleBase], ModuleProxyProtocol]
@@ -251,6 +255,7 @@ class ModuleCoordinator(Resource):
         blueprint: Blueprint,
         blueprint_args: MutableMapping[str, Any] | None = None,
     ) -> ModuleCoordinator:
+        # 契约：校验 → 启 worker → 部署 → 连通流与模块引用 → 各模块 build() → start()
         logger.info("Building the blueprint")
         global_config.update(**dict(blueprint.global_config_overrides))
         blueprint_args = blueprint_args or {}
@@ -513,6 +518,7 @@ class ModuleCoordinator(Resource):
         return new_proxy
 
     def loop(self) -> None:
+        # 主线程阻塞直到收到停止信号（或 Ctrl+C）；真正清理在 finally → stop()
         stop = threading.Event()
         try:
             stop.wait()

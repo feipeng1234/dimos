@@ -11,6 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+"""Fork/worker 进程内执行 DimOS 模块：通过 multiprocessing Pipe 收发 `WorkerRequest`。
+
+主进程侧的 `Actor`/`MethodCallProxy` 将 `@rpc` 与属性访问转成跨进程调用；
+与 `WorkerManagerPython`、forkserver 配合实现模块隔离与并行部署。"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

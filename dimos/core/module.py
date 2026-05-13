@@ -11,6 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+"""模块基类：`Module` / `ModuleBase` 负责 RPC（LCM 等）、TF、异步 loop 以及 `In`/`Out` 流。
+
+运行在 worker 进程内时，`connect_stream`/`set_transport` 由 Coordinator 布线调用；
+关停时需断开 RPC、事件循环与各流以避免与 Actor 生命周期相关的循环引用。"""
+
 import asyncio
 from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass
@@ -106,6 +112,8 @@ class _BlueprintPartial(Protocol):
 
 
 class ModuleBase(Configurable, CompositeResource):
+    """可部署子系统基类：组合配置、RPC/TF、流订阅与异步任务钩子。"""
+
     config: ModuleConfig
 
     # Deployment target. Worker managers declare which deployment type they
@@ -711,6 +719,8 @@ class ModuleBase(Configurable, CompositeResource):
 
 
 class Module(ModuleBase):
+    """具体功能模块：`__init__` 根据注解实例化每条 `In`/`Out`，供 Coordinator 自动连线。"""
+
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """Set class-level None attributes for In/Out type annotations.
 

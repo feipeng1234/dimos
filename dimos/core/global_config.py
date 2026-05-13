@@ -12,6 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""进程级全局配置（GlobalConfig）。
+
+从 .env、环境变量 DIMOS_*、CLI 与各 Blueprint 的覆盖项逐级合并，
+供连接方式、回放/仿真开关、可视化与 worker 数量等运行时决策使用；
+具体模块仍使用各自的 ModuleConfig 子类字段。"""
+
 import re
 from typing import Literal, TypeAlias
 

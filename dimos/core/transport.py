@@ -12,6 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Concrete `Transport` 实现（LCM/共享内存/ROS 等）：内含 `PubSubTransport` 等与 `stream` 粘合，
+
+布线后在上层承担跨进程或进程内的消息收发。"""
+
 from __future__ import annotations
 
 import threading

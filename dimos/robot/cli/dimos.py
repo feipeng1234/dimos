@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Dimensional CLI：`run`/`status`/`mcp`/`agent-send` 等入口汇聚于此；源码内中文分段注释标明主流程分支。"""
+
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -46,6 +48,7 @@ if TYPE_CHECKING:
 
 logger = setup_logger()
 
+# --- Typer 根命令：挂载 GlobalConfig 动态选项与子命令（help 仍为英文以供终端用户使用） ---
 main = typer.Typer(
     help="Dimensional CLI",
     no_args_is_help=True,
@@ -190,6 +193,7 @@ def load_config_args(config: type[BaseModel], args: Iterable[str], path: Path) -
     return kwargs  # type: ignore[no-any-return]
 
 
+# --- run：解析蓝图 → Coordinator.build → daemon 分叉或前台 loop ---
 @main.command()
 def run(
     ctx: typer.Context,

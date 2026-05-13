@@ -27,6 +27,8 @@ Usage::
     adapter.wait_for_ready(timeout=10)
     tools = adapter.list_tools()
     result = adapter.call_tool("echo", {"message": "hi"})
+
+中文：`dimos mcp` 子命令与测试共用此适配层，不向 LLM 暴露；仅封装 JSON-RPC 往返。
 """
 
 from __future__ import annotations
