@@ -295,6 +295,7 @@ if __name__ == "__main__":
 
 ## Library API
 
+- [Architecture overview](docs/architecture.md)
 - [Modules](docs/usage/modules.md)
 - [LCM](docs/usage/lcm.md)
 - [Blueprints](docs/usage/blueprints.md)
@@ -310,6 +311,8 @@ if __name__ == "__main__":
 # Development
 
 ## Develop on DimOS
+
+For a concise **architecture overview** (modules, streams/transports, blueprints, workers, agents, and CLI), see [docs/architecture.md](docs/architecture.md). AI assistants and contributors may also use the workflow-focused [AGENTS.md](AGENTS.md).
 
 ```sh
 export GIT_LFS_SKIP_SMUDGE=1

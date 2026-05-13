@@ -381,6 +381,7 @@ CI asserts the file is current — if it's stale, CI fails.
 
 ## Further Reading
 
+- Architecture overview (reader-facing): `docs/architecture.md`
 - Module system: `docs/usage/modules.md`
 - Blueprints: `docs/usage/blueprints.md`
 - Visualization: `docs/usage/visualization.md`

@@ -4,6 +4,7 @@ This page explains general concepts.
 
 ## Table of Contents
 
+- [Architecture overview](/docs/architecture.md): High-level tour of modules, transports, blueprints, runtime workers, agents, and CLI — links into the deeper guides below.
 - [Modules](/docs/usage/modules.md): The primary units of deployment in DimOS, modules run in parallel and are python classes.
 - [Streams](/docs/usage/sensor_streams/README.md): How modules communicate, a Pub / Sub system.
 - [Blueprints](/docs/usage/blueprints.md): a way to group modules together and define their connections to each other.
