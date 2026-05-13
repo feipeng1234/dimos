@@ -12,6 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""模块间 typed 数据通道：`In`/`Out`、`Transport` 与 ReactiveX Observable 适配。
+
+模块在类体上标注 `Out[T]` / `In[T]`，实例化时落成具体流对象并通过 `Transport`
+（LCM、共享内存等）跨进程收发；`State` 表示描述符与传输绑定的不同阶段。
+"""
+
 from __future__ import annotations
 
 import enum

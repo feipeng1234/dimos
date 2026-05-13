@@ -12,6 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""蓝图：`Blueprint`、`BlueprintAtom` 与 `autoconnect`，用于组合多个 Module 类型。
+
+每种模块类型在蓝图里出现一次并提供构造参数；`StreamRef` 记录其 `In`/`Out`
+与消息类型，部署器据此把匹配的输出连到输入。更多信息见 `docs/usage/blueprints.md`。
+"""
+
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from functools import cached_property, reduce
@@ -203,6 +209,8 @@ class Blueprint:
         return tuple(bp for bp in self.blueprints if bp.module not in disabled)
 
 
+# 扁平合并多个蓝图：拼装模块原子、传输表、全局配置覆盖、spec 重映射与启动前检查；
+# 若同一 `module` 类型重复出现，保留靠后者（实现见 `_eliminate_duplicates`）。
 def autoconnect(*blueprints: Blueprint) -> Blueprint:
     all_blueprints = tuple(_eliminate_duplicates([bp for bs in blueprints for bp in bs.blueprints]))
     all_transports = dict(  # type: ignore[var-annotated]

@@ -11,6 +11,14 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+"""DimOS 模块子系统：`Module` / `ModuleBase`、RPC、TF 与各 `In`/`Out` 流的生命周期。
+
+子类继承 `Module` 并用类型标注声明输入输出流；蓝图 `autoconnect` 会在部署阶段
+按 `(流名字, 消息类型)` 把发布端与订阅端接好，`ModuleCoordinator` 负责在 worker
+进程里启动模块并绑定传输。
+"""
+
 import asyncio
 from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass
@@ -108,6 +116,8 @@ class _BlueprintPartial(Protocol):
 class ModuleBase(Configurable, CompositeResource):
     config: ModuleConfig
 
+    # deployment：本模块跑在哪种 worker 上（python / docker）；ModuleCoordinator
+    # 按此把实例交给对应的 worker 管理器。
     # Deployment target. Worker managers declare which deployment type they
     # handle; the coordinator routes modules accordingly.
     deployment: ClassVar[Deployment] = "python"
