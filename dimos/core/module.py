@@ -50,6 +50,9 @@ from dimos.utils.logging_config import setup_logger
 
 logger = setup_logger()
 
+# 模块（Module）：通常在独立 worker 进程中运行；通过 In[T]/Out[T] 与其它模块交换消息，通过 RPC（如 LCM）跨进程调用。
+# 协调器编排下的典型顺序：部署并绑定传输 → build()（可选重活）→ start()；stop() 会关闭 RPC、事件循环与各 Stream。
+
 if TYPE_CHECKING:
     from reactivex import Observable
     from reactivex.abc import DisposableBase

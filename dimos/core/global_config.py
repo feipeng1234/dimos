@@ -19,6 +19,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from dimos.models.vl.types import VlModelName
 
+# GlobalConfig：进程级全局配置单例 global_config；生效顺序大致为默认值 → .env → 环境变量 DIMOS_* → 蓝图/CLI 覆盖。
+
 ViewerBackend: TypeAlias = Literal["rerun", "rerun-web", "rerun-connect", "foxglove", "none"]
 
 

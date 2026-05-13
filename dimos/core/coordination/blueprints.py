@@ -40,6 +40,7 @@ else:
 
 logger = setup_logger()
 
+# Blueprint（蓝图）：描述要启动的一组模块类型及其 In/Out/Spec 依赖；autoconnect 用于把多段子蓝图合并为一份可构建描述。
 
 class DisabledModuleProxy:
     def __init__(self, spec_name: str) -> None:
@@ -203,6 +204,7 @@ class Blueprint:
         return tuple(bp for bp in self.blueprints if bp.module not in disabled)
 
 
+# autoconnect：合并多个 Blueprint 的 atoms、transport_map、global 覆盖与 remapping；重复模块类型保留靠后蓝图中的定义。
 def autoconnect(*blueprints: Blueprint) -> Blueprint:
     all_blueprints = tuple(_eliminate_duplicates([bp for bs in blueprints for bp in bs.blueprints]))
     all_transports = dict(  # type: ignore[var-annotated]

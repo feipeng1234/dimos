@@ -40,6 +40,7 @@ if TYPE_CHECKING:
 
 logger = setup_logger()
 
+# HTTP MCP（Model Context Protocol）服务端：FastAPI 承载 JSON-RPC（tools/list、tools/call 等），通过 RPCClient 转到各 Module 上的 @skill。
 
 _SSE_KEEPALIVE_INTERVAL = 20.0  # seconds
 

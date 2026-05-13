@@ -42,6 +42,8 @@ if TYPE_CHECKING:
 
 logger = setup_logger()
 
+# ModuleCoordinator：根据 Blueprint 选择 WorkerManager（Python/Docker）、并行 deploy、创建/复用 PubSubTransport、
+# 解析 Spec 注入，再按序对所有模块 build() → start()；stop() 逆序停模块并停各 manager。
 
 class ModuleCoordinator(Resource):
     _managers: dict[str, WorkerManager]
@@ -251,6 +253,7 @@ class ModuleCoordinator(Resource):
         blueprint: Blueprint,
         blueprint_args: MutableMapping[str, Any] | None = None,
     ) -> ModuleCoordinator:
+        # 蓝图构建顺序：合并全局配置 → 系统配置与 requirement → deploy → 连线 → 解析模块引用 → 全员 build → start。
         logger.info("Building the blueprint")
         global_config.update(**dict(blueprint.global_config_overrides))
         blueprint_args = blueprint_args or {}
@@ -275,6 +278,8 @@ class ModuleCoordinator(Resource):
         _log_blueprint_graph(blueprint, coordinator)
 
         return coordinator
+
+    # load_blueprint：在已 start 的协调器上增量加载另一张蓝图（复用 worker 池），流程与 build 类似但做冲突检测。
 
     def load_blueprint(
         self,
@@ -513,6 +518,7 @@ class ModuleCoordinator(Resource):
         return new_proxy
 
     def loop(self) -> None:
+        # 阻塞主线程直到 KeyboardInterrupt；finally 统一调用 stop() 回收模块与各 WorkerManager。
         stop = threading.Event()
         try:
             stop.wait()

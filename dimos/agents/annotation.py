@@ -20,6 +20,9 @@ from typing import Any, TypeVar, cast
 
 from dimos.core.core import rpc
 
+# @skill：在 @rpc 之上为方法打 __skill__，供 MCP/Agent 枚举为工具；面向 LLM 的说明与参数模式仍须用英文 docstring（见 AGENTS.md）。
+# current_skill_context：tools/call 执行期由 MCP 服务端注入 _mcp_context（例如 progress_token）。
+
 F = TypeVar("F", bound=Callable[..., Any])
 
 _SKILL_CONTEXT = threading.local()

@@ -42,6 +42,7 @@ T = TypeVar("T")
 
 logger = setup_logger()
 
+# Stream：类型化数据通道。Transport（传输层，如 LCM/SHM）负责 topic 与分发；Out 发布、In 订阅，蓝图按 (name, type) 自动对接。
 
 class ObservableMixin(Generic[T]):
     # subscribes and returns the first value it receives
