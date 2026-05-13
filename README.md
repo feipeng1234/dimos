@@ -309,6 +309,9 @@ if __name__ == "__main__":
 
 # Development
 
+- [Documentation index](docs/README.md) — map of usage vs contributor docs.
+- [Future optimization directions](docs/development/future_optimizations.md) — roadmap-style backlog (performance, CI, agents, transports).
+
 ## Develop on DimOS
 
 ```sh skip

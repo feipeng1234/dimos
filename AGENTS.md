@@ -381,11 +381,13 @@ CI asserts the file is current — if it's stale, CI fails.
 
 ## Further Reading
 
+- Documentation index: `docs/README.md`
 - Module system: `docs/usage/modules.md`
 - Blueprints: `docs/usage/blueprints.md`
 - Visualization: `docs/usage/visualization.md`
 - Configuration: `docs/usage/configuration.md`
 - Testing: `docs/development/testing.md`
+- Future optimizations (roadmap backlog): `docs/development/future_optimizations.md`
 - CLI / dimos run: `docs/development/dimos_run.md`
 - LFS data: `docs/development/large_file_management.md`
 - Agent system: `docs/agents/`
