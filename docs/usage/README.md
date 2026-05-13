@@ -2,6 +2,8 @@
 
 This page explains general concepts.
 
+**简体中文：** [DimOS 项目概览](../zh/overview.md)
+
 ## Table of Contents
 
 - [Modules](/docs/usage/modules.md): The primary units of deployment in DimOS, modules run in parallel and are python classes.

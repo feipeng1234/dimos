@@ -29,6 +29,8 @@
 
 </div>
 
+**简体中文：** [DimOS 项目概览](docs/zh/overview.md)
+
 # Intro
 
 Dimensional is the modern operating system for generalist robotics. We are setting the next-generation SDK standard, integrating with the majority of robot manufacturers.
