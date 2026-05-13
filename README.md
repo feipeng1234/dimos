@@ -27,6 +27,8 @@
 
 </big></big>
 
+<p align="center"><a href="docs/zh/README.md">简体中文 · 项目概览</a></p>
+
 </div>
 
 # Intro
