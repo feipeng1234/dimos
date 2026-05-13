@@ -159,3 +159,7 @@ If a test needs to be skipped for some reason, please use on of these markers, o
 * `skipif_in_ci`: tests which cannot run in GitHub Actions
 * `skipif_no_openai`: tests which require an `OPENAI_API_KEY` key in the env
 * `skipif_no_alibaba`: tests which require an `ALIBABA_API_KEY` key in the env
+
+## See also
+
+- [Future optimization directions](future_optimizations.md) — backlog candidates (CI defaults vs self-hosted, transports, deps, agents), issue #62
