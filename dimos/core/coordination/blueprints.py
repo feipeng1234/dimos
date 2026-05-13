@@ -40,6 +40,9 @@ else:
 
 logger = setup_logger()
 
+# Blueprint 描述「模块图」：流端口、对其它模块的 Spec 依赖，以及传输/配置覆盖。
+# autoconnect() 合并多个片段并做自动连线。
+
 
 class DisabledModuleProxy:
     def __init__(self, spec_name: str) -> None:
@@ -204,6 +207,8 @@ class Blueprint:
 
 
 def autoconnect(*blueprints: Blueprint) -> Blueprint:
+    # 合并若干 Blueprint：去重模块、汇总 transport/global_config/remap/requirements，
+    # 构建时再按 (流名称, 消息类型) 把 Out 接到 In。
     all_blueprints = tuple(_eliminate_duplicates([bp for bs in blueprints for bp in bs.blueprints]))
     all_transports = dict(  # type: ignore[var-annotated]
         reduce(operator.iadd, [list(x.transport_map.items()) for x in blueprints], [])

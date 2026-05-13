@@ -39,6 +39,7 @@ def current_skill_context() -> dict[str, Any] | None:
 
 
 def skill(func: F) -> F:
+    # 暴露给 LLM/MCP 的工具装饰器；技能方法的 docstring 须保持英文以便生成 JSON schema。
     if inspect.iscoroutinefunction(func):
 
         @functools.wraps(func)

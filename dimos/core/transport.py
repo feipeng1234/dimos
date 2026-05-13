@@ -60,6 +60,9 @@ T = TypeVar("T")
 #
 # a web camera rtsp stream for Image, audio stream from mic, etc
 # http binary streams, tcp connections etc
+#
+# 传输选型（简要）：LCMTransport 为默认结构化消息；pLCMTransport 用 Pickle 传任意 Python 对象；
+# SHM/pSHM/Jpeg* 适合同机大图/点云；ROSTransport 桥接 ROS；DDSTransport 需安装 cyclonedds。
 
 
 class PubSubTransport(Transport[T]):

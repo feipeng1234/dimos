@@ -31,6 +31,7 @@ from dimos.utils.logging_config import setup_logger
 logger = setup_logger()
 
 REGISTRY_DIR = STATE_DIR / "runs"
+# dimos run（尤其 daemon）会把 run_id、PID、蓝图名、log_dir 等持久化为 REGISTRY_DIR 下 JSON。
 
 
 @dataclass

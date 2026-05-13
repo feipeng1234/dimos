@@ -34,6 +34,7 @@ P = ParamSpec("P")
 R = TypeVar("R")
 
 
+# 将下面 @rpc 方法注册为跨进程可调用的 RPC；async 实现在其它线程会通过 self._loop 调度执行。
 def rpc(fn: Callable[P, R]) -> Callable[P, R]:
     """Mark a method as an RPC body callable across modules.
 

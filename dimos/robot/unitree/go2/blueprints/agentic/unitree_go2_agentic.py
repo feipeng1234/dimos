@@ -19,6 +19,7 @@ from dimos.core.coordination.blueprints import autoconnect
 from dimos.robot.unitree.go2.blueprints.agentic._common_agentic import _common_agentic
 from dimos.robot.unitree.go2.blueprints.smart.unitree_go2_spatial import unitree_go2_spatial
 
+# Go2 智能体蓝图：机器人感知/运动栈 + MCP HTTP 服务（技能）+ LLM 客户端 + 共有技能容器。
 unitree_go2_agentic = autoconnect(
     unitree_go2_spatial,
     McpServer.blueprint(),

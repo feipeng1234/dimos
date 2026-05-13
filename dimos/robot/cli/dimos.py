@@ -46,6 +46,9 @@ if TYPE_CHECKING:
 
 logger = setup_logger()
 
+# CLI：run 拉起 blueprint、写入运行注册表并把结构化日志落到 LOG_DIR；
+# status/stop/log 读取最近一次运行；路径来自 dimos.constants（常为 ~/.local/state/dimos）。
+
 main = typer.Typer(
     help="Dimensional CLI",
     no_args_is_help=True,

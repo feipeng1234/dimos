@@ -27,6 +27,8 @@ def _get_all_numbers(s: str) -> list[float]:
 
 
 class GlobalConfig(BaseSettings):
+    # 全局配置（后者覆盖前者）：字段默认值 → .env → 环境变量 →
+    # blueprint.global_config(...) → dimos CLI 传入的选项（见 robot/cli/dimos.py）。
     robot_ip: str | None = None
     robot_ips: str | None = None
     xarm7_ip: str | None = None

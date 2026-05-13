@@ -42,6 +42,9 @@ T = TypeVar("T")
 
 logger = setup_logger()
 
+# 流（Stream）抽象：Module 上声明 In[T]/Out[T]，构建期按「同名 + 同类型」自动对接。
+# Transport 决定底层走 LCM、共享内存还是 ROS/DDS 等（见 dimos.core.transport）。
+
 
 class ObservableMixin(Generic[T]):
     # subscribes and returns the first value it receives
@@ -73,6 +76,7 @@ class ObservableMixin(Generic[T]):
 
 
 class State(enum.Enum):
+    # 流生命周期：未绑定 → 已挂到模块 → 输入已连到输出 → 已有数据流过。
     UNBOUND = "unbound"  # descriptor defined but not bound
     READY = "ready"  # bound to owner but not yet connected
     CONNECTED = "connected"  # input bound to an output

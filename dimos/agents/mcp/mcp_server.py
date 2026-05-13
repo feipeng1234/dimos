@@ -40,6 +40,8 @@ if TYPE_CHECKING:
 
 logger = setup_logger()
 
+# MCP HTTP/FastAPI 服务端：聚合各 Worker 上报的 SkillInfo，通过 JSON-RPC 暴露 tools；
+# tools/call 再转发到对应的 @skill（工具描述取自英文 docstring，勿改写为中文）。
 
 _SSE_KEEPALIVE_INTERVAL = 20.0  # seconds
 

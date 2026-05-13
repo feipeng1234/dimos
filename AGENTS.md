@@ -237,6 +237,8 @@ Run registry: `~/.local/state/dimos/runs/<run-id>.json`
 - `@rpc` alone: callable via RPC, not exposed to LLM
 - `@skill`: implies `@rpc` AND exposes method to the LLM as a tool. **Do not stack both.**
 
+**Localization:** Explanatory `#` comments may be written in Chinese (or bilingual) where they help humans read the codebase. **`@skill` method docstrings must stay English** — they are copied verbatim into MCP/LLM tool JSON schemas.
+
 #### Schema generation rules
 
 | Rule | What happens if you break it |

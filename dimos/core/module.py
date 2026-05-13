@@ -50,6 +50,9 @@ from dimos.utils.logging_config import setup_logger
 
 logger = setup_logger()
 
+# 模块（Module）是 DimOS 的基本运行单元：通过 In/Out 与同类流自动连线，
+# @rpc 标记跨进程可调用的方法；协调器负责部署 worker、绑定传输与生命周期。
+
 if TYPE_CHECKING:
     from reactivex import Observable
     from reactivex.abc import DisposableBase
@@ -711,6 +714,8 @@ class ModuleBase(Configurable, CompositeResource):
 
 
 class Module(ModuleBase):
+    # 具体模块类：根据类型注解在实例上创建 In/Out，并由 blueprint 连接远端流。
+
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """Set class-level None attributes for In/Out type annotations.
 

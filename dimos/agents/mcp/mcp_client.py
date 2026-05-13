@@ -40,6 +40,8 @@ from dimos.utils.sequential_ids import SequentialIds
 
 logger = setup_logger()
 
+# MCP HTTP 客户端：连接 McpServer，拉取 tools 列表并把 LLM 的 tool-call 转成对 @skill RPC 的请求。
+
 
 class McpClientConfig(ModuleConfig):
     system_prompt: str | None = SYSTEM_PROMPT
