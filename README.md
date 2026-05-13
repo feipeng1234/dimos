@@ -295,6 +295,7 @@ if __name__ == "__main__":
 
 ## Library API
 
+- [Architecture](docs/usage/architecture.md) — project structure, runtime model, glossary
 - [Modules](docs/usage/modules.md)
 - [LCM](docs/usage/lcm.md)
 - [Blueprints](docs/usage/blueprints.md)
