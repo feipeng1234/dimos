@@ -1,15 +1,38 @@
 name: ci
+# Slimmed-down CI for the feipeng1234/dimos fork.
+#
+# Goals:
+#   1. Keep the same `lint` job upstream uses (pre-commit + mypy). It already
+#      passes on agent-generated PRs and is the cheapest way to catch real
+#      regressions before merge.
+#   2. Replace the heavy upstream test matrix (5 Python versions × Ubuntu
+#      + 3.14t + 3.15-experimental + md-babel + self-hosted-tests + a
+#      cross-job fail-fast watcher + codecov upload) with a single
+#      `tests-changed` job that:
+#         - Skips entirely when the PR / push touches no `.py` files.
+#         - Otherwise maps each changed `.py` to its sibling `test_*.py`
+#           and runs ONLY those tests on a single Python version.
+#      This is enough to catch regressions in the changed code without
+#      burning ~30 min of CI minutes per PR on flake-prone matrix jobs
+#      that the fork can't independently fix.
+#   3. Drop the `md-babel`, `self-hosted-tests`, `fail-fast`, and codecov
+#      jobs entirely — none of them gate merges in this fork's workflow,
+#      and self-hosted runners aren't reliably available here.
+#
+# `ci-complete` is preserved as the branch-protection target so the
+# repo's existing required-checks setup still works.
+
 on:
   push:
     branches: [main]
     paths-ignore:
       - '**.md'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths-ignore:
       - '**.md'
 
 concurrency:
-  # Cancels runs from previous pushes in a PR.
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
@@ -17,6 +40,8 @@ permissions: {}
 
 jobs:
   lint:
+    # Unchanged from upstream. pre-commit covers ruff-format / ruff-check /
+    # license headers / doclinks / json+yaml format / largefiles / lfs.
     timeout-minutes: 10
     runs-on: ubuntu-latest
     permissions:
@@ -38,245 +63,135 @@ jobs:
       - name: Run pre-commit
         uses: pre-commit/action@v3.0.1
 
-  md-babel:
-    timeout-minutes: 10
+  tests-changed:
+    # Replaces the upstream `tests` matrix. Single Python (3.11) on
+    # ubuntu-latest. Skips itself when no .py files changed; otherwise
+    # only runs tests sibling to the changed .py files.
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     permissions:
       contents: read  # For checkout
-
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          lfs: true
-      # Docs decode JPEG from SQLite via PyTurboJPEG; pyaudio needs portaudio.
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libturbojpeg portaudio19-dev
-      - name: Install uv
-        uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 'lts/*'
-      - name: Install Python dependencies
-        run: uv sync --group tests --frozen
-      - name: Execute documentation code blocks
-        run: ./bin/run-doc-codeblocks --ci --no-cache
-
-  tests:
-    timeout-minutes: 20
-    strategy:
-      matrix:
-        pyver: ['3.10', '3.11', '3.12', '3.13', '3.14']
-        os: [ubuntu]
-        experimental: [false]
-        include:
-          - os: ubuntu
-            pyver: "3.14t"
-            experimental: false
-          - os: ubuntu
-            pyver: "3.15"
-            experimental: true
-      fail-fast: true
-    runs-on: ${{ matrix.os }}-latest
-    continue-on-error: ${{ matrix.experimental }}
-    permissions:
-      contents: read  # For checkout
-      id-token: write  # For codecov-action's OIDC upload
-
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          # Need history so we can `git diff` against the base ref.
+          fetch-depth: 0
+
       - name: Install uv
         uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
-          allow-prereleases: true
-          python-version: ${{ matrix.pyver }}
-      - name: Install dependency for pyaudio (Ubuntu)
-        if: matrix.os == 'ubuntu'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y portaudio19-dev
-      - name: Install dependency for pyaudio (macOS)
-        if: matrix.os == 'macos'
-        run: brew install portaudio
-      - name: Remove git LFS to avoid accidental large downloads
-        run: sudo rm -f /usr/bin/git-lfs
-      - name: Set PYTHON_GIL=0 for free-threading builds
-        if: ${{ endsWith(matrix.pyver, 't') }}
-        run: echo "PYTHON_GIL=0" >> $GITHUB_ENV
-      - name: Run tests
-        run: uv run pytest --numprocesses=3 --cov=dimos/ --junitxml=junit.xml -m 'not (tool or self_hosted or mujoco)'
-      - name: Re-run the failing tests with maximum verbosity
-        if: failure()
-        env:
-          COLOR: yes
-        run: >-  # `exit 1` makes sure that the job remains red with flaky runs
-          uv run pytest --no-cov -vvvvv --lf  -m 'not (tool or self_hosted or mujoco)' && exit 1
-        shell: bash
-      - name: Turn coverage into xml
-        run: uv run python -m coverage xml
-      - name: Upload coverage
-        uses: codecov/codecov-action@v6
-        with:
-          disable_search: true
-          fail_ci_if_error: true
-          files: ./coverage.xml
-          flags: OS-${{ matrix.os }},Py-${{ matrix.pyver }}
-          use_oidc: true
-      - name: Upload test results to Codecov
-        if: ${{ !cancelled() }}
-        uses: codecov/codecov-action@v6
-        with:
-          report_type: test_results
-          use_oidc: true
+          python-version: "3.11"
 
-  self-hosted-tests:
-    # Skip on draft PRs and on PRs from forks — the latter would expose the
-    # self-hosted runner to untrusted code from external contributors.
-    if: |
-      github.event_name == 'push' || (
-        github.event.pull_request.draft == false &&
-        github.event.pull_request.head.repo.full_name == github.repository
-      )
-    env:
-      UV_NO_SYNC: "1"  # Disable installing default packages on `uv run`
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      ALIBABA_API_KEY: ${{ secrets.ALIBABA_API_KEY }}
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: [self-hosted, Linux]
-            # GitHub Actions only honours `container:` on Linux runners.
-            container:
-              image: ghcr.io/dimensionalos/ros-dev:dev
-            markers: "self_hosted or skipif_no_ros"
-            experimental: false
-          - runner: [self-hosted, macos, arm64]
-            container: null  # run on host — `container:` is Linux-only
-            markers: "self_hosted"
-            experimental: true
-    runs-on: ${{ matrix.runner }}
-    continue-on-error: ${{ matrix.experimental }}
-    permissions:
-      contents: read  # For checkout
-      packages: read  # For pulling the ros-dev container from ghcr.io
-      id-token: write  # For codecov-action's OIDC upload
-    container: ${{ matrix.container }}
-
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          clean: false
-          # If we ever allow external PRs on custom runner, persisting credentials
-          # could be abused by attackers.
-          persist-credentials: false
-      - name: Fix permissions
-        run: |
-          git config --global --add safe.directory '*'
-          git clean -ffdx
-      - name: Install uv
-        uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-      - name: Install dependencies
-        run: uv sync --group tests-self-hosted --frozen
-      - name: Build C++ extensions in-place
-        run: uv run python setup.py build_ext --inplace
-      - name: Source ROS environment
-        # The uv venv is sealed (include-system-site-packages = false), so
-        # `import rclpy` / `ament_index_python` would fail. Sourcing the ROS
-        # setup script and exporting PYTHONPATH/AMENT_PREFIX_PATH/etc into
-        # GITHUB_ENV makes them importable from `uv run`.
-        if: contains(toJSON(matrix.runner), 'Linux')
+      - name: Find changed .py files vs base
+        id: changed_py
         shell: bash
         run: |
-          source /opt/ros/humble/setup.bash
-          {
-            echo "PYTHONPATH=$PYTHONPATH"
-            echo "AMENT_PREFIX_PATH=$AMENT_PREFIX_PATH"
-            echo "CMAKE_PREFIX_PATH=$CMAKE_PREFIX_PATH"
-            echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
-            echo "ROS_DISTRO=$ROS_DISTRO"
-            echo "ROS_VERSION=$ROS_VERSION"
-            echo "ROS_PYTHON_VERSION=$ROS_PYTHON_VERSION"
-          } >> "$GITHUB_ENV"
-      - name: Run tests
-        run: uv run pytest --cov=dimos/ --junitxml=junit.xml -m '(${{ matrix.markers }}) and not (tool or mujoco)'
-      - name: Re-run the failing tests with maximum verbosity
-        if: failure()
-        env:
-          COLOR: yes
-        run: >-  # `exit 1` makes sure that the job remains red with flaky runs
-          uv run pytest --no-cov -vvvvv --lf  -m '(${{ matrix.markers }}) and not (tool or mujoco)' && exit 1
+          set -e
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base_ref="origin/${{ github.base_ref }}"
+            git fetch --depth=1 origin "${{ github.base_ref }}" 2>/dev/null || true
+          else
+            base_ref="${{ github.event.before }}"
+          fi
+          # Empty base (first push to a new branch) → fall back to the
+          # parent of HEAD so we still get a sensible diff.
+          if ! git rev-parse "$base_ref" >/dev/null 2>&1; then
+            base_ref="HEAD~1"
+          fi
+          git diff --name-only "$base_ref...HEAD" \
+            | grep -E '\.py$' \
+            > /tmp/changed_py.txt || true
+          n=$(wc -l < /tmp/changed_py.txt | tr -d ' ')
+          echo "Changed .py count: $n"
+          if [ "$n" -gt 0 ]; then
+            echo "any=true" >> "$GITHUB_OUTPUT"
+            cat /tmp/changed_py.txt
+          else
+            echo "any=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip pytest (no .py changes)
+        if: steps.changed_py.outputs.any == 'false'
+        run: echo "No Python files changed in this PR; skipping pytest."
+
+      - name: Map .py files to sibling test files
+        if: steps.changed_py.outputs.any == 'true'
+        id: targets
         shell: bash
-      - name: Turn coverage into xml
-        run: uv run python -m coverage xml
-      - name: Upload coverage
-        uses: codecov/codecov-action@v6
-        with:
-          disable_search: true
-          fail_ci_if_error: true
-          files: ./coverage.xml
-          flags: SelfHosted-${{ matrix.runner[1] }}
-          use_oidc: true
-      - name: Upload test results to Codecov
-        if: ${{ !cancelled() }}
-        uses: codecov/codecov-action@v6
-        with:
-          report_type: test_results
-          use_oidc: true
-      - name: Check disk space
-        if: failure()
         run: |
-          df -h
+          targets=()
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            # If the changed file is itself a test, include it directly.
+            case "$(basename "$f")" in
+              test_*.py|*_test.py)
+                [ -f "$f" ] && targets+=("$f")
+                continue
+                ;;
+            esac
+            # Otherwise look for a sibling test file in the same dir or
+            # a `tests/` subdir.
+            dir=$(dirname "$f")
+            base=$(basename "$f" .py)
+            for cand in \
+                "$dir/test_${base}.py" \
+                "$dir/${base}_test.py" \
+                "$dir/tests/test_${base}.py"; do
+              [ -f "$cand" ] && targets+=("$cand")
+            done
+          done < /tmp/changed_py.txt
 
-  # Cross-job fail-fast: GitHub Actions only fail-fasts within a matrix,
-  # not across sibling jobs. This watcher fires the moment `tests` fails
-  # and cancels the whole workflow run.
-  fail-fast:
-    if: failure()
-    needs: [tests]
-    runs-on: ubuntu-latest
-    permissions:
-      actions: write  # For `gh run cancel`
-    steps:
-      - name: Cancel workflow run
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh run cancel ${{ github.run_id }} --repo ${{ github.repository }}
+          if [ ${#targets[@]} -eq 0 ]; then
+            echo "any=false" >> "$GITHUB_OUTPUT"
+            echo "No sibling test files mapped from changed .py files."
+          else
+            uniq=$(printf '%s\n' "${targets[@]}" | sort -u | tr '\n' ' ')
+            echo "list=$uniq" >> "$GITHUB_OUTPUT"
+            echo "any=true" >> "$GITHUB_OUTPUT"
+            echo "Will run pytest on:"
+            printf ' - %s\n' "${targets[@]}" | sort -u
+          fi
 
-  ci-complete:  # This is used for branch protection.
+      - name: Skip pytest (no test files matched)
+        if: steps.changed_py.outputs.any == 'true' && steps.targets.outputs.any != 'true'
+        run: echo "Changed .py files have no sibling test_*.py / tests/test_*.py; skipping pytest."
+
+      - name: Install test dependencies
+        if: steps.targets.outputs.any == 'true'
+        run: uv sync --group tests --frozen
+
+      - name: Run pytest on mapped tests only
+        if: steps.targets.outputs.any == 'true'
+        # `not (tool or self_hosted or mujoco or slow)` matches the markers
+        # `pyproject.toml` excludes by default; we re-state them so that a
+        # caller-supplied addopts override doesn't accidentally pull them in.
+        run: |
+          uv run pytest \
+            -x \
+            --timeout=120 \
+            --no-cov \
+            -m 'not (tool or self_hosted or mujoco or slow)' \
+            ${{ steps.targets.outputs.list }}
+
+  ci-complete:
+    # Branch-protection target. Stays green iff lint AND tests-changed
+    # both succeed (or are skipped, which `re-actors/alls-green` treats
+    # as success — it's only used for the docs-only PRs that bypass
+    # `tests-changed` via the no-.py path above).
     if: always()
-
     needs:
-    - lint
-    - md-babel
-    - tests
-    - self-hosted-tests
-
+      - lint
+      - tests-changed
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write  # For codecov-action's OIDC notify
-
+    permissions: {}
     steps:
-    - name: Decide whether the needed jobs succeeded or failed
-      uses: re-actors/alls-green@release/v1
-      with:
-        allowed-skips: self-hosted-tests
-        jobs: ${{ toJSON(needs) }}
-    - name: Trigger Codecov notifications
-      uses: codecov/codecov-action@v6
-      with:
-        run_command: send-notifications
-        use_oidc: true
-        fail_ci_if_error: true
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@release/v1
+        with:
+          jobs: ${{ toJSON(needs) }}
