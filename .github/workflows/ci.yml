@@ -162,6 +162,22 @@ jobs:
         if: steps.changed_py.outputs.any == 'true' && steps.targets.outputs.any != 'true'
         run: echo "Changed .py files have no sibling test_*.py / tests/test_*.py; skipping pytest."
 
+      - name: Install system libraries needed by `tests` group
+        # `uv sync --group tests` transitively pulls in `pyaudio`
+        # (via `unitree-webrtc-connect-leshy`) and PyTurboJPEG (via
+        # the docs / sensor stack), both of which compile native
+        # extensions and require the corresponding C libraries to be
+        # present on the runner. Without these, `Install test
+        # dependencies` below fails at `pyaudio` build with
+        # `fatal error: portaudio.h: No such file or directory`.
+        # Mirrors what upstream's `md-babel` job installs.
+        if: steps.targets.outputs.any == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            portaudio19-dev \
+            libturbojpeg
+
       - name: Install test dependencies
         if: steps.targets.outputs.any == 'true'
         run: uv sync --group tests --frozen
