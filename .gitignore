@@ -14,6 +14,8 @@ __pycache__/
 # Ignore virtual environment directories
 *venv*/
 .venv*/
+# Bare `.venv` paths (symlink/file) are not matched by `.venv*/` patterns above
+.venv
 .ssh/
 .direnv/
 
