@@ -14,6 +14,8 @@ __pycache__/
 # Ignore virtual environment directories
 *venv*/
 .venv*/
+# Bare `.venv` (symlink or dir at repo root) — globs above require trailing `/`, so symlink paths were not ignored.
+.venv
 .ssh/
 .direnv/
 

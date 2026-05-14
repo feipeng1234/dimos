@@ -321,6 +321,7 @@ cd dimos
 uv run pytest --numprocesses=auto dimos
 ```
 
+Repo-grounded **proposal-only** ideas for future optimizations (not a roadmap) live in [docs/development/future_optimization_directions.md](docs/development/future_optimization_directions.md).
 
 ## Multi Language Support
 
