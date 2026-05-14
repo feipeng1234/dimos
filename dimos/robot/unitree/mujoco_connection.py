@@ -61,9 +61,47 @@ from dimos.utils.logging_config import setup_logger
 
 ODOM_FREQUENCY = 50
 
+# Unitree WebRTC sport API ids for Dance1 / Dance2 (see ``UNITREE_WEBRTC_CONTROLS`` in
+# ``unitree_skill_container``). Firmware runs full routines; MuJoCo approximates them with cmd_vel.
+_GO2_DANCE1_API_ID = 1022
+_GO2_DANCE2_API_ID = 1023
+
 logger = setup_logger()
 
 T = TypeVar("T")
+
+
+def _go2_mujoco_dance_plan(variant: int) -> list[tuple[Twist, float]]:
+    """Velocity segments (twist, duration seconds) for a short MuJoCo dance stand-in."""
+
+    def seg(lx: float, ly: float, az: float, dur: float) -> tuple[Twist, float]:
+        return (
+            Twist(
+                linear=Vector3(lx, ly, 0.0),
+                angular=Vector3(0.0, 0.0, az),
+            ),
+            dur,
+        )
+
+    # Variant 1: forward/back + alternating turns
+    if variant == 1:
+        return [
+            seg(0.12, 0.0, 0.35, 0.75),
+            seg(-0.08, 0.0, -0.35, 0.75),
+            seg(0.0, 0.1, 0.5, 0.6),
+            seg(0.0, -0.1, -0.5, 0.6),
+            seg(0.1, 0.0, 0.3, 0.7),
+            seg(-0.06, 0.0, -0.25, 0.65),
+        ]
+    # Variant 2: more spin, smaller translation
+    return [
+        seg(0.08, 0.0, 0.55, 0.65),
+        seg(-0.05, 0.0, -0.55, 0.65),
+        seg(0.0, 0.12, 0.45, 0.55),
+        seg(0.0, -0.12, -0.45, 0.55),
+        seg(0.06, 0.05, 0.4, 0.7),
+        seg(-0.04, -0.05, -0.35, 0.7),
+    ]
 
 
 class MujocoConnection:
@@ -93,6 +131,7 @@ class MujocoConnection:
         self._stop_timer: threading.Timer | None = None
 
         self._stream_threads: list[threading.Thread] = []
+        self._dance_thread: threading.Thread | None = None
         self._stop_events: list[threading.Event] = []
         self._is_cleaned_up = False
 
@@ -198,6 +237,10 @@ class MujocoConnection:
         if self._stop_timer:
             self._stop_timer.cancel()
             self._stop_timer = None
+
+        if self._dance_thread and self._dance_thread.is_alive():
+            self._dance_thread.join(timeout=5.0)
+        self._dance_thread = None
 
         # Stop all stream threads
         for stop_event in self._stop_events:
@@ -379,5 +422,36 @@ class MujocoConnection:
         return True
 
     def publish_request(self, topic: str, data: dict[str, Any]) -> dict[Any, Any]:
-        print(f"publishing request, topic={topic}, data={data}")
+        api_id = data.get("api_id")
+        if api_id in (_GO2_DANCE1_API_ID, _GO2_DANCE2_API_ID):
+            if self._is_cleaned_up or self.shm_data is None:
+                logger.warning("MuJoCo dance ignored: connection not ready (api_id=%s)", api_id)
+                return {"status": "not_ready"}
+            variant = 1 if api_id == _GO2_DANCE1_API_ID else 2
+
+            def run_dance() -> None:
+                try:
+                    for twist, dur in _go2_mujoco_dance_plan(variant):
+                        if self._is_cleaned_up or self.shm_data is None:
+                            break
+                        self.move(twist, dur)
+                        time.sleep(dur)
+                    if self.shm_data is not None and not self._is_cleaned_up:
+                        self.move(Twist(), 0.0)
+                except Exception as e:
+                    logger.error("MuJoCo dance routine failed: %s", e)
+
+            self._dance_thread = threading.Thread(
+                target=run_dance,
+                name="go2-mujoco-dance",
+                daemon=True,
+            )
+            self._dance_thread.start()
+            return {
+                "status": "started",
+                "mode": "sim_velocity_dance",
+                "variant": variant,
+            }
+
+        logger.debug("publish_request noop in MuJoCo (topic=%s, data=%s)", topic, data)
         return {}

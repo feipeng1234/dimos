@@ -284,6 +284,21 @@ class UnitreeSkillContainer(Module):
         return str(datetime.datetime.now())
 
     @skill
+    def dance(self, routine: int = 1) -> str:
+        """Play a short Unitree dance preset (Dance1 or Dance2).
+
+        Args:
+            routine: 1 selects Dance1, 2 selects Dance2. On real hardware this uses
+                the onboard sport motion presets. In MuJoCo simulation, DimOS runs a
+                short velocity-based routine (same sport ids) so motion is visible in sim.
+        """
+        if routine not in (1, 2):
+            return "routine must be 1 or 2"
+
+        name = "Dance1" if routine == 1 else "Dance2"
+        return self.execute_sport_command(name)
+
+    @skill
     def execute_sport_command(self, command_name: str) -> str:
         if command_name not in _UNITREE_COMMANDS:
             suggestions = difflib.get_close_matches(

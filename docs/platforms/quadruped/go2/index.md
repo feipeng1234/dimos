@@ -115,6 +115,27 @@ dimos --simulation run unitree-go2
 
 Full navigation stack in MuJoCo — same code, simulated robot.
 
+### Dance (simulation vs hardware)
+
+Sport IDs for `Dance1` / `Dance2` are mapped in MuJoCo to a short **velocity-based** routine so you can validate motion before hardware. The real robot still runs Unitree’s onboard dance presets when not in simulation.
+
+1. Install dependencies as in the [MuJoCo Simulation](#mujoco-simulation) section (`dimos[base,unitree,sim]`).
+2. Run an agentic blueprint with simulation, for example:
+
+```bash
+dimos --simulation run unitree-go2-agentic
+```
+
+3. Trigger a dance (with DimOS and the MCP server up):
+
+```bash
+dimos agent-send "dance"
+# or, with explicit routine:
+dimos mcp call dance --arg routine=1
+```
+
+**Pass criteria:** the stack stays up (no crash), telemetry keeps flowing, and the simulated dog shows visible motion during the routine. Use `execute_sport_command("RecoveryStand")` afterward if you chain other dynamic moves.
+
 ## Agentic Control
 
 Natural language control with an LLM agent that understands physical space:

@@ -31,6 +31,7 @@ Users hear you through speakers but cannot see text. Use `speak` to communicate 
 - Tag important locations with `tag_location` so you can return to them later.
 - During `start_exploration`, avoid calling other skills except `stop_movement`.
 - Always run `execute_sport_command("RecoveryStand")` after dynamic movements (flips, jumps, sit) before navigating.
+- For a short dance performance, use `dance` (or `execute_sport_command("Dance1")` / `"Dance2"`). In MuJoCo simulation, motion is approximated with velocity segments; on hardware the robot runs the firmware dance presets.
 
 ## GPS Navigation Flow
 For outdoor/GPS-based navigation:
